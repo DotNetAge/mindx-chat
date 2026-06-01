@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useChatStore } from '../stores/chatStore'
+import { useSessionStore } from '../stores/sessionStore'
 
 const chatStore = useChatStore()
+const sessionStore = useSessionStore()
 
 const formatNumber = (num: number): string => {
   if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M'
@@ -15,6 +17,8 @@ const formatCost = (cost: number): string => {
   return '¥' + cost.toFixed(2)
 }
 
+const sessionTokens = computed(() => formatNumber(chatStore.sessionTokensUsed))
+const sessionCost = computed(() => formatCost(chatStore.sessionCost))
 const totalTokens = computed(() => formatNumber(chatStore.totalTokensUsed))
 const totalCost = computed(() => formatCost(chatStore.totalCost))
 const totalConversations = computed(() => chatStore.totalConversations)
@@ -22,19 +26,35 @@ const totalConversations = computed(() => chatStore.totalConversations)
 
 <template>
   <div class="token-usage-footer">
-    <div class="usage-item">
-      <span class="usage-label">总消耗</span>
-      <span class="usage-value">{{ totalTokens }}</span>
+    <div class="stat-group session">
+      <div class="stat-item">
+        <span class="stat-label">会话</span>
+        <span class="stat-value">{{ sessionTokens }}</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-label">费用</span>
+        <span class="stat-value cost">{{ sessionCost }}</span>
+      </div>
     </div>
-    <div class="usage-divider"></div>
-    <div class="usage-item">
-      <span class="usage-label">总费用</span>
-      <span class="usage-value cost">{{ totalCost }}</span>
-    </div>
-    <div class="usage-divider"></div>
-    <div class="usage-item">
-      <span class="usage-label">对话</span>
-      <span class="usage-value">{{ totalConversations }}</span>
+
+    <div class="stat-separator"></div>
+
+    <div class="stat-group total">
+      <div class="stat-item">
+        <span class="stat-label">总计</span>
+        <span class="stat-value">{{ totalTokens }}</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-label">费用</span>
+        <span class="stat-value cost">{{ totalCost }}</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-label">对话</span>
+        <span class="stat-value">{{ totalConversations }}</span>
+      </div>
     </div>
   </div>
 </template>
@@ -44,40 +64,79 @@ const totalConversations = computed(() => chatStore.totalConversations)
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 10px 16px;
+  gap: 2px;
+  padding: 8px 16px;
   background: rgba(6, 182, 212, 0.05);
   border-top: 1px solid rgba(55, 65, 81, 0.5);
 }
 
-.usage-item {
+.stat-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+
+.stat-group.session {
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.stat-group.total {
+  background: rgba(6, 182, 212, 0.08);
+  border: 1px solid rgba(6, 182, 212, 0.2);
+}
+
+.stat-item {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  min-width: 36px;
 }
 
-.usage-label {
-  font-size: 10px;
+.stat-label {
   color: #64748b;
+  font-size: 9px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  line-height: 1;
 }
 
-.usage-value {
+.stat-value {
   font-size: 13px;
-  font-weight: 600;
-  color: #22d3ee;
+  font-weight: 700;
   font-family: 'JetBrains Mono', monospace;
+  line-height: 1.2;
 }
 
-.usage-value.cost {
+.stat-group.session .stat-value {
+  color: #a78bfa;
+}
+
+.stat-group.session .stat-value.cost {
+  color: #c4b5fd;
+}
+
+.stat-group.total .stat-value {
+  color: #22d3ee;
+}
+
+.stat-group.total .stat-value.cost {
   color: #6ee7b7;
 }
 
-.usage-divider {
+.stat-divider {
   width: 1px;
   height: 24px;
-  background: rgba(55, 65, 81, 0.5);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.stat-separator {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.15);
 }
 </style>

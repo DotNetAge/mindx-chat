@@ -29,7 +29,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['toggle-collapse', 'update:selectedDirectory', 'setupConfirm', 'setupCancel', 'toggleSetupDialog'])
+const emit = defineEmits(['toggle-collapse', 'update:selectedDirectory', 'setupConfirm', 'setupCancel', 'toggleSetupDialog', 'toggle-file-browser'])
 
 const sessionStore = useSessionStore()
 const connectionStore = useConnectionStore()
@@ -254,19 +254,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
         enabled: m.enabled !== false
       })))
 
-      // 不覆盖已有的 agent，只处理 model
-      if (models.length > 0 && !connectionStore.currentModelName) {
-        const currentAgent = connectionStore.currentAgent
-        if (currentAgent?.model) {
-          const matchedModel = models.find(m => m.name === currentAgent.model)
-          if (matchedModel) {
-            connectionStore.setCurrentModel(matchedModel.name)
-          }
-        }
-        if (!connectionStore.currentModelName) {
-          connectionStore.setCurrentModel(models[0].name)
-        }
-      }
+      console.log(`[MindX] ✅ Loaded ${agents.length} agents and ${models.length} models`)
     } catch (err) {
       console.error('Failed to load initial data:', err)
       connectionStore.setServerError(`数据加载失败: ${err}`)
@@ -463,6 +451,19 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 
     <!-- Footer -->
     <div class="sidebar-footer" v-show="!isCollapsed">
+      <div class="project-dir-info" v-if="connectionStore.currentProjectDir">
+        <el-icon><FolderOpened /></el-icon>
+        <span class="project-dir-label">工作目录</span>
+        <code class="project-dir-path">{{ connectionStore.currentProjectDir }}</code>
+        <button
+          class="open-browser-btn"
+          @click="emit('toggle-file-browser')"
+          title="打开文件浏览器"
+        >
+          <el-icon><FolderOpened /></el-icon>
+        </button>
+      </div>
+
       <div class="user-profile">
         <div class="avatar" :class="{ connected: connectionStore.isConnected, offline: !connectionStore.isConnected }">
           <span v-if="connectionStore.isConnected">✓</span>
@@ -655,7 +656,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       </template>
     </el-dialog>
 
-    <TokenUsageFooter />
+    <TokenUsageFooter v-show="!isCollapsed" />
   </aside>
 </template>
 
@@ -1022,39 +1023,6 @@ watch(() => connectionStore.state, async (newState, oldState) => {
   width: 44px;
 }
 
-.dir-browser-btn {
-  flex: 1;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  font-weight: 500;
-  font-size: 13px;
-  transition: all 0.25s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.dir-browser-btn:hover:not(:disabled) {
-  background: rgba(6, 182, 212, 0.08);
-  border-color: rgba(6, 182, 212, 0.3);
-  color: var(--accent-cyan);
-}
-
-.dir-browser-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.dir-browser-btn.btn-collapsed {
-  padding: 0;
-  width: 36px;
-  flex: none;
-}
-
 .btn-icon {
   font-size: 18px;
 }
@@ -1268,6 +1236,72 @@ watch(() => connectionStore.state, async (newState, oldState) => {
   padding: 16px 20px;
   border-top: 1px solid var(--border-color);
   background: var(--bg-card);
+}
+
+.project-dir-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: rgba(6, 182, 212, 0.06);
+  border: 1px solid rgba(6, 182, 212, 0.15);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.project-dir-info .el-icon {
+  color: var(--accent-cyan);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.project-dir-label {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.project-dir-path {
+  color: var(--accent-cyan);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  background: rgba(6, 182, 212, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+  flex: 1;
+}
+
+.open-browser-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(6, 182, 212, 0.2);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.open-browser-btn:hover {
+  background: rgba(6, 182, 212, 0.1);
+  border-color: rgba(6, 182, 212, 0.4);
+  color: var(--accent-cyan);
+}
+
+.open-browser-btn .el-icon {
+  font-size: 14px;
 }
 
 .user-profile {

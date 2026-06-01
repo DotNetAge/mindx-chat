@@ -92,14 +92,19 @@ const thinkingData = computed(() => ({
 
 const actionData = computed(() => {
   const data = props.message.eventData || {}
-  
+
   if (props.message.eventType === 'action_start') {
     return {
       toolCount: data.tool_count || 0,
       toolNames: data.tool_names || [],
       totalPredictedTokens: data.total_predicted_tokens || 0,
       isCompleted: false,
-      steps: []
+      steps: [{
+        toolName: data.tool_name || data.toolName || props.message.eventTitle || '执行操作',
+        status: 'executing' as const,
+        params: data.params || data.arguments || data.args || null,
+        collapsed: false
+      }]
     }
   }
 

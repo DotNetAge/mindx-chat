@@ -215,6 +215,35 @@ export const useConnectionStore = defineStore('connection', {
       return result?.path || ''
     },
 
+    async fetchUserConfig(): Promise<{
+      default_model?: string
+      default_provider?: string
+      last_model?: string
+      [key: string]: any
+    }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      try {
+        const result = await client.call<any>('user.config', {})
+
+        console.group('📋 [MindX] User Config (user.config)')
+        console.log('%c✅ 成功获取用户配置', 'color: #10b981; font-weight: bold;')
+        console.log('%c数据来源: ~/.mindx/mindh.json', 'color: #64748b; font-size: 11px;')
+        console.log('─────────────────────────────────────')
+        console.table(result)
+        console.log('%c完整 JSON:', 'color: #8b5cf6; font-weight: bold;')
+        console.dir(result, { depth: null, colors: true })
+        console.log('%cJSON 字符串:', 'color: #f59e0b; font-weight: bold;')
+        console.log(JSON.stringify(result, null, 2))
+        console.groupEnd()
+
+        return result || {}
+      } catch (err) {
+        console.warn('[MindX] ⚠️ Failed to fetch user config:', err)
+        return {}
+      }
+    },
+
     incrementReconnectAttempt() {
       this.reconnectAttempts++
     },
@@ -592,6 +621,6 @@ export const useConnectionStore = defineStore('connection', {
   persist: {
     key: 'mindx-connection',
     storage: localStorage,
-    paths: ['serverUrl', 'currentAgentName', 'currentModelName']
+    paths: ['serverUrl', 'currentAgentName']
   }
 })

@@ -31,6 +31,7 @@ const connectionStore = useConnectionStore()
 const currentPath = ref('')
 const entries = ref<FSEntry[]>([])
 const loading = ref(false)
+const error = ref<string | null>(null)
 const showFileViewer = ref(false)
 const selectedFile = ref<{ path: string; name: string; content: string } | null>(null)
 
@@ -92,22 +93,59 @@ function formatDate(dateStr: string): string {
 
 async function fetchFSList(path: string) {
   loading.value = true
+  error.value = null
   try {
     if (!connectionStore.isConnected) {
       throw new Error('未连接到 MindX 服务')
     }
-    entries.value = await connectionStore.fetchFSList(path)
+
+    const result = await connectionStore.fetchFSList(path)
+
+    console.log('[FileBrowser] Raw response:', typeof result, Array.isArray(result), result)
+
+    if (Array.isArray(result)) {
+      entries.value = result
+    } else if (result && result.entries && Array.isArray(result.entries)) {
+      entries.value = result.entries
+    } else if (result && typeof result === 'object') {
+      entries.value = Object.values(result).filter(item =>
+        item && typeof item === 'object' && 'name' in item
+      )
+    } else {
+      console.warn('[FileBrowser] Unexpected data format:', result)
+      entries.value = []
+    }
+
     currentPath.value = path
   } catch (err: any) {
     console.error('[FileBrowser] Failed to fetch directory:', err)
+    error.value = err?.message || '加载目录失败'
   } finally {
     loading.value = false
   }
 }
 
 async function handleOpen() {
-  const targetPath = props.projectDir || '/'
-  await fetchFSList(targetPath)
+  let targetPath = props.projectDir
+
+  if (!targetPath || targetPath === '/') {
+    console.log('[FileBrowser] No project dir, fetching home directory...')
+    try {
+      targetPath = await connectionStore.fetchFSHome()
+      console.log(`[FileBrowser] ✅ Got home directory: ${targetPath}`)
+    } catch (err) {
+      console.error('[FileBrowser] Failed to fetch home:', err)
+      error.value = '无法获取用户目录，请先创建或选择一个会话'
+      loading.value = false
+      return
+    }
+  }
+
+  if (targetPath) {
+    await fetchFSList(targetPath)
+  } else {
+    error.value = '未设置工作目录'
+  }
 }
 
 function navigateTo(path: string) {
@@ -200,8 +238,24 @@ watch(() => props.visible, (val) => {
 
       <div class="file-list">
         <div v-if="loading && entries.length === 0" class="loading-state">
-          <el-icon class="is-loading" :size="24"><RefreshRight /></el-icon>
-          <span>加载中...</span>
+          <div class="loading-spinner">
+            <el-icon class="is-loading" :size="32"><RefreshRight /></el-icon>
+          </div>
+          <div class="loading-text">
+            <span class="loading-title">正在加载目录...</span>
+            <span class="loading-subtitle">请稍候，正在获取文件列表</span>
+          </div>
+        </div>
+
+        <div v-else-if="error && entries.length === 0" class="error-state">
+          <el-icon :size="40" color="#ef4444"><Close /></el-icon>
+          <div class="error-text">
+            <span class="error-title">加载失败</span>
+            <span class="error-message">{{ error }}</span>
+          </div>
+          <el-button type="primary" size="small" @click="refresh" :loading="loading">
+            重试
+          </el-button>
         </div>
 
         <div
@@ -374,7 +428,8 @@ watch(() => props.visible, (val) => {
 }
 
 .loading-state,
-.empty-state {
+.empty-state,
+.error-state {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -383,6 +438,37 @@ watch(() => props.visible, (val) => {
   padding: 60px 20px;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.loading-spinner {
+  margin-bottom: 8px;
+}
+
+.loading-text,
+.error-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.loading-title,
+.error-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.loading-subtitle,
+.error-message {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 240px;
+  text-align: center;
+}
+
+.error-state .error-title {
+  color: #ef4444;
 }
 
 .file-item {

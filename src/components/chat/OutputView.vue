@@ -84,10 +84,7 @@ async function copyToClipboard() {
 }
 
 .output-content {
-  padding: 12px 18px;
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.12), rgba(6, 182, 212, 0.05));
-  border: 1px solid rgba(6, 182, 212, 0.2);
-  border-radius: 12px;
+  width: 100%;
 }
 
 .actions {

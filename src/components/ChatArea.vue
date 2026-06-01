@@ -13,6 +13,14 @@ const props = defineProps({
   isSidebarCollapsed: {
     type: Boolean,
     default: false
+  },
+  onRequestNewSession: {
+    type: Function,
+    default: null
+  },
+  showModelPicker: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -21,6 +29,8 @@ const sessionStore = useSessionStore()
 const connectionStore = useConnectionStore()
 const messageInput = ref('')
 const chatContainer = ref(null)
+
+const emit = defineEmits(['update:showModelPicker'])
 
 watch(
   () => chatStore.currentMessages.length,
@@ -50,17 +60,50 @@ const progressPercent = computed(() => {
   return Math.round((chatStore.actionProgress.completed / chatStore.actionProgress.total) * 100)
 })
 
-function sendMessage() {
+async function sendMessage() {
   if (!messageInput.value.trim() || chatStore.isProcessing) return
-  
+
+  if (!sessionStore.activeSessionId) {
+    console.log('[MindX] No active session, attempting to create one...')
+
+    if (!connectionStore.isConnected) {
+      ElMessage.warning('请先连接到 MindX 服务')
+      return
+    }
+
+    if (!connectionStore.currentAgent) {
+      ElMessage.warning('请先选择一个 Agent')
+      return
+    }
+
+    try {
+      chatStore.clearAll()
+
+      if (props.onRequestNewSession) {
+        await props.onRequestNewSession()
+      }
+
+      if (!sessionStore.activeSessionId) {
+        ElMessage.error('无法创建会话，请手动点击"新建对话"按钮')
+        return
+      }
+
+      console.log('[MindX] Session created:', sessionStore.activeSessionId)
+    } catch (err: any) {
+      console.error('[MindX] Failed to create session:', err)
+      ElMessage.error(`创建会话失败: ${err?.message || '未知错误'}`)
+      return
+    }
+  }
+
   const result = chatStore.sendMessage(messageInput.value)
-  
+
   if (result.queued) {
     console.log('消息已加入离线队列，等待连接后发送')
   }
-  
+
   messageInput.value = ''
-  
+
   nextTick(() => scrollToBottom())
 }
 
@@ -161,23 +204,11 @@ async function handlePermissionDeny(reason?: string) {
         </div>
       </div>
 
-      <div class="header-actions" v-if="!connectionStore.isOfflineMode || connectionStore.isConnected">
-        <div class="session-stats" v-if="sessionStore.activeSessionId">
-          <span class="stat-item">
-            <span class="stat-label">消耗</span>
-            <span class="stat-value">{{ chatStore.sessionTokensUsed >= 1000 ? (chatStore.sessionTokensUsed / 1000).toFixed(1) + 'K' : chatStore.sessionTokensUsed }}</span>
-          </span>
-          <span class="stat-item">
-            <span class="stat-label">费用</span>
-            <span class="stat-value cost">¥{{ chatStore.sessionCost.toFixed(2) }}</span>
-          </span>
-        </div>
-      </div>
     </header>
 
     <ProviderModelPicker
-      :visible="showProviderPicker"
-      @update:visible="showProviderPicker = $event"
+      :visible="showProviderPicker || showModelPicker"
+      @update:visible="(v) => { showProviderPicker = v; if (showModelPicker && !v) emit('update:showModel-picker', false) }"
       @model-changed="handleModelChanged"
     />
 
@@ -338,6 +369,20 @@ async function handlePermissionDeny(reason?: string) {
   background: var(--bg-primary);
   position: relative;
   z-index: 5;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chat-area.sidebar-collapsed .chat-header {
+  padding: 8px 16px;
+}
+
+.chat-area.sidebar-collapsed .chat-messages {
+  padding: 16px;
+}
+
+.chat-area.sidebar-collapsed .input-container {
+  margin: 0 12px 12px;
 }
 
 /* Header */
@@ -362,6 +407,8 @@ async function handlePermissionDeny(reason?: string) {
   background: rgba(6, 182, 212, 0.08);
   border: 1px solid rgba(6, 182, 212, 0.15);
   border-radius: 8px;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .provider-label {
@@ -370,6 +417,7 @@ async function handlePermissionDeny(reason?: string) {
   color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  flex-shrink: 0;
 }
 
 .model-label {
@@ -377,6 +425,9 @@ async function handlePermissionDeny(reason?: string) {
   font-weight: 600;
   color: var(--accent-cyan);
   font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .gear-btn {
@@ -450,46 +501,10 @@ async function handlePermissionDeny(reason?: string) {
   border: 1px solid rgba(99, 102, 241, 0.2);
 }
 
-.session-stats {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-right: 8px;
-  padding: 6px 12px;
-  background: rgba(6, 182, 212, 0.08);
-  border: 1px solid rgba(6, 182, 212, 0.2);
-  border-radius: 8px;
-}
-
-.stat-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-
-.stat-label {
-  font-size: 9px;
-  color: #64748b;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.stat-value {
-  font-size: 12px;
-  font-weight: 600;
-  color: #22d3ee;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.stat-value.cost {
-  color: #6ee7b7;
-}
-
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 0;
 }
 
 .action-btn {

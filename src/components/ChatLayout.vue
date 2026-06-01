@@ -9,10 +9,11 @@ import { useConnectionStore } from '../stores/connectionStore'
 const props = defineProps({
   showSetupDialog: Boolean,
   setupAgentName: String,
-  selectedDirectory: String
+  selectedDirectory: String,
+  showModelPicker: Boolean
 })
 
-const emit = defineEmits(['update:selectedDirectory', 'setupConfirm', 'setupCancel', 'toggleSetupDialog'])
+const emit = defineEmits(['update:selectedDirectory', 'setupConfirm', 'setupCancel', 'toggleSetupDialog', 'update:showModelPicker', 'toggle-file-browser'])
 
 const isCollapsed = ref(false)
 const fileBrowserVisible = ref(false)
@@ -41,6 +42,14 @@ function handleToggleSetupDialog() {
 function toggleFileBrowser() {
   fileBrowserVisible.value = !fileBrowserVisible.value
 }
+
+async function handleRequestNewSession() {
+  if (!connectionStore.isConnected || !connectionStore.currentAgent) {
+    throw new Error('未连接或未选择 Agent')
+  }
+
+  emit('toggleSetupDialog')
+}
 </script>
 
 <template>
@@ -56,14 +65,14 @@ function toggleFileBrowser() {
         @setup-confirm="handleSetupConfirm"
         @setup-cancel="handleSetupCancel"
         @toggle-setup-dialog="handleToggleSetupDialog"
+        @toggle-file-browser="toggleFileBrowser"
       />
-      <ChatArea :is-sidebar-collapsed="isCollapsed" />
-    </div>
-
-    <div class="right-toolbar" :class="{ 'with-drawer': fileBrowserVisible }">
-      <button class="toolbar-btn" @click="toggleFileBrowser" title="文件浏览器">
-        <el-icon><FolderOpened /></el-icon>
-      </button>
+      <ChatArea
+        :is-sidebar-collapsed="isCollapsed"
+        :on-request-new-session="handleRequestNewSession"
+        :show-model-picker="showModelPicker"
+        @update:show-model-picker="(v) => emit('update:showModel-picker', v)"
+      />
     </div>
 
     <FileBrowserDrawer
@@ -87,53 +96,8 @@ function toggleFileBrowser() {
   flex: 1;
   display: flex;
   min-width: 0;
+  overflow: hidden;
   transition: margin-right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.right-toolbar {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 14;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 4px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-right: none;
-  border-radius: 8px 0 0 8px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  opacity: 0.7;
-}
-
-.right-toolbar:hover {
-  opacity: 1;
-}
-
-.right-toolbar.with-drawer {
-  right: 360px;
-  opacity: 1;
-}
-
-.toolbar-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-}
-
-.toolbar-btn:hover {
-  background: var(--bg-hover);
-  color: var(--accent-cyan);
 }
 
 .chat-layout::before {

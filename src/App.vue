@@ -14,6 +14,7 @@ const showSetupDialog = ref(false)
 const setupAgentName = ref('')
 const selectedDirectory = ref('')
 const pendingSetup = ref(false)
+const showModelPicker = ref(false)
 
 async function initializeAfterConnect() {
   if (!connectionStore.isConnected) return
@@ -47,12 +48,53 @@ async function initializeAfterConnect() {
         const detail = await connectionStore.fetchSessionDetail(targetSession.session_id)
         chatStore.restoreSessionMessages(targetSession.session_id, detail.messages || [])
         console.log(`[MindX] Resumed session: ${targetSession.session_id}`)
+
+        if (detail?.meta?.project_dir) {
+          connectionStore.currentProjectDir = detail.meta.project_dir
+          console.log(`[MindX] ✅ Set project dir from session: ${detail.meta.project_dir}`)
+        } else {
+          console.warn(`[MindX] ⚠️ No project_dir in session meta, trying to fetch home dir...`)
+          try {
+            const homeDir = await connectionStore.fetchFSHome()
+            if (homeDir && homeDir !== '/') {
+              connectionStore.currentProjectDir = homeDir
+              console.log(`[MindX] ✅ Set project dir from home: ${homeDir}`)
+            }
+          } catch (err) {
+            console.warn(`[MindX] Could not fetch home directory:`, err)
+          }
+        }
+      } else {
+        console.warn(`[MindX] ⚠️ No target session found (lastSessionId: ${lastSessionId})`)
       }
 
-      // 根据 agent 的 model 字段设置 Model
-      const targetAgent = agents.find(a => a.name === targetAgentName)
-      if (targetAgent?.model && !connectionStore.currentModelName) {
-        connectionStore.setCurrentModel(targetAgent.model)
+      // ========================================
+      // 🎯 Model 初始化：只从服务端 ~/.mindx/mindh.json 读取
+      // ❌ 不再从 Agent.model 读取
+      // ❌ 不再从 localStorage 缓存读取
+      // ========================================
+      console.log(`[MindX] 📋 Fetching user config from server (~/.mindx/mindh.json)...`)
+
+      try {
+        const userConfig = await connectionStore.fetchUserConfig()
+        const modelFromConfig = userConfig.default_model || userConfig.last_model
+
+        console.log(`[MindX] 📋 User config response:`)
+        console.log(`  - default_model: "${userConfig.default_model}"`)
+        console.log(`  - last_model: "${userConfig.last_model}"`)
+        console.log(`  - Selected model: "${modelFromConfig}"`)
+
+        if (modelFromConfig) {
+          connectionStore.setCurrentModel(modelFromConfig)
+          console.log(`[MindX] ✅ Model set from server config: ${modelFromConfig}`)
+        } else {
+          console.warn(`[MindX] ❌ No model in server config, showing picker...`)
+          showModelPicker.value = true
+        }
+      } catch (configErr) {
+        console.error(`[MindX] ❌ Failed to fetch user config:`, configErr)
+        console.warn(`[MindX] Falling back to model picker...`)
+        showModelPicker.value = true
       }
     }
   } catch (e) {
@@ -69,6 +111,7 @@ async function handleDirectoryConfirm() {
 
     connectionStore.setLastAgent(setupAgentName.value)
     connectionStore.setLastSession(sessionId)
+    connectionStore.currentProjectDir = selectedDirectory.value
 
     const newSession = {
       session_id: sessionId,
@@ -81,7 +124,7 @@ async function handleDirectoryConfirm() {
     sessionStore.syncServerSessions([newSession])
 
     sessionStore.setActiveSession(sessionId)
-    console.log(`[MindX] Created session: ${sessionId} for agent: ${setupAgentName.value}`)
+    console.log(`[MindX] Created session: ${sessionId} for agent: ${setupAgentName.value} with dir: ${selectedDirectory.value}`)
 
     showSetupDialog.value = false
     pendingSetup.value = false
@@ -96,7 +139,6 @@ function handleDirectoryCancel() {
 }
 
 watch(() => connectionStore.state, (newState) => {
-  // watch 只用于连接状态变化时的 UI 响应，不在这里初始化
 })
 
 onMounted(async () => {
@@ -117,10 +159,12 @@ onMounted(async () => {
       :show-setup-dialog="showSetupDialog"
       :setup-agent-name="setupAgentName"
       :selected-directory="selectedDirectory"
+      :show-model-picker="showModelPicker"
       @update:selected-directory="selectedDirectory = $event"
       @setup-confirm="handleDirectoryConfirm"
       @setup-cancel="handleDirectoryCancel"
       @toggle-setup-dialog="showSetupDialog = !showSetupDialog"
+      @update:show-model-picker="showModelPicker = $event"
     />
   </ElConfigProvider>
 </template>
