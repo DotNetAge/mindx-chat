@@ -1,0 +1,597 @@
+import { defineStore } from 'pinia'
+import { getMindXClient, createMindXClient } from '../services/websocket'
+import { useChatStore } from './chatStore'
+import { useSessionStore } from './sessionStore'
+import type { AgentConfig, ModelConfig, SkillInfo, ServerSessionInfo, ConnectionState, FSEntry } from '../types/websocket'
+
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error'
+
+export interface AgentInfo {
+  name: string
+  role: string
+  description: string
+  model: string
+  skills?: string[]
+  introduction?: string
+  active?: boolean
+}
+
+export interface ModelInfo {
+  name: string
+  title?: string
+  description: string
+  provider: string
+  enabled?: boolean
+}
+
+export const useConnectionStore = defineStore('connection', {
+  state: () => ({
+    state: 'disconnected' as ConnectionState,
+    lastError: null as string | null,
+    serverUrl: '' as string,
+    clientId: '' as string,
+    agents: [] as AgentInfo[],
+    models: [] as ModelInfo[],
+    skills: [] as SkillInfo[],
+    currentAgentName: '' as string,
+    currentModelName: '' as string,
+    currentProjectDir: '' as string,
+    reconnectAttempts: 0 as number,
+    maxReconnectAttempts: 10 as number,
+    lastAgentName: '' as string,
+    lastSessionId: '' as string
+  }),
+
+  getters: {
+    isConnected: (state): boolean => {
+      return state.state === 'connected'
+    },
+
+    isOfflineMode: (state): boolean => {
+      return !['connected', 'connecting', 'reconnecting'].includes(state.state)
+    },
+
+    canSendMessage: (state): boolean => {
+      return state.state === 'connected'
+    },
+
+    primaryAgent: (state): AgentInfo | undefined => {
+      return state.agents.find(a => a.active) || state.agents[0]
+    },
+
+    currentAgent: (state): AgentInfo | undefined => {
+      if (!state.currentAgentName) return state.agents[0]
+      return state.agents.find(a => a.name === state.currentAgentName) || state.agents[0]
+    },
+
+    currentModel: (state): ModelInfo | undefined => {
+      if (!state.currentModelName && state.models.length > 0) return state.models[0]
+      if (!state.currentModelName) return undefined
+      return state.models.find(m => m.name === state.currentModelName)
+    },
+
+    providers: (state): { name: string; models: ModelInfo[] }[] => {
+      const map = new Map<string, ModelInfo[]>()
+      state.models.forEach(m => {
+        const list = map.get(m.provider) || []
+        list.push(m)
+        map.set(m.provider, list)
+      })
+      return Array.from(map.entries()).map(([name, models]) => ({ name, models }))
+    },
+
+    statusLabel: (state): string => {
+      const labels: Record<ConnectionState, string> = {
+        disconnected: '未连接',
+        connecting: '连接中...',
+        connected: '已连接',
+        reconnecting: '重连中...',
+        error: '连接错误'
+      }
+      return labels[state.state]
+    },
+
+    statusColor: (state): string => {
+      const colors: Record<ConnectionState, string> = {
+        disconnected: '#64748b',
+        connecting: '#f59e0b',
+        connected: '#10b981',
+        reconnecting: '#f59e0b',
+        error: '#ef4444'
+      }
+      return colors[state.state]
+    },
+  },
+
+  actions: {
+    async deleteSession(sessionId: string): Promise<{ session_id: string; deleted: boolean }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<{ session_id: string; deleted: boolean }>('session.delete', {
+        session_id: sessionId
+      })
+      return result
+    },
+
+    setConnectionState(newState: ConnectionState) {
+      this.state = newState
+
+      if (newState === 'connected') {
+        this.reconnectAttempts = 0
+        this.lastError = null
+      }
+    },
+
+    setServerError(error: string) {
+      this.lastError = error
+      this.state = 'error'
+    },
+
+    setServerUrl(url: string) {
+      this.serverUrl = url
+    },
+
+    setClientId(id: string) {
+      this.clientId = id
+    },
+
+    generateClientId(): string {
+      this.clientId = `web_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+      return this.clientId
+    },
+
+    setAgents(agents: AgentInfo[]) {
+      this.agents = agents
+    },
+
+    setModels(models: ModelInfo[]) {
+      this.models = models
+    },
+
+    setSkills(skills: SkillInfo[]) {
+      this.skills = skills
+    },
+
+    setCurrentAgent(agentName: string) {
+      this.currentAgentName = agentName
+      const agent = this.agents.find(a => a.name === agentName)
+      if (agent?.model && !this.currentModelName) {
+        this.currentModelName = agent.model
+      }
+    },
+
+    setCurrentModel(modelName: string) {
+      this.currentModelName = modelName
+    },
+
+    async fetchAgents(): Promise<AgentConfig[]> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<AgentConfig[]>('agent.list', {})
+      return Array.isArray(result) ? result : []
+    },
+
+    async fetchSessions(agentName?: string): Promise<ServerSessionInfo[]> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const params = agentName ? { agent: agentName } : {}
+      const result = await client.call<ServerSessionInfo[]>('session.list', params)
+      return Array.isArray(result) ? result : []
+    },
+
+    async fetchSessionDetail(sessionId: string): Promise<{ session_id: string; messages: SessionMessage[]; meta?: any }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<{ session_id: string; messages: SessionMessage[]; meta?: any }>('session.get', { session_id: sessionId })
+      return result || { session_id: sessionId, messages: [] }
+    },
+
+    async fetchModels(): Promise<ModelConfig[]> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<ModelConfig[]>('model.list', {})
+      return Array.isArray(result) ? result : []
+    },
+
+    async fetchSkills(): Promise<SkillInfo[]> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<SkillInfo[]>('skill.list', {})
+      return Array.isArray(result) ? result : []
+    },
+
+    async fetchFSList(dirPath?: string): Promise<FSEntry[]> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const params = dirPath ? { path: dirPath } : {}
+      const result = await client.call<FSEntry[]>('fs.list', params)
+      return Array.isArray(result) ? result : []
+    },
+
+    async fetchFSHome(): Promise<string> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<{ path: string }>('fs.home', {})
+      return result?.path || ''
+    },
+
+    incrementReconnectAttempt() {
+      this.reconnectAttempts++
+    },
+
+    resetReconnectAttempts() {
+      this.reconnectAttempts = 0
+    },
+
+    async autoConnect(timeoutMs: number = 5000): Promise<boolean> {
+      const url = this.serverUrl || 'ws://localhost:1314/ws'
+      console.log('[MindX] 🚀 autoConnect starting with URL:', url)
+      this.setServerUrl(url)
+
+      if (!this.clientId) {
+        this.generateClientId()
+      }
+
+      return new Promise((resolve) => {
+        let settled = false
+        const timer = setTimeout(() => {
+          if (!settled) {
+            settled = true
+            console.log('[MindX] ❌ Auto-connect TIMED OUT after', timeoutMs, 'ms, state:', this.state)
+            this.state = 'disconnected'
+            resolve(false)
+          }
+        }, timeoutMs)
+
+        const onStateChange = (oldState: ConnectionState, newState: ConnectionState) => {
+          console.log('[MindX] 🔄 State changed:', oldState, '→', newState)
+          this.setConnectionState(newState)
+
+          if (newState === 'connected') {
+            if (!settled) {
+              settled = true
+              clearTimeout(timer)
+              console.log('[MindX] ✅ Auto-connect SUCCEEDED')
+              resolve(true)
+            }
+          } else if (newState === 'error' || newState === 'disconnected') {
+            if (!settled && (oldState === 'connecting' || oldState === 'reconnecting')) {
+              settled = true
+              clearTimeout(timer)
+              console.log('[MindX] ❌ Auto-connect FAILED with state:', newState)
+              resolve(false)
+            }
+          }
+        }
+
+        try {
+          console.log('[MindX] 🔧 Creating WebSocket client...')
+          createMindXClient(url, onStateChange)
+          this.setConnectionState('connecting')
+          console.log('[MindX] 🔧 Registering event handlers...')
+          this.registerEventHandlers()
+        } catch (err) {
+          if (!settled) {
+            settled = true
+            clearTimeout(timer)
+            console.log('[MindX] ❌ Auto-connect EXCEPTION:', err)
+            this.setServerError(String(err))
+            resolve(false)
+          }
+        }
+      })
+    },
+
+    disconnect() {
+      this.state = 'disconnected'
+      this.reconnectAttempts = this.maxReconnectAttempts
+      this.agents = []
+      this.models = []
+      this.skills = []
+      this.currentAgentName = ''
+      this.currentModelName = ''
+    },
+
+    reset() {
+      this.state = 'disconnected'
+      this.lastError = null
+      this.serverUrl = ''
+      this.clientId = ''
+      this.agents = []
+      this.models = []
+      this.skills = []
+      this.currentAgentName = ''
+      this.currentModelName = ''
+      this.reconnectAttempts = 0
+    },
+
+    loadUserPreferences() {
+      try {
+        const prefs = localStorage.getItem('mindx_user_preferences')
+        if (prefs) {
+          const data = JSON.parse(prefs)
+          this.lastAgentName = data.lastAgentName || ''
+          this.lastSessionId = data.lastSessionId || ''
+        }
+      } catch (e) {
+        console.error('[MindX] Failed to load user preferences:', e)
+      }
+    },
+
+    saveUserPreferences() {
+      try {
+        localStorage.setItem('mindx_user_preferences', JSON.stringify({
+          lastAgentName: this.lastAgentName,
+          lastSessionId: this.lastSessionId
+        }))
+      } catch (e) {
+        console.error('[MindX] Failed to save user preferences:', e)
+      }
+    },
+
+    registerEventHandlers() {
+      console.log('[MindX] 🚀 registerEventHandlers called')
+      const client = getMindXClient()
+      if (!client) {
+        console.error('[MindX] ❌ Client is null!')
+        return
+      }
+      console.log('[MindX] ✅ Client found:', !!client)
+
+      const chatStore = useChatStore()
+      const sessionStore = useSessionStore()
+
+      client.on('thinking_delta', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        if (targetSessionId) {
+          chatStore.handleThinkingDelta(envelope.data, targetSessionId)
+        } else {
+          chatStore.handleThinkingDelta(envelope.data)
+        }
+      })
+
+      client.on('thinking_done', (envelope) => {
+        chatStore.handleThinkingDone(envelope.data)
+      })
+
+      client.on('markdown', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleMarkdownContent(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title,
+          meta: envelope.meta
+        })
+      })
+
+      client.on('content_delta', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleContentDelta(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title
+        })
+      })
+
+      client.on('text', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleToolArguments(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title
+        })
+      })
+
+      client.on('action_start', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleActionStart(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title
+        })
+      })
+
+      client.on('action_progress', (envelope) => {
+        chatStore.handleActionProgress(envelope.data)
+      })
+
+      client.on('action_result', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleActionResult(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title
+        })
+      })
+
+      client.on('action_end', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleActionEnd(envelope.data, {
+          session_id: targetSessionId
+        })
+      })
+
+      client.on('subtask_spawned', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleSubtaskSpawned(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title
+        })
+      })
+
+      client.on('subtask_completed', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleSubtaskCompleted(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title
+        })
+      })
+
+      client.on('final_answer', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleFinalAnswer(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title
+        })
+      })
+
+      client.on('permission_request', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handlePermissionRequest(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title
+        })
+      })
+
+      client.on('permission_denied', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handlePermissionDenied(envelope.data, {
+          session_id: targetSessionId
+        })
+      })
+
+      client.on('form', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleAskUserRequest(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title
+        })
+      })
+
+      client.on('execution_summary', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleExecutionSummary(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title,
+          meta: envelope.meta
+        })
+        if (targetSessionId) {
+          sessionStore.incrementMessageCount(targetSessionId)
+        }
+      })
+
+      client.on('cycle_end', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleCycleEnd(envelope.data, {
+          session_id: targetSessionId
+        })
+      })
+
+      client.on('task_summary', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleTaskSummary(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title,
+          meta: envelope.meta
+        })
+        if (targetSessionId) {
+          sessionStore.incrementMessageCount(targetSessionId)
+        }
+      })
+
+      client.on('error', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleError(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title
+        })
+      })
+
+      client.on('agent_talk_start', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleAgentTalkStart(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title
+        })
+      })
+
+      client.on('agent_talk_end', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleAgentTalkEnd(envelope.data, {
+          session_id: targetSessionId
+        })
+      })
+
+      client.on('compaction', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleCompaction(envelope.data, {
+          session_id: targetSessionId
+        })
+      })
+
+      client.on('max_turns_reached', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleMaxTurnsReached(envelope.data, {
+          session_id: targetSessionId
+        })
+      })
+
+      console.log('[MindX] Event handlers registered')
+    },
+
+    setLastAgent(agentName: string) {
+      this.lastAgentName = agentName
+      this.saveUserPreferences()
+    },
+
+    setLastSession(sessionId: string) {
+      this.lastSessionId = sessionId
+      this.saveUserPreferences()
+    },
+
+    async createSession(agentName: string, projectDir: string): Promise<{ session_id: string }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<{ session_id: string }>('session.create', {
+        agent: agentName,
+        project_dir: projectDir
+      })
+      return result
+    },
+
+    async switchModel(modelName: string, provider?: string): Promise<{ name: string; provider: string; message: string }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<{ name: string; provider: string; message: string }>('model.switch', {
+        name: modelName,
+        provider: provider
+      })
+      this.currentModelName = modelName
+      return result
+    },
+
+    async respondToAskUser(correlationId: string, answers: Record<string, string>): Promise<void> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      await client.call<{ status: string }>('ask_user.reply', {
+        correlation_id: correlationId,
+        answers
+      })
+    },
+
+    async respondToPermission(correlationId: string, action: string, extra?: { params?: Record<string, any>; reason?: string }): Promise<void> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      await client.call<{ status: string }>('permission.reply', {
+        correlation_id: correlationId,
+        action,
+        ...extra
+      })
+    },
+
+    async fetchFSList(path: string): Promise<FSEntry[]> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<{ entries: FSEntry[] }>('fs.list', { path })
+      return result.entries || []
+    },
+
+    async readFile(path: string): Promise<string> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<{ content: string }>('fs.read', { path })
+      return result.content || ''
+    }
+  },
+
+  persist: {
+    key: 'mindx-connection',
+    storage: localStorage,
+    paths: ['serverUrl', 'currentAgentName', 'currentModelName']
+  }
+})
