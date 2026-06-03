@@ -178,6 +178,7 @@ export const useConnectionStore = defineStore('connection', {
       if (!client) throw new Error('WebSocket client not initialized')
       const params = agentName ? { agent: agentName } : {}
       const result = await client.call<ServerSessionInfo[]>('session.list', params)
+      console.log(`[MindX] 🔍 fetchSessions(agentName=${agentName}) raw result:`, JSON.parse(JSON.stringify(result)))
       return Array.isArray(result) ? result : []
     },
 
@@ -334,30 +335,6 @@ export const useConnectionStore = defineStore('connection', {
       this.currentAgentName = ''
       this.currentModelName = ''
       this.reconnectAttempts = 0
-    },
-
-    loadUserPreferences() {
-      try {
-        const prefs = localStorage.getItem('mindx_user_preferences')
-        if (prefs) {
-          const data = JSON.parse(prefs)
-          this.lastAgentName = data.lastAgentName || ''
-          this.lastSessionId = data.lastSessionId || ''
-        }
-      } catch (e) {
-        console.error('[MindX] Failed to load user preferences:', e)
-      }
-    },
-
-    saveUserPreferences() {
-      try {
-        localStorage.setItem('mindx_user_preferences', JSON.stringify({
-          lastAgentName: this.lastAgentName,
-          lastSessionId: this.lastSessionId
-        }))
-      } catch (e) {
-        console.error('[MindX] Failed to save user preferences:', e)
-      }
     },
 
     registerEventHandlers() {
@@ -539,23 +516,29 @@ export const useConnectionStore = defineStore('connection', {
         })
       })
 
+      client.on('file_modified', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleFileModified(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title
+        })
+      })
+
       console.log('[MindX] Event handlers registered')
     },
 
     setLastAgent(agentName: string) {
       this.lastAgentName = agentName
-      this.saveUserPreferences()
     },
 
     setLastSession(sessionId: string) {
       this.lastSessionId = sessionId
-      this.saveUserPreferences()
     },
 
-    async createSession(agentName: string, projectDir: string): Promise<{ session_id: string }> {
+    async createSession(agentName: string, projectDir: string): Promise<{ session_id: string; agent_name?: string; created_at?: string }> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      const result = await client.call<{ session_id: string }>('session.create', {
+      const result = await client.call<{ session_id: string; agent_name?: string; created_at?: string }>('session.create', {
         agent: agentName,
         project_dir: projectDir
       })
@@ -606,6 +589,26 @@ export const useConnectionStore = defineStore('connection', {
       if (!client) throw new Error('WebSocket client not initialized')
       const result = await client.call<{ content: string }>('fs.read', { path })
       return result.content || ''
+    },
+
+    async confirmFiles(sessionId: string, files?: string[]): Promise<string[]> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<{ confirmed: string[] }>('session.confirm_files', {
+        session_id: sessionId,
+        ...(files && files.length > 0 && { files })
+      })
+      return result.confirmed || []
+    },
+
+    async rollbackFiles(sessionId: string, files?: string[]): Promise<string[]> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<{ rolled_back: string[] }>('session.rollback_files', {
+        session_id: sessionId,
+        ...(files && files.length > 0 && { files })
+      })
+      return result.rolled_back || []
     },
 
     async fetchProviders(): Promise<void> {
@@ -749,11 +752,5 @@ export const useConnectionStore = defineStore('connection', {
       if (!client) throw new Error('WebSocket client not initialized')
       return client.call('memory.query', { query, top_k: topK })
     }
-  },
-
-  persist: {
-    key: 'mindx-connection',
-    storage: localStorage,
-    paths: ['serverUrl', 'currentAgentName']
   }
 })

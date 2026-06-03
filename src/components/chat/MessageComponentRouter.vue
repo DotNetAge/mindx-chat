@@ -11,6 +11,7 @@ import AgentTalkView from './AgentTalkView.vue'
 import CompactionView from './CompactionView.vue'
 import MaxTurnsView from './MaxTurnsView.vue'
 import FormView from './FormView.vue'
+import DiffView from './DiffView.vue'
 
 const props = defineProps({
   message: {
@@ -36,6 +37,7 @@ const componentType = computed(() => {
   if (et === 'compaction') return 'compaction'
   if (et === 'max_turns_reached') return 'max_turns'
   if (et === 'cycle_end' || et === 'execution_summary') return 'system_event'
+  if (et === 'file_modified') return 'diff_view'
 
   const role = props.message.role
   if (role === 'user') return 'user'
@@ -47,7 +49,8 @@ const thinkingData = computed(() => ({
   content: props.message.eventType === 'thinking_done' ? props.message.content : '',
   pending: props.message.eventType === 'thinking_delta' ? props.message.content : '',
   isActive: props.message.eventType === 'thinking_delta',
-  isComplete: props.message.eventType === 'thinking_done'
+  isComplete: props.message.eventType === 'thinking_done',
+  durationMs: props.message.metadata?.duration_ms || 0
 }))
 
 const actionData = computed(() => {
@@ -213,6 +216,16 @@ function formatContent(content: string): string {
       @submit="(data) => $emit('form-submit', data)"
     />
 
+    <!-- File Modified Diff Component -->
+    <DiffView
+      v-else-if="componentType === 'diff_view'"
+      :filePath="message.eventTitle || ''"
+      :diff="message.eventData?.diff || ''"
+      :additions="message.eventData?.additions || 0"
+      :deletions="message.eventData?.deletions || 0"
+      :isNew="message.eventData?.isNew || false"
+    />
+
     <!-- System Event (cycle_end, execution_summary) - now hidden -->
     <template v-else-if="componentType === 'system_event'">
       <!-- Internal events, not displayed -->
@@ -255,6 +268,7 @@ function formatContent(content: string): string {
 }
 
 .user-content {
+  flex: 1;
   font-size: 14px;
   line-height: 1.65;
   color: var(--text-primary);

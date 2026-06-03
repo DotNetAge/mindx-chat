@@ -8,6 +8,7 @@ import { useConnectionStore } from '../stores/connectionStore'
 import MessageComponentRouter from './chat/MessageComponentRouter.vue'
 import ProviderModelPicker from './chat/ProviderModelPicker.vue'
 import ScheduleView from './chat/ScheduleView.vue'
+import FileReviewBar from './FileReviewBar.vue'
 import LogDrawer from './LogDrawer.vue'
 import MemoryModal from './MemoryModal.vue'
 
@@ -352,6 +353,9 @@ async function handlePermissionDeny(reason?: string) {
         </div>
       </div>
     </div>
+
+    <!-- File Review Bar -->
+    <FileReviewBar />
 
     <!-- Input Area -->
     <footer class="chat-input-area">

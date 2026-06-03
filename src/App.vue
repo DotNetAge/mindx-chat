@@ -23,81 +23,38 @@ async function initializeAfterConnect() {
     const agents = await connectionStore.fetchAgents()
     if (agents.length === 0) return
 
-    connectionStore.loadUserPreferences()
+    // Agent/Session 自动选择由 Sidebar 中基于 user.config 的 watcher 处理
+    // 这里仅处理 Model 初始化
 
-    const lastAgentName = connectionStore.lastAgentName
-    let targetAgentName = lastAgentName
+    // ========================================
+    // 🎯 Model 初始化：只从服务端 ~/.mindx/mindh.json 读取
+    // ❌ 不再从 Agent.model 读取
+    // ❌ 不再从 localStorage 缓存读取
+    // ========================================
+    console.log(`[MindX] 📋 Fetching user config from server (~/.mindx/mindh.json)...`)
 
-    if (!targetAgentName || !agents.find(a => a.name === targetAgentName)) {
-      targetAgentName = agents[0]?.name || ''
-    }
+    try {
+      const userConfig = await connectionStore.fetchUserConfig()
+      const modelFromConfig = userConfig.default_model || userConfig.last_model
 
-    if (targetAgentName) {
-      connectionStore.setCurrentAgent(targetAgentName)
-      const sessions = await connectionStore.fetchSessions(targetAgentName)
+      console.log(`[MindX] 📋 User config response:`)
+      console.log(`  - default_model: "${userConfig.default_model}"`)
+      console.log(`  - last_model: "${userConfig.last_model}"`)
+      console.log(`  - last_agent: "${userConfig.last_agent}"`)
+      console.log(`  - last_session_id: "${userConfig.last_session_id}"`)
+      console.log(`  - Selected model: "${modelFromConfig}"`)
 
-      const lastSessionId = connectionStore.lastSessionId
-      let targetSession = null
-
-      if (lastSessionId) {
-        targetSession = sessions.find(s => s.session_id === lastSessionId)
-      }
-
-      if (targetSession) {
-        sessionStore.setActiveSession(targetSession.session_id)
-        const detail = await connectionStore.fetchSessionDetail(targetSession.session_id)
-        if (detail?.messages && Array.isArray(detail.messages) && detail.messages.length > 0) {
-          chatStore.restoreSessionMessages(targetSession.session_id, detail.messages)
-        }
-        console.log(`[MindX] Resumed session: ${targetSession.session_id}`)
-
-        if (detail?.meta?.project_dir) {
-          connectionStore.currentProjectDir = detail.meta.project_dir
-          console.log(`[MindX] ✅ Set project dir from session: ${detail.meta.project_dir}`)
-        } else {
-          console.warn(`[MindX] ⚠️ No project_dir in session meta, trying to fetch home dir...`)
-          try {
-            const homeDir = await connectionStore.fetchFSHome()
-            if (homeDir && homeDir !== '/') {
-              connectionStore.currentProjectDir = homeDir
-              console.log(`[MindX] ✅ Set project dir from home: ${homeDir}`)
-            }
-          } catch (err) {
-            console.warn(`[MindX] Could not fetch home directory:`, err)
-          }
-        }
+      if (modelFromConfig) {
+        connectionStore.setCurrentModel(modelFromConfig)
+        console.log(`[MindX] ✅ Model set from server config: ${modelFromConfig}`)
       } else {
-        console.warn(`[MindX] ⚠️ No target session found (lastSessionId: ${lastSessionId})`)
-      }
-
-      // ========================================
-      // 🎯 Model 初始化：只从服务端 ~/.mindx/mindh.json 读取
-      // ❌ 不再从 Agent.model 读取
-      // ❌ 不再从 localStorage 缓存读取
-      // ========================================
-      console.log(`[MindX] 📋 Fetching user config from server (~/.mindx/mindh.json)...`)
-
-      try {
-        const userConfig = await connectionStore.fetchUserConfig()
-        const modelFromConfig = userConfig.default_model || userConfig.last_model
-
-        console.log(`[MindX] 📋 User config response:`)
-        console.log(`  - default_model: "${userConfig.default_model}"`)
-        console.log(`  - last_model: "${userConfig.last_model}"`)
-        console.log(`  - Selected model: "${modelFromConfig}"`)
-
-        if (modelFromConfig) {
-          connectionStore.setCurrentModel(modelFromConfig)
-          console.log(`[MindX] ✅ Model set from server config: ${modelFromConfig}`)
-        } else {
-          console.warn(`[MindX] ❌ No model in server config, showing picker...`)
-          showModelPicker.value = true
-        }
-      } catch (configErr) {
-        console.error(`[MindX] ❌ Failed to fetch user config:`, configErr)
-        console.warn(`[MindX] Falling back to model picker...`)
+        console.warn(`[MindX] ❌ No model in server config, showing picker...`)
         showModelPicker.value = true
       }
+    } catch (configErr) {
+      console.error(`[MindX] ❌ Failed to fetch user config:`, configErr)
+      console.warn(`[MindX] Falling back to model picker...`)
+      showModelPicker.value = true
     }
   } catch (e) {
     console.error('[MindX] Initialization error:', e)
@@ -132,13 +89,20 @@ async function handleDirectoryConfirm() {
     connectionStore.setLastSession(sessionId)
     connectionStore.currentProjectDir = selectedDirectory.value
 
+    // 从服务端获取真实 session 元数据（title, project_working_dir 等）
+    const detail = await connectionStore.fetchSessionDetail(sessionId)
+    const meta = detail?.meta || {}
+    console.log(`[MindX] 📥 session detail:`, JSON.parse(JSON.stringify(detail)))
+    console.log(`[MindX] 📋 session meta:`, JSON.parse(JSON.stringify(meta)))
+
     sessionStore.addSession({
       session_id: sessionId,
       agent_name: setupAgentName.value,
-      title: setupAgentName.value,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      message_count: 0
+      title: meta.title || '',
+      created_at: meta.created_at || new Date().toISOString(),
+      updated_at: meta.updated_at || new Date().toISOString(),
+      message_count: meta.message_count || 0,
+      project_dir: meta.project_working_dir || selectedDirectory.value
     })
     sessionStore.setActiveSession(sessionId)
 

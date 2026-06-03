@@ -11,19 +11,24 @@ const fullscreen = ref(false)
 const lines = ref<string[]>([])
 const totalLines = ref(0)
 const currentOffset = ref(0) // 已从末尾跳过的行数
+const currentPageIndex = ref(0) // 当前所在页码（从0开始）
 const hasMore = ref(true)
 const loading = ref(false)
 const loadingMore = ref(false) // 向上滚动加载更多
 const error = ref('')
 
 const logContainer = ref<HTMLElement | null>(null)
-// 保存滚动位置，防止加载新数据时跳动
 let savedScrollTop = 0
 
-const PAGE_SIZE = 10
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+
+const PAGE_SIZE = 100
 
 async function loadPage(offset: number): Promise<{ lines: string[]; total: number; returned: number; offset: number; has_more: boolean }> {
-  return connectionStore.fetchLogs(offset, PAGE_SIZE)
+  console.log(`[LogDrawer] 📥 loadPage(offset=${offset}, limit=${PAGE_SIZE})`)
+  const res = await connectionStore.fetchLogs(offset, PAGE_SIZE)
+  console.log(`[LogDrawer] 📥 loadPage response:`, JSON.parse(JSON.stringify(res)))
+  return res
 }
 
 // 首次加载（最新 N 行）
@@ -32,10 +37,14 @@ async function loadLatest() {
   error.value = ''
   try {
     const res = await loadPage(0)
-    lines.value = res.lines.reverse() // 最新在前（数组头部）
+    // 过滤掉末尾空行（Split 会产出多余空串）
+    const clean = res.lines.filter((l: string) => l !== '')
+    lines.value = clean.reverse() // 最新在前（数组头部）
     totalLines.value = res.total
     currentOffset.value = res.returned
+    currentPageIndex.value = 0
     hasMore.value = res.has_more
+    console.log(`[LogDrawer] ✅ loadLatest done: total=${totalLines.value}, loaded=${lines.value.length}, offset=${currentOffset.value}, hasMore=${hasMore.value}`)
     await nextTick()
     scrollToBottom()
   } catch (e: any) {
@@ -49,25 +58,28 @@ async function loadLatest() {
 async function loadOlder() {
   if (loadingMore.value || !hasMore.value) return
   loadingMore.value = true
+  console.log(`[LogDrawer] ⬆ loadOlder start: offset=${currentOffset.value}, pageIndex=${currentPageIndex.value}, currentLines=${lines.value.length}`)
   try {
     const res = await loadPage(currentOffset.value)
     if (res.returned > 0) {
-      // 保存当前可视区域第一条的位置
       const container = logContainer.value
       const prevScrollHeight = container ? container.scrollHeight : 0
 
-      // 新数据 reverse 后 unshift 到头部（保持时间顺序：旧→新）
       const olderLines = res.lines.reverse()
       lines.value = [...olderLines, ...lines.value]
 
       currentOffset.value += res.returned
+      currentPageIndex.value++
       hasMore.value = res.has_more
 
-      // 恢复滚动位置（让用户感觉内容在上方自然延伸）
+      console.log(`[LogDrawer] ⬆ loadOlder done: added=${res.returned}, totalLines=${lines.value.length}, newOffset=${currentOffset.value}, newPageIndex=${currentPageIndex.value}, hasMore=${hasMore.value}`)
+
       await nextTick()
       if (container) {
         container.scrollTop = container.scrollHeight - prevScrollHeight
       }
+    } else {
+      console.log(`[LogDrawer] ⬆ loadOlder: no more data (returned=0)`)
     }
   } catch (e: any) {
     console.error('[LogDrawer] loadOlder error:', e)
@@ -86,25 +98,68 @@ function scrollToBottom() {
 // 滚动事件：接近顶部时加载更多
 function onScroll(e: Event) {
   const el = e.target as HTMLElement
-  // 距离顶部 < 100px 时触发加载
+  console.log(`[LogDrawer] 📜 onScroll: scrollTop=${el.scrollTop}, scrollHeight=${el.scrollHeight}, clientHeight=${el.clientHeight}, loadingMore=${loadingMore.value}, hasMore=${hasMore.value}`)
   if (el.scrollTop < 100 && !loadingMore.value && hasMore.value) {
     loadOlder()
   }
 }
 
-// 打开时加载
+// 打开/关闭 → 启动/停止定时器
 watch(visible, async (v) => {
   if (v) {
     lines.value = []
     currentOffset.value = 0
+    currentPageIndex.value = 0
     hasMore.value = true
     await loadLatest()
+    // 每10秒自动刷新 — 只追加新行到头部，不丢弃已加载的分页数据
+    refreshTimer = setInterval(async () => {
+      if (!visible.value || loading.value) return
+
+      try {
+        const res = await loadPage(0)
+        const newLines = res.lines.filter((l: string) => l !== '').reverse()
+
+        if (newLines.length > 0 && lines.value.length > 0 && newLines[0] !== lines.value[0]) {
+          // 找出真正新增的行数（从头部开始对比）
+          let newCount = 0
+          for (let i = 0; i < newLines.length; i++) {
+            if (i >= lines.value.length || newLines[i] !== lines.value[i]) {
+              newCount = newLines.length - i
+              break
+            }
+          }
+
+          if (newCount > 0) {
+            const trulyNew = newLines.slice(0, newCount)
+            lines.value = [...trulyNew, ...lines.value]
+            currentOffset.value += newCount
+            currentPageIndex.value = 0
+            hasMore.value = res.has_more
+            totalLines.value = res.total
+
+            console.log(`[LogDrawer] 🔄 auto-refresh: appended ${newCount} new lines at top, total=${lines.value.length}, offset=${currentOffset.value}`)
+          } else {
+            console.log(`[LogDrawer] 🔄 auto-refresh: new data but 0 new lines (unexpected)`)
+          }
+        }
+      } catch (_) { /* ignore refresh errors */ }
+    }, 10000)
   } else {
     fullscreen.value = false
+    if (refreshTimer) {
+      clearInterval(refreshTimer)
+      refreshTimer = null
+    }
   }
 })
 
-onBeforeUnmount(() => {})
+onBeforeUnmount(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+})
 
 // 清空日志
 const showConfirmClear = ref(false)
@@ -115,6 +170,7 @@ async function confirmClear() {
     lines.value = []
     totalLines.value = 0
     currentOffset.value = 0
+    currentPageIndex.value = 0
     hasMore.value = false
   } catch (e: any) {
     error.value = e.message || String(e)
@@ -136,8 +192,11 @@ defineExpose({ visible, open, close })
         <div class="drawer-toolbar">
           <span class="toolbar-title">📋 日志终端</span>
           <span class="toolbar-info" v-if="totalLines">{{ totalLines }} 行</span>
-          <span class="toolbar-info" v-if="currentOffset > 0">已载 {{ currentOffset }}</span>
+          <span class="toolbar-info" v-if="currentOffset > 0">第{{ currentPageIndex }}页</span>
           <div class="toolbar-actions">
+            <button class="toolbar-btn" @click="loadOlder" :disabled="!hasMore || loadingMore" title="加载上一页">
+              ◀ 上一页
+            </button>
             <button class="toolbar-btn" @click="fullscreen = !fullscreen" :title="fullscreen ? '退出全屏' : '全屏'">
               {{ fullscreen ? '⤓' : '⤢' }}
             </button>
@@ -207,13 +266,15 @@ defineExpose({ visible, open, close })
 .toolbar-info { font-size: 11px; color: #6e7681; font-family: monospace; }
 .toolbar-actions { margin-left: auto; display: flex; gap: 4px; }
 .toolbar-btn {
-  width: 30px; height: 28px;
+  height: 28px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 14px; color: #8b949e;
+  font-size: 12px; color: #8b949e;
   background: none; border: 1px solid #30363d; border-radius: 5px;
-  cursor: pointer; transition: all .15s;
+  cursor: pointer; transition: all .15s; white-space: nowrap;
+  padding: 0 10px;
 }
 .toolbar-btn:hover { background: #21262d; color: #c9d1d9; }
+.toolbar-btn:disabled { opacity: .4; cursor: default; }
 .toolbar-btn.danger:hover { background: rgba(248,81,73,.15); color: #f85149; border-color: #f85149; }
 .toolbar-btn.close:hover { background: rgba(248,81,73,.2); color: #fff; }
 

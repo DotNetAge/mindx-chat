@@ -58,6 +58,15 @@ export const useChatStore = defineStore('chat', {
     // GoReact 发送顺序: tool_use_delta → tool_exec_start → tool_exec_end
     // 此缓存用于在 start 到达前暂存 delta 数据，不做任何协议转换
     pendingToolUseDelta: null as { index: number; id: string; name: string; arguments: string } | null,
+
+    // File modification tracking
+    pendingFileModifications: [] as Array<{
+      path: string
+      diff: string
+      additions: number
+      deletions: number
+      isNew: boolean
+    }>,
   }),
 
   getters: {
@@ -85,7 +94,11 @@ export const useChatStore = defineStore('chat', {
 
     actionMessages(): ChatMessage[] {
       return this.currentMessages.filter(m => m.eventType === 'tool_exec' || m.eventType === 'tool_exec_start' || m.eventType === 'tool_exec_end')
-    }
+    },
+
+    hasPendingFiles(): boolean {
+      return this.pendingFileModifications.length > 0
+    },
   },
 
   actions: {
@@ -141,19 +154,41 @@ export const useChatStore = defineStore('chat', {
       const restored: ChatMessage[] = []
       // 按 tool_call_id 索引待匹配的工具调用，支持一个 assistant 消息包含多个 tool_calls
       const pendingToolCalls = new Map<string, { name: string; args: any }>()
+      // 记录每个 tool_call 发出时的 timestamp（秒），用于估算执行时长
+      const toolCallStartTimestamps = new Map<string, number>()
+      // 前一条消息的 timestamp，用于估算思考时长
+      let prevTimestamp = 0
 
       for (let idx = 0; idx < serverMessages.length; idx++) {
         const msg = serverMessages[idx]
+        const msgTimestamp = typeof msg.timestamp === 'number' ? msg.timestamp : 0
 
         // 先收集所有 tool_calls（一个 assistant 可能并发调用多个工具）
-        if (msg.role === 'assistant' && msg.tool_calls?.length > 0) {
-          for (const tc of msg.tool_calls) {
+        const toolCalls = msg.tool_calls
+        if (msg.role === 'assistant' && toolCalls && toolCalls.length > 0) {
+          // 同一消息可能同时有 reasoning_content 和 tool_calls，先恢复思想流
+          if (msg.reasoning_content && msg.reasoning_content.trim()) {
+            const thinkDurationMs = prevTimestamp > 0 ? Math.round((msgTimestamp - prevTimestamp) * 1000) : 0
+            restored.push({
+              id: `restored_thinking_${idx}_${msg.timestamp}`,
+              role: 'assistant',
+              content: msg.reasoning_content,
+              eventType: 'thinking_done',
+              eventTitle: '💭 思考过程',
+              metadata: { complete: true, duration_ms: thinkDurationMs },
+              timestamp: new Date(msg.timestamp).toISOString(),
+              sessionId
+            })
+          }
+          for (const tc of toolCalls) {
             // GoReact 扁平格式 { id, name, arguments }
             pendingToolCalls.set(tc.id, {
               name: tc.name || '工具',
               args: tc.arguments ? (() => { try { return JSON.parse(tc.arguments) } catch { return tc.arguments } })() : null
             })
+            toolCallStartTimestamps.set(tc.id, msgTimestamp)
           }
+          prevTimestamp = msgTimestamp
           continue
         }
 
@@ -162,6 +197,8 @@ export const useChatStore = defineStore('chat', {
           const match = pendingToolCalls.get(msg.tool_call_id || '')
           const toolName = match?.name || '工具'
           const toolArgs = match?.args || null
+          const startTs = toolCallStartTimestamps.get(msg.tool_call_id || '')
+          const durationMs = startTs ? Math.round((msgTimestamp - startTs) * 1000) : 0
           restored.push({
             id: `restored_tool_${idx}_${msg.timestamp}`,
             role: 'tool',
@@ -170,7 +207,7 @@ export const useChatStore = defineStore('chat', {
             eventTitle: `${toolName}`,
             eventData: {
               start: { tool_name: toolName, params: toolArgs },
-              end: { tool_name: toolName, success: true, result: msg.content || '' },
+              end: { tool_name: toolName, success: true, result: msg.content || '', duration_ms: durationMs },
               status: 'done'
             },
             metadata: { phase: 'complete', success: true, tool_call_id: msg.tool_call_id },
@@ -178,6 +215,7 @@ export const useChatStore = defineStore('chat', {
             sessionId
           })
           pendingToolCalls.delete(msg.tool_call_id || '')
+          prevTimestamp = msgTimestamp
           continue
         }
 
@@ -194,13 +232,14 @@ export const useChatStore = defineStore('chat', {
           case 'assistant': {
             // 先恢复思想流（reasoning_content 是 assistant 消息内嵌字段，非独立 role）
             if (msg.reasoning_content && msg.reasoning_content.trim()) {
+              const thinkDurationMs = prevTimestamp > 0 ? Math.round((msgTimestamp - prevTimestamp) * 1000) : 0
               restored.push({
                 id: `restored_thinking_${idx}_${msg.timestamp}`,
                 role: 'assistant',       // 保持原始 role，不造 thinking
                 content: msg.reasoning_content,
                 eventType: 'thinking_done',
                 eventTitle: '💭 思考过程',
-                metadata: { complete: true },
+                metadata: { complete: true, duration_ms: thinkDurationMs },
                 timestamp: new Date(msg.timestamp).toISOString(),
                 sessionId
               })
@@ -225,6 +264,7 @@ export const useChatStore = defineStore('chat', {
           timestamp: new Date(msg.timestamp).toISOString(),
           sessionId
         })
+        prevTimestamp = msgTimestamp
       }
 
       console.log('[MindX Chat] restoreSessionMessages:', {
@@ -257,6 +297,7 @@ export const useChatStore = defineStore('chat', {
       this.currentThinking = ''
       this.currentAction = null
       this.executionStats = null
+      this.pendingFileModifications = []
     },
 
     sendMessage(text: string) {
@@ -368,6 +409,9 @@ export const useChatStore = defineStore('chat', {
         case 'cycle_end':
           // Internal system event, do not display in message history
           break
+        case 'file_modified':
+          this.handleFileModified(data)
+          break
         case 'task_summary':
           this.handleTaskSummary(data, envelope)
           break
@@ -423,14 +467,27 @@ export const useChatStore = defineStore('chat', {
       const targetSessionId = sessionStore.activeSessionId
       const messages = this.messagesBySession[targetSessionId]
 
-      const lastThinkingMsg = messages?.findLast(m =>
+      const content = typeof data === 'string' ? data : (data?.reasoning_content || data?.content || data?.text || '')
+
+      let thinkingMsg = messages?.findLast(m =>
         m.eventType === 'thinking_delta' || (m.eventType === 'thinking_done' && !m.metadata?.complete)
       )
 
-      if (lastThinkingMsg) {
-        // 保留流式积累的思考内容，不覆盖为后端的固定文本
-        lastThinkingMsg.eventType = 'thinking_done'
-        lastThinkingMsg.metadata = { ...lastThinkingMsg.metadata, complete: true }
+      if (thinkingMsg) {
+        thinkingMsg.eventType = 'thinking_done'
+        if (!thinkingMsg.content && content) {
+          thinkingMsg.content = content
+        }
+        thinkingMsg.metadata = { ...thinkingMsg.metadata, complete: true }
+      } else if (targetSessionId && content) {
+        // 仅有 thinking_done 无 thinking_delta 时直接创建消息
+        thinkingMsg = this.addMessage(targetSessionId, {
+          role: 'assistant',
+          content,
+          eventType: 'thinking_done',
+          eventTitle: '💭 思考过程',
+          metadata: { complete: true }
+        })
       }
 
       this.currentThinking = ''
@@ -530,6 +587,41 @@ export const useChatStore = defineStore('chat', {
         toolMsg.eventData.status = data?.success !== false ? 'done' : 'failed'
 
         this.currentAction = null
+      }
+    },
+
+    // --- FileModified: 工具执行后文件变更通知 ---
+    // 注意：后端 RespFileModified 发射的是 {files: []string}（纯文件路径数组）
+    // 此函数将路径数组转为前端需要的对象格式
+    handleFileModified(data: any, opts?: { session_id?: string; title?: string }) {
+      const sessionStore = useSessionStore()
+      const targetSessionId = opts?.session_id || sessionStore.activeSessionId
+      const rawFiles: any[] = data?.files || []
+
+      // 兼容：后端发射 []string，前端需要 Array<{path, diff, additions, deletions, isNew}>
+      const files = rawFiles.map((f: any) =>
+        typeof f === 'string'
+          ? { path: f, diff: '', additions: 0, deletions: 0, isNew: false }
+          : {
+              path: f.path || '',
+              diff: f.diff || '',
+              additions: f.additions || 0,
+              deletions: f.deletions || 0,
+              isNew: f.isNew || false
+            }
+      )
+
+      this.pendingFileModifications = files
+
+      for (const file of files) {
+        this.addMessage(targetSessionId, {
+          role: 'system',
+          content: '',
+          eventType: 'file_modified',
+          eventTitle: file.path,
+          eventData: file,
+          metadata: { phase: 'modified' }
+        })
       }
     },
 

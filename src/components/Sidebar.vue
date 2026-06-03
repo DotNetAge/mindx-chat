@@ -41,13 +41,28 @@ const showConnectionDialog = ref(false)
 const setupSelectedPath = ref('')
 const showTokenReport = ref(false)
 
+// --- 用户偏好设定（来自服务端 user.config）---
+const userPreferences = ref<{ lastAgent: string; lastSessionId: string }>({
+  lastAgent: '',
+  lastSessionId: ''
+})
+let autoSelectedAgent = false
+let autoSelectedSession = false
+
 function shortenPath(absPath: string): string {
   if (!absPath) return ''
+  // 将 /Users/xxx 替换为 ~
+  let path = absPath
   const m = absPath.match(/^\/Users\/[^/]+/)
   if (m) {
-    return '~' + absPath.slice(m[0].length)
+    path = '~' + absPath.slice(m[0].length)
   }
-  return absPath
+  // 如果 split 深度 > 3，只保留最后两级
+  const parts = path.split('/')
+  if (parts.length > 3) {
+    return '.../' + parts.slice(-2).join('/')
+  }
+  return path
 }
 
 const displaySelectedPath = computed(() => shortenPath(setupSelectedPath.value))
@@ -82,7 +97,8 @@ const sessions = computed(() => {
     .map(s => ({
       id: s.session_id,
       title: s.title || '<空>',
-      subtitle: s.project_dir || '',
+      subtitle: shortenPath(s.project_dir || ''),
+      subtitleFull: s.project_dir || '',
       time: formatTime(s.updated_at),
       isActive: s.session_id === sessionStore.activeSessionId
     }))
@@ -120,17 +136,32 @@ function selectAgent(agentName: string) {
 async function loadSessionsForAgent(agentName?: string) {
   try {
     const serverSessions = await connectionStore.fetchSessions(agentName)
+    console.log(`[MindX] 📥 serverSessions (raw):`, JSON.parse(JSON.stringify(serverSessions)))
     const mapped = serverSessions.map(s => ({
       session_id: s.session_id,
       agent_name: s.agent_name || agentName || '',
       title: s.title || '<空>',  // 服务端已从 meta.json 返回 title（首条 user 消息）
       created_at: s.created_at,
       updated_at: s.last_activity_at,
-      message_count: s.messages?.length || 0,
+      message_count: 0,  // messages 通过 session.get 动态加载，列表不返回
       project_dir: s.project_dir
     }))
+    console.log(`[MindX] 📋 mapped sessions:`, JSON.parse(JSON.stringify(mapped)))
 
     sessionStore.syncServerSessions(mapped, true)
+
+    // 自动选择偏好中的 session 并加载消息历史
+    if (autoSelectedAgent && !autoSelectedSession && userPreferences.value.lastSessionId) {
+      const matched = serverSessions.find(s => s.session_id === userPreferences.value.lastSessionId)
+      if (matched) {
+        autoSelectedSession = true
+        console.log(`[MindX] 🎯 Auto-selecting session from preferences: "${userPreferences.value.lastSessionId}"`)
+        await selectSession(matched.session_id)
+        return
+      } else {
+        console.log(`[MindX] ⚠️ last_session_id "${userPreferences.value.lastSessionId}" not found in session list`)
+      }
+    }
 
     if (serverSessions.length > 0 && !sessionStore.activeSessionId) {
       sessionStore.setActiveSession(serverSessions[0].session_id)
@@ -217,13 +248,18 @@ async function handleDeleteSession(sessionId: string, event: Event) {
       }
     )
 
-    if (!connectionStore.isOfflineMode) {
-      await connectionStore.deleteSession(sessionId)
+    // 服务端删除可能失败（网络/客户端未初始化等），但无论结果如何都要从本地 store 中移除
+    try {
+      if (!connectionStore.isOfflineMode) {
+        await connectionStore.deleteSession(sessionId)
+      }
+    } catch (serverErr) {
+      console.warn('[MindX] 服务端删除失败，继续从本地移除:', serverErr)
     }
     sessionStore.deleteSession(sessionId)
   } catch (err: any) {
     if (err !== 'cancel' && err !== 'close') {
-      console.error('[MindX] Failed to delete session:', err)
+      console.error('[MindX] 删除会话失败:', err)
     }
   }
 }
@@ -233,13 +269,31 @@ onMounted(() => {
 
 watch(() => connectionStore.state, async (newState, oldState) => {
   if (newState === 'connected' && oldState !== 'connected') {
+    // 重置自动选择标记，便于重新连接时再次触发
+    autoSelectedAgent = false
+    autoSelectedSession = false
+
     try {
-      const [agents, models] = await Promise.all([
+      const [agents, models, , userConfig] = await Promise.all([
         connectionStore.fetchAgents(),
         connectionStore.fetchModels(),
-        connectionStore.fetchProviders()
+        connectionStore.fetchProviders(),
+        connectionStore.fetchUserConfig()
       ])
 
+      // 1. 先保存用户偏好设定（在 setAgents 之前，确保 watcher 触发时已就绪）
+      if (userConfig.last_agent || userConfig.last_session_id) {
+        console.log(`[MindX] 📋 User preferences from config:`, {
+          last_agent: userConfig.last_agent,
+          last_session_id: userConfig.last_session_id
+        })
+        userPreferences.value = {
+          lastAgent: userConfig.last_agent || '',
+          lastSessionId: userConfig.last_session_id || ''
+        }
+      }
+
+      // 2. 填充 agents / models 到 store（这会触发 agentsList computed 更新）
       connectionStore.setAgents(agents.map(a => ({
         name: a.name,
         role: a.role || '',
@@ -256,6 +310,20 @@ watch(() => connectionStore.state, async (newState, oldState) => {
         provider: m.provider,
         enabled: m.enabled !== false
       })))
+
+      // 3. 显式触发 Agent 自动选择（不依赖 watcher 时序）
+      if (!autoSelectedAgent && userPreferences.value.lastAgent) {
+        const hasAgent = agents.find(a => a.name === userPreferences.value.lastAgent)
+        if (hasAgent) {
+          autoSelectedAgent = true
+          console.log(`[MindX] 🎯 Auto-selecting agent from preferences: "${userPreferences.value.lastAgent}"`)
+          connectionStore.setCurrentAgent(hasAgent.name)
+          connectionStore.setLastAgent(hasAgent.name)
+
+          // 4. 加载 sessions 并自动选择会话（await 确保完成后再继续）
+          await loadSessionsForAgent(hasAgent.name)
+        }
+      }
 
       console.log(`[MindX] ✅ Loaded ${agents.length} agents and ${models.length} models`)
     } catch (err) {
@@ -417,7 +485,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
           <transition name="fade">
             <div v-if="!isCollapsed" class="session-content">
               <h3 class="session-title">{{ session.title }}</h3>
-              <p class="session-subtitle">{{ session.subtitle }}</p>
+              <p class="session-subtitle" :title="session.subtitleFull || session.subtitle">{{ session.subtitle }}</p>
             </div>
           </transition>
           

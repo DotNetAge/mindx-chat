@@ -56,7 +56,6 @@ class MindXWebSocketClient {
       this.ws = new WebSocket(wsUrl)
 
       this.ws.onopen = () => {
-        console.log('[MindX WS] ✅ WebSocket onopen fired - Connected to', this.config.url)
         this.state.value = 'connected'
         this.reconnectAttempts = 0
         this.startHeartbeat()
@@ -67,19 +66,16 @@ class MindXWebSocketClient {
       }
 
       this.ws.onclose = (event) => {
-        console.log('[MindX WS] ❌ WebSocket onclose fired', { code: event.code, reason: event.reason })
         this.stopHeartbeat()
         this.state.value = 'disconnected'
         this.handleReconnect()
       }
 
       this.ws.onerror = (error) => {
-        console.error('[MindX WS] ❌ WebSocket onerror fired', error)
         this.lastError.value = 'WebSocket connection error'
         this.state.value = 'error'
       }
     } catch (error) {
-      console.error('[MindX WS] Failed to connect:', error)
       this.lastError.value = String(error)
       this.state.value = 'error'
       throw error
@@ -147,7 +143,6 @@ class MindXWebSocketClient {
 
   notify(method: string, params?: any): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn('[MindX WS] Cannot send notification: not connected')
       return false
     }
 
@@ -169,13 +164,10 @@ class MindXWebSocketClient {
   }
 
   on(method: string, handler: MessageHandler): () => void {
-    console.log('[MindX WS] 📝 Registering handler for:', method)
     if (!this.handlers.has(method)) {
       this.handlers.set(method, new Set())
-      console.log('[MindX WS] ✅ Created new handler set for:', method)
     }
     this.handlers.get(method)!.add(handler)
-    console.log('[MindX WS] ✅ Handler added, total handlers for', method, ':', this.handlers.get(method)!.size)
 
     return () => {
       this.handlers.get(method)?.delete(handler)
@@ -209,41 +201,29 @@ class MindXWebSocketClient {
       this.ws.send(data)
       return true
     } catch (error) {
-      console.error('[MindX WS] Send failed:', error)
       return false
     }
   }
 
   private handleMessage(rawData: string): void {
-    console.log('[MindX WS] 📨 Received raw message:', rawData.substring(0, 500))
-
     try {
       const lines = rawData.split('\n').filter(line => line.trim())
 
       for (const line of lines) {
         try {
           const message = JSON.parse(line)
-          console.log('[MindX WS] 📦 Parsed JSON message:', {
-            hasId: !!message.id,
-            hasMethod: !!message.method,
-            hasResult: !!message.result,
-            hasError: !!message.error,
-            method: message.method
-          })
 
           if (message.id !== undefined && (message.result !== undefined || message.error !== undefined)) {
             this.handleResponse(message as JsonRpcResponse)
           } else if (message.method) {
             this.handleNotification(message as JsonRpcNotification)
-          } else {
-            console.warn('[MindX WS] Unknown message format:', message)
           }
         } catch (e) {
-          console.error('[MindX WS] Failed to parse JSON line:', line.substring(0, 200), e)
+          console.error('[MindX] Failed to parse JSON line:', line.substring(0, 200), e)
         }
       }
     } catch (error) {
-      console.error('[MindX WS] Failed to parse message:', error, rawData)
+      console.error('[MindX] Failed to parse message:', error, rawData)
     }
   }
 
@@ -264,29 +244,19 @@ class MindXWebSocketClient {
 
   private handleNotification(notification: JsonRpcNotification): void {
     const method = notification.method
-    console.log('[MindX WS] 📩 handleNotification called:', {
-      method,
-      paramsType: typeof notification.params,
-      paramsValue: notification.params,
-      params: notification.params
-    })
 
     let paramsObj: any
     if (typeof notification.params === 'string') {
-      console.log('[MindX WS] 🔄 Params is string, parsing JSON...')
       try {
         paramsObj = JSON.parse(notification.params)
-        console.log('[MindX WS] ✅ Parsed params:', paramsObj)
       } catch (e) {
-        console.error('[MindX WS] ❌ Failed to parse params:', e)
+        console.error('[MindX] Failed to parse notification params:', e)
         return
       }
     } else if (notification.params && typeof notification.params === 'object') {
       paramsObj = notification.params
-      console.log('[MindX WS] ✅ Params is already object:', paramsObj)
     } else {
       paramsObj = {}
-      console.log('[MindX WS] ⚠️ No params, using empty object')
     }
 
     const envelope = paramsObj as {
@@ -305,22 +275,15 @@ class MindXWebSocketClient {
       meta: envelope.meta
     }
 
-    console.log('[MindX WS] 📦 Event envelope:', eventEnvelope)
-    console.log('[MindX WS] 🔍 Looking for handlers for method:', method, 'and type:', eventEnvelope.type)
-    console.log('[MindX WS] 📋 Registered handlers:', Array.from(this.handlers.keys()))
-
     const handlers = this.handlers.get(method)
     if (handlers) {
-      console.log('[MindX WS] ✅ Found handlers for method:', method, 'count:', handlers.size)
       handlers.forEach(handler => {
         try {
           handler(eventEnvelope)
         } catch (error) {
-          console.error(`[MindX WS] ❌ Handler error for ${method}:`, error)
+          console.error(`[MindX] Handler error for ${method}:`, error)
         }
       })
-    } else {
-      console.log('[MindX WS] ❌ No handlers for method:', method)
     }
 
     // 仅当 type 与 method 不同时才做二次分发，避免同一事件被处理两次
@@ -328,22 +291,18 @@ class MindXWebSocketClient {
     if (eventEnvelope.type && eventEnvelope.type !== method) {
       const typedHandlers = this.handlers.get(eventEnvelope.type)
       if (typedHandlers) {
-        console.log('[MindX WS] ✅ Found typed handlers for:', eventEnvelope.type, 'count:', typedHandlers.size)
         typedHandlers.forEach(handler => {
           try {
             handler(eventEnvelope)
           } catch (error) {
-            console.error(`[MindX WS] ❌ Typed handler error for ${eventEnvelope.type}:`, error)
+            console.error(`[MindX] Typed handler error for ${eventEnvelope.type}:`, error)
           }
         })
-      } else {
-        console.log('[MindX WS] ❌ No typed handlers for:', eventEnvelope.type)
       }
     }
 
     if (envelope.session_id && envelope.session_id !== this.sessionId.value) {
       this.sessionId.value = envelope.session_id
-      console.log('[MindX WS] 🔄 Updated sessionId to:', envelope.session_id)
     }
   }
 
@@ -368,7 +327,6 @@ class MindXWebSocketClient {
     const maxAttempts = this.config.maxReconnectAttempts || 10
 
     if (this.reconnectAttempts >= maxAttempts) {
-      console.warn(`[MindX WS] Max reconnect attempts (${maxAttempts}) reached`)
       this.lastError.value = `Failed to reconnect after ${maxAttempts} attempts`
       return
     }
@@ -380,8 +338,6 @@ class MindXWebSocketClient {
       this.config.reconnectInterval! * Math.pow(1.5, this.reconnectAttempts - 1),
       30000
     )
-
-    console.log(`[MindX WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${maxAttempts})`)
 
     this.reconnectTimer = setTimeout(() => {
       this.connect()
@@ -417,7 +373,7 @@ export function createMindXClient(
   }
 
   clientInstance.connect().catch((err) => {
-    console.error('[MindX WS] Auto-connect failed:', err)
+    console.error('[MindX] Auto-connect failed:', err)
   })
 
   return clientInstance

@@ -41,7 +41,10 @@ export enum ResponseType {
   MaxTurnsReached = 'max_turns_reached',
   ContentDelta = 'content_delta',
   FSList = 'fs_list',
-  FSHome = 'fs_home'
+  FSHome = 'fs_home',
+
+  // File events
+  FileModified = 'file_modified',
 }
 
 export interface ResponseEnvelope {
@@ -125,9 +128,10 @@ export interface SessionMessage {
 export interface ServerSessionInfo {
   session_id: string;
   agent_name?: string;
+  title?: string;
   project_dir?: string;
   session_dir?: string;
-  messages: SessionMessage[];
+  messages?: SessionMessage[];
   last_activity_at: string;
   created_at: string;
 }
@@ -318,4 +322,18 @@ export interface ToolExecEndData {
   result: string
   error: string
   duration_ms: number
+}
+
+/** FileModified — 文件修改通知（在 ToolExecEnd 之后发送）
+ *  来源: daemon 在 ToolExecEnd 后发射 RespFileModified
+ *  触发时机: 工具执行成功后，文件被实际修改
+ */
+export interface FileModifiedData {
+  files: Array<{
+    path: string
+    diff: string
+    additions: number
+    deletions: number
+    isNew: boolean
+  }>
 }

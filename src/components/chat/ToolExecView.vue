@@ -157,7 +157,7 @@ const resultText = computed(() => {
 /* ===== 工具块 ===== */
 .tool-exec-block {
   width: 100%;
-  margin-left: 20px;
+  margin-left: 0px;
 }
 
 .exec-header {
@@ -239,7 +239,6 @@ const resultText = computed(() => {
 
 /* 按钮 */
 .detail-btn {
-  margin-left: auto;
   padding: 3px 10px;
   font-size: 11px;
   font-weight: 500;
@@ -253,7 +252,6 @@ const resultText = computed(() => {
 .detail-btn:hover { background: rgba(59, 130, 246, 0.18); }
 
 .error-btn {
-  margin-left: auto;
   padding: 3px 10px;
   font-size: 11px;
   font-weight: 500;

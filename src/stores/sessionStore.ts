@@ -89,11 +89,5 @@ export const useSessionStore = defineStore('session', {
       this.activeSessionId = ''
       this.isLoadedFromServer = false
     }
-  },
-
-  persist: {
-    key: 'mindx-sessions',
-    storage: localStorage,
-    paths: ['sessions', 'activeSessionId']
   }
 })
