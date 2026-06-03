@@ -9,6 +9,7 @@ import { createMindXClient, getMindXClient } from '../services/websocket'
 import type { ServerSessionInfo } from '../types/websocket'
 import DirectoryBrowser from './DirectoryBrowser.vue'
 import TokenUsageFooter from './TokenUsageFooter.vue'
+import TokenUsageReport from './TokenUsageReport.vue'
 
 const props = defineProps({
   isCollapsed: {
@@ -38,6 +39,18 @@ const searchQuery = ref('')
 const serverUrl = ref(connectionStore.serverUrl || 'ws://localhost:1314/ws')
 const showConnectionDialog = ref(false)
 const setupSelectedPath = ref('')
+const showTokenReport = ref(false)
+
+function shortenPath(absPath: string): string {
+  if (!absPath) return ''
+  const m = absPath.match(/^\/Users\/[^/]+/)
+  if (m) {
+    return '~' + absPath.slice(m[0].length)
+  }
+  return absPath
+}
+
+const displaySelectedPath = computed(() => shortenPath(setupSelectedPath.value))
 
 const connectionStatus = computed(() => {
   const state = connectionStore.state
@@ -68,8 +81,8 @@ const sessions = computed(() => {
     })
     .map(s => ({
       id: s.session_id,
-      title: s.title || `Session ${s.session_id?.substring(0, 8)}`,
-      subtitle: s.agent_name || `${s.message_count} 条消息`,
+      title: s.title || '<空>',
+      subtitle: s.project_dir || '',
       time: formatTime(s.updated_at),
       isActive: s.session_id === sessionStore.activeSessionId
     }))
@@ -104,28 +117,17 @@ function selectAgent(agentName: string) {
   loadSessionsForAgent(agentName)
 }
 
-function extractSessionTitle(sess: ServerSessionInfo): string {
-  if (!sess.messages || sess.messages.length === 0) {
-    return `Session ${sess.session_id?.substring(0, 8)}`
-  }
-  const firstUserMsg = sess.messages.find(m => m.role === 'user')
-  if (firstUserMsg?.content) {
-    const text = firstUserMsg.content.replace(/\n/g, ' ').trim()
-    return text.length > 40 ? text.substring(0, 37) + '...' : text
-  }
-  return `Session ${sess.session_id?.substring(0, 8)}`
-}
-
 async function loadSessionsForAgent(agentName?: string) {
   try {
     const serverSessions = await connectionStore.fetchSessions(agentName)
     const mapped = serverSessions.map(s => ({
       session_id: s.session_id,
       agent_name: s.agent_name || agentName || '',
-      title: extractSessionTitle(s),
+      title: s.title || '<空>',  // 服务端已从 meta.json 返回 title（首条 user 消息）
       created_at: s.created_at,
       updated_at: s.last_activity_at,
-      message_count: s.messages?.length || 0
+      message_count: s.messages?.length || 0,
+      project_dir: s.project_dir
     }))
 
     sessionStore.syncServerSessions(mapped, true)
@@ -182,7 +184,7 @@ function handleDisconnect() {
 
 function handleNewSession() {
   if (connectionStore.isConnected && connectionStore.currentAgent) {
-    setupSelectedPath.value = connectionStore.lastSessionId || ''
+    setupSelectedPath.value = ''
     emit('toggleSetupDialog')
   }
 }
@@ -234,7 +236,8 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     try {
       const [agents, models] = await Promise.all([
         connectionStore.fetchAgents(),
-        connectionStore.fetchModels()
+        connectionStore.fetchModels(),
+        connectionStore.fetchProviders()
       ])
 
       connectionStore.setAgents(agents.map(a => ({
@@ -543,7 +546,16 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 
             <!-- Danger Zone -->
             <div class="setting-section danger">
-              <h5>危险操作</h5>
+              <h5>数据与报表</h5>
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                @click="showTokenReport = true"
+                style="margin-bottom: 8px; width: 100%;"
+              >
+                📊 Token 用量报表
+              </el-button>
               <el-button 
                 size="small" 
                 type="danger" 
@@ -623,18 +635,18 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     </el-dialog>
 
     <el-dialog
-      v-model="props.showSetupDialog"
+      :model-value="props.showSetupDialog"
       title="选择工作目录"
       width="640px"
       :close-on-click-modal="false"
       class="setup-dialog"
       append-to-body
       destroy-on-close
-      @update:model-value="(v) => !v && emit('setupCancel')"
+      @update:model-value="(v) => { if (!v) emit('setupCancel') }"
     >
       <div class="setup-info" style="padding: 0 0 12px 0;">
         <p>Agent: <strong>{{ props.setupAgentName }}</strong></p>
-        <p class="setup-hint">请选择一个工作目录来创建新的会话</p>
+        <p class="setup-hint">每个会话需要对应一个目录存放工作文件，请先选择一个目录</p>
       </div>
       <DirectoryBrowser
         :visible="true"
@@ -644,7 +656,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       <template #footer>
         <div style="display: flex; align-items: center; gap: 12px; justify-content: space-between;">
           <div style="font-size: 12px; color: var(--text-secondary);">
-            当前: <code style="color: var(--accent-cyan); font-family: 'JetBrains Mono', monospace;">{{ setupSelectedPath || '/' }}</code>
+            当前: <code style="color: var(--accent-cyan); font-family: 'JetBrains Mono', monospace;">{{ displaySelectedPath || '(未选择)' }}</code>
           </div>
           <div style="display: flex; gap: 8px;">
             <el-button @click="emit('setupCancel')">取消</el-button>
@@ -656,7 +668,9 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       </template>
     </el-dialog>
 
-    <TokenUsageFooter v-show="!isCollapsed" />
+    <TokenUsageFooter v-show="!isCollapsed" @click="showTokenReport = true" style="cursor: pointer;" />
+
+    <TokenUsageReport v-if="showTokenReport" v-model:visible="showTokenReport" />
   </aside>
 </template>
 

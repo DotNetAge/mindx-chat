@@ -4,7 +4,7 @@ import ChatLayout from './components/ChatLayout.vue'
 import { useConnectionStore } from './stores/connectionStore'
 import { useSessionStore } from './stores/sessionStore'
 import { useChatStore } from './stores/chatStore'
-import { ElConfigProvider } from 'element-plus'
+import { ElConfigProvider, ElMessage } from 'element-plus'
 
 const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
@@ -46,7 +46,9 @@ async function initializeAfterConnect() {
       if (targetSession) {
         sessionStore.setActiveSession(targetSession.session_id)
         const detail = await connectionStore.fetchSessionDetail(targetSession.session_id)
-        chatStore.restoreSessionMessages(targetSession.session_id, detail.messages || [])
+        if (detail?.messages && Array.isArray(detail.messages) && detail.messages.length > 0) {
+          chatStore.restoreSessionMessages(targetSession.session_id, detail.messages)
+        }
         console.log(`[MindX] Resumed session: ${targetSession.session_id}`)
 
         if (detail?.meta?.project_dir) {
@@ -103,33 +105,48 @@ async function initializeAfterConnect() {
 }
 
 async function handleDirectoryConfirm() {
-  if (!selectedDirectory.value.trim() || !setupAgentName.value) return
+  if (!selectedDirectory.value.trim()) {
+    ElMessage.warning({ message: '请先选择一个工作目录', duration: 3000 })
+    return
+  }
+  if (!setupAgentName.value) {
+    ElMessage.error({ message: '未选择 Agent，请先选择一个 Agent', duration: 3000 })
+    return
+  }
 
   try {
-    const result = await connectionStore.createSession(setupAgentName.value, selectedDirectory.value)
-    const sessionId = result.session_id
+    const sessions = await connectionStore.fetchSessions(setupAgentName.value)
+    const existingSession = sessions.find(s => s.project_dir === selectedDirectory.value)
+
+    let sessionId
+    if (existingSession) {
+      sessionId = existingSession.session_id
+      console.log(`[MindX] Found existing session ${sessionId} for dir: ${selectedDirectory.value}`)
+    } else {
+      const result = await connectionStore.createSession(setupAgentName.value, selectedDirectory.value)
+      sessionId = result.session_id
+      console.log(`[MindX] Created new session ${sessionId} for agent: ${setupAgentName.value} with dir: ${selectedDirectory.value}`)
+    }
 
     connectionStore.setLastAgent(setupAgentName.value)
     connectionStore.setLastSession(sessionId)
     connectionStore.currentProjectDir = selectedDirectory.value
 
-    const newSession = {
+    sessionStore.addSession({
       session_id: sessionId,
       agent_name: setupAgentName.value,
-      title: `Session ${sessionId.substring(0, 8)}`,
+      title: setupAgentName.value,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       message_count: 0
-    }
-    sessionStore.syncServerSessions([newSession])
-
+    })
     sessionStore.setActiveSession(sessionId)
-    console.log(`[MindX] Created session: ${sessionId} for agent: ${setupAgentName.value} with dir: ${selectedDirectory.value}`)
 
     showSetupDialog.value = false
     pendingSetup.value = false
+    ElMessage.success({ message: `会话已${existingSession ? '恢复' : '创建'}`, duration: 2000 })
   } catch (e) {
-    console.error('[MindX] Failed to create session:', e)
+    console.error('[MindX] Failed to setup session:', e)
   }
 }
 
@@ -163,7 +180,7 @@ onMounted(async () => {
       @update:selected-directory="selectedDirectory = $event"
       @setup-confirm="handleDirectoryConfirm"
       @setup-cancel="handleDirectoryCancel"
-      @toggle-setup-dialog="showSetupDialog = !showSetupDialog"
+      @toggle-setup-dialog="showSetupDialog = !showSetupDialog; if(showSetupDialog) { setupAgentName = connectionStore.currentAgentName || connectionStore.currentAgent?.name || '' }"
       @update:show-model-picker="showModelPicker = $event"
     />
   </ElConfigProvider>

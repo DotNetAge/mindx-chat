@@ -7,6 +7,7 @@ export interface Session {
   created_at: string
   updated_at: string
   message_count: number
+  project_dir?: string
 }
 
 export const useSessionStore = defineStore('session', {

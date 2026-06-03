@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { getMindXClient, createMindXClient } from '../services/websocket'
 import { useChatStore } from './chatStore'
 import { useSessionStore } from './sessionStore'
-import type { AgentConfig, ModelConfig, SkillInfo, ServerSessionInfo, ConnectionState, FSEntry } from '../types/websocket'
+import type { AgentConfig, ModelConfig, SkillInfo, ServerSessionInfo, FSEntry, TokenUsageOverview, MonthlyUsageStats, ModelUsageSummary, ProviderInfo, ProviderCreateParams, ProviderUpdateParams, ModelCreateParams, ModelUpdateParams } from '../types/websocket'
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error'
 
@@ -39,7 +39,9 @@ export const useConnectionStore = defineStore('connection', {
     reconnectAttempts: 0 as number,
     maxReconnectAttempts: 10 as number,
     lastAgentName: '' as string,
-    lastSessionId: '' as string
+    lastSessionId: '' as string,
+    providerTitleMap: {} as Record<string, string>,
+    rawProviders: [] as ProviderInfo[]
   }),
 
   getters: {
@@ -385,7 +387,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('markdown', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
-        chatStore.handleMarkdownContent(envelope.data, {
+        chatStore.handleContentDelta(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title,
           meta: envelope.meta
@@ -400,38 +402,30 @@ export const useConnectionStore = defineStore('connection', {
         })
       })
 
-      client.on('text', (envelope) => {
+      // GoReact ToolUseDelta: LLM 流式输出工具调用参数
+      client.on('tool_use_delta', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
-        chatStore.handleToolArguments(envelope.data, {
+        chatStore.handleToolUseDelta(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
         })
       })
 
-      client.on('action_start', (envelope) => {
+      // GoReact ToolExecStart: 工具即将开始执行
+      client.on('tool_exec_start', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
-        chatStore.handleActionStart(envelope.data, {
+        chatStore.handleToolExecStart(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
         })
       })
 
-      client.on('action_progress', (envelope) => {
-        chatStore.handleActionProgress(envelope.data)
-      })
-
-      client.on('action_result', (envelope) => {
+      // GoReact ToolExecEnd: 工具执行结束（成功或失败）
+      client.on('tool_exec_end', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
-        chatStore.handleActionResult(envelope.data, {
+        chatStore.handleToolExecEnd(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
-        })
-      })
-
-      client.on('action_end', (envelope) => {
-        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
-        chatStore.handleActionEnd(envelope.data, {
-          session_id: targetSessionId
         })
       })
 
@@ -494,12 +488,7 @@ export const useConnectionStore = defineStore('connection', {
         }
       })
 
-      client.on('cycle_end', (envelope) => {
-        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
-        chatStore.handleCycleEnd(envelope.data, {
-          session_id: targetSessionId
-        })
-      })
+      // cycle_end: 内部系统事件，不需要处理（chatStore 中直接 break）
 
       client.on('task_summary', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
@@ -606,8 +595,10 @@ export const useConnectionStore = defineStore('connection', {
     async fetchFSList(path: string): Promise<FSEntry[]> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      const result = await client.call<{ entries: FSEntry[] }>('fs.list', { path })
-      return result.entries || []
+      const result = await client.call<any>('fs.list', { path })
+      if (Array.isArray(result)) return result
+      if (result && Array.isArray(result.entries)) return result.entries
+      return []
     },
 
     async readFile(path: string): Promise<string> {
@@ -615,6 +606,148 @@ export const useConnectionStore = defineStore('connection', {
       if (!client) throw new Error('WebSocket client not initialized')
       const result = await client.call<{ content: string }>('fs.read', { path })
       return result.content || ''
+    },
+
+    async fetchProviders(): Promise<void> {
+      const client = getMindXClient()
+      if (!client) return
+      try {
+        const result = await client.call<ProviderInfo[]>('provider.list', {})
+        if (Array.isArray(result)) {
+          this.rawProviders = result
+          const map: Record<string, string> = {}
+          for (const p of result) {
+            if (p.title && p.name) {
+              map[p.name] = p.title
+            }
+          }
+          this.providerTitleMap = map
+        }
+      } catch {
+        console.warn('[ConnectionStore] Failed to fetch providers, using fallback')
+      }
+    },
+
+    formatProviderTitle(provider: string): string {
+      if (this.providerTitleMap[provider]) return this.providerTitleMap[provider]
+      return provider.charAt(0).toUpperCase() + provider.slice(1)
+    },
+
+    // --- Provider CRUD ---
+
+    async createProvider(params: ProviderCreateParams): Promise<ProviderInfo> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<ProviderInfo>('provider.create', params)
+      if (result) {
+        this.providerTitleMap[result.name] = result.title
+        await this.fetchProviders()
+      }
+      return result
+    },
+
+    async updateProvider(params: ProviderUpdateParams): Promise<ProviderInfo> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<ProviderInfo>('provider.update', params)
+      if (result) {
+        await this.fetchProviders()
+      }
+      return result
+    },
+
+    async deleteProvider(name: string): Promise<{ message: string }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<{ message: string }>('provider.delete', { name })
+      delete this.providerTitleMap[name]
+      return result
+    },
+
+    // --- Model CRUD ---
+
+    async createModel(params: ModelCreateParams): Promise<ModelConfig> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call<ModelConfig>('model.create', params)
+    },
+
+    async updateModel(params: ModelUpdateParams): Promise<ModelConfig> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call<ModelConfig>('model.update', params)
+    },
+
+    async deleteModel(name: string): Promise<{ message: string }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call<{ message: string }>('model.delete', { name })
+    },
+
+    async fetchTokenUsageOverview(): Promise<TokenUsageOverview> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<TokenUsageOverview>('token.usage.overview', {})
+      return result || { current_month: this.emptyMonthlyStats(), available_models: [] }
+    },
+
+    async fetchTokenUsageMonthly(year: number, month: number): Promise<MonthlyUsageStats> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<MonthlyUsageStats>('token.usage.monthly', { year, month })
+      return result || this.emptyMonthlyStats(year, month)
+    },
+
+    async fetchTokenUsageByModel(model: string, year?: number, month?: number): Promise<ModelUsageSummary[]> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const params: { model: string; year?: number; month?: number } = { model }
+      if (year) params.year = year
+      if (month) params.month = month
+      const result = await client.call<ModelUsageSummary[]>('token.usage.by_model', params)
+      return Array.isArray(result) ? result : []
+    },
+
+    emptyMonthlyStats(year?: number, month?: number): MonthlyUsageStats {
+      const now = new Date()
+      return {
+        year: year || now.getFullYear(),
+        month: month || now.getMonth() + 1,
+        total_cost: 0,
+        total_tokens: 0,
+        total_requests: 0,
+        daily_usage: [],
+        model_breakdown: []
+      }
+    },
+
+    // --- Log RPC ---
+
+    async fetchLogs(offset = 0, limit = 10): Promise<{
+      lines: string[]; total: number; returned: number; offset: number; has_more: boolean; path: string
+    }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('log.read', { offset, limit })
+    },
+
+    async clearLogs(confirmed = false): Promise<{ status: string; path: string }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('log.clear', { confirmed })
+    },
+
+    // --- Memory RPC ---
+
+    async queryMemory(query: string, topK = 5): Promise<Array<{
+      id: string
+      content: string
+      score: number
+      created_at: string
+    }>> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('memory.query', { query, top_k: topK })
     }
   },
 

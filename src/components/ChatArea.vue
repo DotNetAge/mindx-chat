@@ -8,6 +8,15 @@ import { useConnectionStore } from '../stores/connectionStore'
 import MessageComponentRouter from './chat/MessageComponentRouter.vue'
 import ProviderModelPicker from './chat/ProviderModelPicker.vue'
 import ScheduleView from './chat/ScheduleView.vue'
+import LogDrawer from './LogDrawer.vue'
+import MemoryModal from './MemoryModal.vue'
+
+// 日志/记忆组件 ref
+const logDrawerRef = ref<InstanceType<typeof LogDrawer> | null>(null)
+const memoryModalRef = ref<InstanceType<typeof MemoryModal> | null>(null)
+
+function openLogDrawer() { logDrawerRef.value?.open() }
+function openMemoryModal() { memoryModalRef.value?.open() }
 
 const props = defineProps({
   isSidebarCollapsed: {
@@ -193,8 +202,8 @@ async function handlePermissionDeny(reason?: string) {
     <header class="chat-header">
       <div class="header-left">
         <div class="provider-info" v-if="connectionStore.isConnected && connectionStore.currentModel">
-          <span class="provider-label">{{ connectionStore.currentModel.provider }}</span>
-          <span class="model-label">{{ connectionStore.currentModel.name }}</span>
+          <span class="provider-label">{{ connectionStore.formatProviderTitle(connectionStore.currentModel.provider) }}</span>
+          <span class="model-label">{{ connectionStore.currentModel.title || connectionStore.currentModel.name }}</span>
           <el-button text circle class="gear-btn" @click="showProviderPicker = true">
             <el-icon><Setting /></el-icon>
           </el-button>
@@ -204,6 +213,10 @@ async function handlePermissionDeny(reason?: string) {
         </div>
       </div>
 
+      <div class="header-right">
+        <button class="nav-pill" @click="openLogDrawer" title="查看日志">日志</button>
+        <button class="nav-pill" @click="openMemoryModal" title="查询记忆">记忆</button>
+      </div>
     </header>
 
     <ProviderModelPicker
@@ -357,6 +370,10 @@ async function handlePermissionDeny(reason?: string) {
         </div>
       </div>
     </footer>
+
+    <!-- 全局组件：日志抽屉 + 记忆模态框 -->
+    <LogDrawer ref="logDrawerRef" />
+    <MemoryModal ref="memoryModalRef" />
   </main>
 </template>
 
@@ -397,6 +414,32 @@ async function handlePermissionDeny(reason?: string) {
 .header-left {
   display: flex;
   align-items: center;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nav-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(139, 92, 246, 0.06);
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all .2s ease;
+  white-space: nowrap;
+}
+.nav-pill:hover {
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.12);
+  border-color: rgba(139, 92, 246, 0.3);
 }
 
 .provider-info {

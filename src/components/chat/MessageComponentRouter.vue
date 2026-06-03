@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ThinkingView from './ThinkingView.vue'
-import ActionView from './ActionView.vue'
+import ToolExecView from './ToolExecView.vue'
 import ChoicesPanel from './ChoicesPanel.vue'
 import PermissionBar from './PermissionBar.vue'
 import OutputView from './OutputView.vue'
@@ -20,118 +20,51 @@ const props = defineProps({
 })
 
 const componentType = computed(() => {
-  const eventType = props.message.eventType
+  const et = props.message.eventType
+
+  if (et === 'thinking_delta' || et === 'thinking_done') return 'thinking'
+  if (et === 'content_delta' || et === 'markdown') return 'output'
+  if (et === 'tool_use_delta') return 'output'
+  // GoReact 工具执行事件（严格对齐）
+  if (et === 'tool_exec' || et === 'tool_exec_start' || et === 'tool_exec_end') return 'action'
+  if (et === 'subtask_spawned' || et === 'subtask_completed') return 'subtask'
+  if (et === 'final_answer' || et === 'task_summary') return 'output'
+  if (et === 'permission_request') return 'permission'
+  if (et === 'form' || et === 'clarify_needed') return 'form'
+  if (et === 'error' || et === 'permission_denied') return 'error'
+  if (et === 'agent_talk_start' || et === 'agent_talk_end') return 'agent_talk'
+  if (et === 'compaction') return 'compaction'
+  if (et === 'max_turns_reached') return 'max_turns'
+  if (et === 'cycle_end' || et === 'execution_summary') return 'system_event'
+
   const role = props.message.role
-
-  switch (eventType) {
-    case 'thinking_delta':
-    case 'thinking_done':
-      return 'thinking'
-
-    case 'content_delta':
-    case 'markdown':
-      return 'output'
-
-    case 'tool_use_delta':
-    case 'action_start':
-    case 'action_progress':
-    case 'action_result':
-    case 'action_end':
-      return 'action'
-
-    case 'subtask_spawned':
-    case 'subtask_completed':
-      return 'subtask'
-
-    case 'final_answer':
-    case 'task_summary':
-      return 'output'
-
-    case 'permission_request':
-      return 'permission'
-
-    case 'form':
-    case 'clarify_needed':
-      return 'form'
-
-    case 'error':
-    case 'permission_denied':
-      return 'error'
-
-    case 'agent_talk_start':
-    case 'agent_talk_end':
-      return 'agent_talk'
-
-    case 'compaction':
-      return 'compaction'
-
-    case 'max_turns_reached':
-      return 'max_turns'
-
-    case 'cycle_end':
-    case 'execution_summary':
-      return 'system_event'
-
-    default:
-      if (role === 'user') return 'user'
-      if (role === 'assistant') return 'output'
-      return 'default'
-  }
+  if (role === 'user') return 'user'
+  if (role === 'assistant') return 'output'
+  return 'default'
 })
 
 const thinkingData = computed(() => ({
   content: props.message.eventType === 'thinking_done' ? props.message.content : '',
   pending: props.message.eventType === 'thinking_delta' ? props.message.content : '',
   isActive: props.message.eventType === 'thinking_delta',
-  isComplete: props.message.eventType === 'thinking_done',
-  tokensIn: props.message.meta?.inputTokens || 0,
-  tokensOut: props.message.meta?.outputTokens || 0,
-  reasoning: props.message.eventData?.reasoning || '',
-  duration: props.message.eventData?.duration || 0
+  isComplete: props.message.eventType === 'thinking_done'
 }))
 
 const actionData = computed(() => {
-  const data = props.message.eventData || {}
+  const et = props.message.eventType
+  const ed = props.message.eventData || {}
 
-  if (props.message.eventType === 'action_start') {
+  // GoReact tool_exec 事件 — 原样透传，不包装
+  if (et === 'tool_exec' || et === 'tool_exec_start' || et === 'tool_exec_end') {
     return {
-      toolCount: data.tool_count || 0,
-      toolNames: data.tool_names || [],
-      totalPredictedTokens: data.total_predicted_tokens || 0,
-      isCompleted: false,
-      steps: [{
-        toolName: data.tool_name || data.toolName || props.message.eventTitle || '执行操作',
-        status: 'executing' as const,
-        params: data.params || data.arguments || data.args || null,
-        collapsed: false
-      }]
+      start: ed.start || null,       // ToolExecStartData | null
+      end:   ed.end || null,         // ToolExecEndData | null
+      status: ed.status || 'executing',
+      title: props.message.eventTitle || ''
     }
   }
 
-  if (props.message.eventType === 'action_end') {
-    return {
-      isCompleted: true,
-      successCount: data.success_count || 0,
-      failedCount: data.failed_count || 0,
-      totalDuration: data.duration || 0,
-      steps: []
-    }
-  }
-
-  if (props.message.eventType === 'action_result') {
-    return {
-      steps: [{
-        toolName: data.tool_name || 'Unknown',
-        status: data.success ? 'done' : 'failed',
-        estimatedTok: data.predicted_tokens || 0,
-        duration: data.duration_ms || 0,
-        params: data.params || {},
-        resultText: data.result || data.error || ''
-      }]
-    }
-  }
-
-  return { steps: [] }
+  return { start: null, end: null, status: 'executing', title: '' }
 })
 
 const permissionData = computed(() => ({
@@ -203,6 +136,7 @@ function formatContent(content: string): string {
     <!-- User Message -->
     <template v-if="componentType === 'user' && message.content">
       <div class="user-message">
+        <span class="user-indicator"></span>
         <p class="user-content">{{ message.content }}</p>
       </div>
     </template>
@@ -213,8 +147,8 @@ function formatContent(content: string): string {
       v-bind="thinkingData"
     />
 
-    <!-- Action Component -->
-    <ActionView 
+    <!-- ToolExec Component (GoReact tool_exec event) -->
+    <ToolExecView 
       v-else-if="componentType === 'action'"
       v-bind="actionData"
     />
@@ -287,11 +221,9 @@ function formatContent(content: string): string {
     <!-- Default / System Message -->
     <template v-else>
       <div class="system-message">
-        <div class="icon">{{ message.eventTitle || '📝' }}</div>
         <div class="body">
           <h5 v-if="message.eventTitle" class="title">{{ message.eventTitle }}</h5>
-          <div class="content" v-html="formatContent(message.content)"></div>
-          
+          <div class="content" v-html="formatContent(message.content)"></div>        
           <div class="event-data" v-if="message.eventData && Object.keys(message.eventData).length > 0">
             <pre><code>{{ JSON.stringify(message.eventData, null, 2) }}</code></pre>
           </div>
@@ -308,6 +240,18 @@ function formatContent(content: string): string {
 
 .user-message {
   width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.user-indicator {
+  width: 3px;
+  min-height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #8b5cf6, #a78bfa);
+  align-self: stretch;
+  flex-shrink: 0;
 }
 
 .user-content {
@@ -316,8 +260,7 @@ function formatContent(content: string): string {
   color: var(--text-primary);
   padding: 12px 18px;
   background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(139, 92, 246, 0.08));
-  border: 1px solid rgba(139, 92, 246, 0.25);
-  border-radius: 12px;
+  border-radius: 0 12px 12px 0;
   margin: 0;
   word-wrap: break-word;
 }

@@ -323,18 +323,22 @@ class MindXWebSocketClient {
       console.log('[MindX WS] ❌ No handlers for method:', method)
     }
 
-    const typedHandlers = this.handlers.get(eventEnvelope.type)
-    if (typedHandlers) {
-      console.log('[MindX WS] ✅ Found typed handlers for:', eventEnvelope.type, 'count:', typedHandlers.size)
-      typedHandlers.forEach(handler => {
-        try {
-          handler(eventEnvelope)
-        } catch (error) {
-          console.error(`[MindX WS] ❌ Typed handler error for ${eventEnvelope.type}:`, error)
-        }
-      })
-    } else {
-      console.log('[MindX WS] ❌ No typed handlers for:', eventEnvelope.type)
+    // 仅当 type 与 method 不同时才做二次分发，避免同一事件被处理两次
+    // 后端消息中 method 和 type 通常相同（如都是 "thinking_delta"）
+    if (eventEnvelope.type && eventEnvelope.type !== method) {
+      const typedHandlers = this.handlers.get(eventEnvelope.type)
+      if (typedHandlers) {
+        console.log('[MindX WS] ✅ Found typed handlers for:', eventEnvelope.type, 'count:', typedHandlers.size)
+        typedHandlers.forEach(handler => {
+          try {
+            handler(eventEnvelope)
+          } catch (error) {
+            console.error(`[MindX WS] ❌ Typed handler error for ${eventEnvelope.type}:`, error)
+          }
+        })
+      } else {
+        console.log('[MindX WS] ❌ No typed handlers for:', eventEnvelope.type)
+      }
     }
 
     if (envelope.session_id && envelope.session_id !== this.sessionId.value) {

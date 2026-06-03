@@ -4,7 +4,7 @@ import { useSessionStore } from './sessionStore'
 import { getMindXClient } from '../services/websocket'
 import type { SessionMessage } from '../types/websocket'
 
-export type MessageRole = 'user' | 'assistant' | 'system' | 'thinking' | 'action'
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
 
 export interface ChatMessage {
   id: string
@@ -40,7 +40,6 @@ export const useChatStore = defineStore('chat', {
     isProcessing: false as boolean,
     currentThinking: '' as string,
     currentAction: null as string | null,
-    actionProgress: null as { completed: number; total: number; status: string } | null,
     executionStats: null as ExecutionStats | null,
     lastError: null as string | null,
     processingTimer: null as ReturnType<typeof setTimeout> | null,
@@ -56,6 +55,9 @@ export const useChatStore = defineStore('chat', {
 
     pendingCorrelationId: null as string | null,
     pendingContentBySession: {} as Record<string, string>,
+    // GoReact 发送顺序: tool_use_delta → tool_exec_start → tool_exec_end
+    // 此缓存用于在 start 到达前暂存 delta 数据，不做任何协议转换
+    pendingToolUseDelta: null as { index: number; id: string; name: string; arguments: string } | null,
   }),
 
   getters: {
@@ -78,11 +80,11 @@ export const useChatStore = defineStore('chat', {
     },
 
     thinkingMessages(): ChatMessage[] {
-      return this.currentMessages.filter(m => m.role === 'thinking')
+      return this.currentMessages.filter(m => m.eventType === 'thinking_delta' || m.eventType === 'thinking_done')
     },
 
     actionMessages(): ChatMessage[] {
-      return this.currentMessages.filter(m => m.role === 'action')
+      return this.currentMessages.filter(m => m.eventType === 'tool_exec' || m.eventType === 'tool_exec_start' || m.eventType === 'tool_exec_end')
     }
   },
 
@@ -131,27 +133,105 @@ export const useChatStore = defineStore('chat', {
     },
 
     restoreSessionMessages(sessionId: string, serverMessages: SessionMessage[]) {
-      if (!this.messagesBySession[sessionId]) {
-        this.messagesBySession[sessionId] = []
+      if (!serverMessages || serverMessages.length === 0) {
+        console.log('[MindX Chat] restoreSessionMessages: 服务器无消息数据', { sessionId })
+        return
       }
 
-      const restored: ChatMessage[] = serverMessages.map((msg, idx) => {
-        let role: MessageRole = 'system'
-        switch (msg.role) {
-          case 'user': role = 'user'; break
-          case 'assistant': role = 'assistant'; break
-          case 'tool': role = 'action'; break
-          default: role = 'system'; break
+      const restored: ChatMessage[] = []
+      // 按 tool_call_id 索引待匹配的工具调用，支持一个 assistant 消息包含多个 tool_calls
+      const pendingToolCalls = new Map<string, { name: string; args: any }>()
+
+      for (let idx = 0; idx < serverMessages.length; idx++) {
+        const msg = serverMessages[idx]
+
+        // 先收集所有 tool_calls（一个 assistant 可能并发调用多个工具）
+        if (msg.role === 'assistant' && msg.tool_calls?.length > 0) {
+          for (const tc of msg.tool_calls) {
+            // GoReact 扁平格式 { id, name, arguments }
+            pendingToolCalls.set(tc.id, {
+              name: tc.name || '工具',
+              args: tc.arguments ? (() => { try { return JSON.parse(tc.arguments) } catch { return tc.arguments } })() : null
+            })
+          }
+          continue
         }
 
-        return {
+        // 通过 tool_call_id 精确匹配对应的工具调用
+        if (msg.role === 'tool') {
+          const match = pendingToolCalls.get(msg.tool_call_id || '')
+          const toolName = match?.name || '工具'
+          const toolArgs = match?.args || null
+          restored.push({
+            id: `restored_tool_${idx}_${msg.timestamp}`,
+            role: 'tool',
+            content: msg.content || '',
+            eventType: 'tool_exec',
+            eventTitle: `${toolName}`,
+            eventData: {
+              start: { tool_name: toolName, params: toolArgs },
+              end: { tool_name: toolName, success: true, result: msg.content || '' },
+              status: 'done'
+            },
+            metadata: { phase: 'complete', success: true, tool_call_id: msg.tool_call_id },
+            timestamp: new Date(msg.timestamp).toISOString(),
+            sessionId
+          })
+          pendingToolCalls.delete(msg.tool_call_id || '')
+          continue
+        }
+
+        let role: MessageRole = 'system'
+        let eventType: string | undefined
+        let eventTitle = ''
+        let eventData: any | undefined
+        let metadata: any | undefined
+
+        switch (msg.role) {
+          case 'user':
+            role = 'user'
+            break
+          case 'assistant': {
+            // 先恢复思想流（reasoning_content 是 assistant 消息内嵌字段，非独立 role）
+            if (msg.reasoning_content && msg.reasoning_content.trim()) {
+              restored.push({
+                id: `restored_thinking_${idx}_${msg.timestamp}`,
+                role: 'assistant',       // 保持原始 role，不造 thinking
+                content: msg.reasoning_content,
+                eventType: 'thinking_done',
+                eventTitle: '💭 思考过程',
+                metadata: { complete: true },
+                timestamp: new Date(msg.timestamp).toISOString(),
+                sessionId
+              })
+            }
+            // 再恢复正文
+            role = 'assistant'
+            break
+          }
+          default:
+            role = 'system'
+            break
+        }
+
+        restored.push({
           id: `restored_${idx}_${msg.timestamp}`,
           role,
           content: msg.content || '',
+          eventType,
+          eventTitle,
+          eventData,
+          metadata,
           timestamp: new Date(msg.timestamp).toISOString(),
-          sessionId,
-          metadata: msg.tool_calls ? { tool_calls: msg.tool_calls, tool_call_id: msg.tool_call_id } : undefined
-        }
+          sessionId
+        })
+      }
+
+      console.log('[MindX Chat] restoreSessionMessages:', {
+        sessionId,
+        totalServer: serverMessages.length,
+        totalRestored: restored.length,
+        actionCount: restored.filter(m => m.eventType === 'tool_exec' || m.eventType === 'tool_exec_start' || m.eventType === 'tool_exec_end').length
       })
 
       this.messagesBySession[sessionId] = restored
@@ -176,7 +256,6 @@ export const useChatStore = defineStore('chat', {
       this.isProcessing = false
       this.currentThinking = ''
       this.currentAction = null
-      this.actionProgress = null
       this.executionStats = null
     },
 
@@ -254,21 +333,15 @@ export const useChatStore = defineStore('chat', {
         case 'markdown':
           this.handleContentDelta(data)
           break
+        // GoReact 工具执行事件（严格对齐）
         case 'tool_use_delta':
-        case 'text':
           this.handleToolUseDelta(data, envelope?.title)
           break
-        case 'action_start':
-          this.handleActionStart(data, envelope?.title)
+        case 'tool_exec_start':
+          this.handleToolExecStart(data, envelope?.title)
           break
-        case 'action_progress':
-          this.handleActionProgress(data)
-          break
-        case 'action_result':
-          this.handleActionResult(data)
-          break
-        case 'action_end':
-          this.handleActionEnd(data)
+        case 'tool_exec_end':
+          this.handleToolExecEnd(data, envelope?.title)
           break
         case 'subtask_spawned':
           this.handleSubtaskSpawned(data)
@@ -319,55 +392,48 @@ export const useChatStore = defineStore('chat', {
     },
 
     handleThinkingDelta(data: any, sessionId?: string) {
-      console.log('[MindX Chat] 📝 handleThinkingDelta called:', { data: String(data).substring(0, 100), sessionId })
       this.currentThinking += data || ''
 
       const sessionStore = useSessionStore()
       const targetSessionId = sessionId || sessionStore.activeSessionId
-      console.log('[MindX Chat] targetSessionId:', targetSessionId)
       const messages = this.messagesBySession[targetSessionId]
 
       let thinkingMsg = messages?.find(m =>
-        m.role === 'thinking' && !m.metadata?.complete
+        m.eventType === 'thinking_delta' || (m.eventType === 'thinking_done' && !m.metadata?.complete)
       )
 
       if (!thinkingMsg && targetSessionId) {
         thinkingMsg = this.addMessage(targetSessionId, {
-          role: 'thinking',
+          role: 'assistant',
           content: '',
           eventType: 'thinking_delta',
-          eventTitle: '思考中...',
+          eventTitle: '💭 思考中',
           metadata: { complete: false }
         })
       }
 
       if (thinkingMsg) {
         thinkingMsg.content = this.currentThinking
+        thinkingMsg.eventType = 'thinking_delta'
       }
     },
 
     handleThinkingDone(data: any) {
       const sessionStore = useSessionStore()
-      const messages = this.messagesBySession[sessionStore.activeSessionId]
+      const targetSessionId = sessionStore.activeSessionId
+      const messages = this.messagesBySession[targetSessionId]
 
       const lastThinkingMsg = messages?.findLast(m =>
-        m.role === 'thinking' && !m.metadata?.complete
+        m.eventType === 'thinking_delta' || (m.eventType === 'thinking_done' && !m.metadata?.complete)
       )
 
       if (lastThinkingMsg) {
-        lastThinkingMsg.content = data || lastThinkingMsg.content
+        // 保留流式积累的思考内容，不覆盖为后端的固定文本
+        lastThinkingMsg.eventType = 'thinking_done'
         lastThinkingMsg.metadata = { ...lastThinkingMsg.metadata, complete: true }
       }
 
       this.currentThinking = ''
-    },
-
-    handleMarkdownContent(data: any, envelope?: { session_id?: string; title?: string; meta?: any }) {
-      console.log('[MindX Chat] 📝 handleMarkdownContent called:', { data: String(data).substring(0, 100), envelope })
-      const sessionStore = useSessionStore()
-      const targetSessionId = envelope?.session_id || sessionStore.activeSessionId
-      console.log('[MindX Chat] targetSessionId:', targetSessionId)
-      this.handleContentDelta(data, { session_id: targetSessionId, title: envelope?.title })
     },
 
     handleContentDelta(data: any, opts?: { session_id?: string; title?: string }) {
@@ -381,82 +447,97 @@ export const useChatStore = defineStore('chat', {
       this.pendingContentBySession[targetSessionId] += data || ''
     },
 
-    handleToolArguments(data: any, opts?: { session_id?: string; title?: string }) {
+    // --- GoReact ToolUseDelta ---
+    // 来源: goreact/events/tool_use_delta.go → ToolUseDeltaData {index, id, name, arguments}
+    // 触发时机: 在 tool_exec_start 之前到达（GoReact 流式循环先于 executeTools）
+    handleToolUseDelta(data: any, opts?: { session_id?: string; title?: string }) {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
-      this.addMessage(targetSessionId, {
-        role: 'action',
-        content: '',
-        eventType: 'tool_use_delta',
-        eventTitle: opts?.title || '工具参数',
-        eventData: data,
-        metadata: { phase: 'tool_args' }
-      })
-    },
-
-    handleActionStart(data: any, opts?: { session_id?: string; title?: string }) {
-      console.log('[MindX Chat] ❗❗❗ handleActionStart called!', { data, opts })
-      const sessionStore = useSessionStore()
-      const targetSessionId = opts?.session_id || sessionStore.activeSessionId
-      this.currentAction = opts?.title || '执行中...'
-      this.isProcessing = true
-      console.log('[MindX Chat] isProcessing set to TRUE by handleActionStart')
-
-      this.addMessage(targetSessionId, {
-        role: 'action',
-        content: '',
-        eventType: 'action_start',
-        eventTitle: opts?.title || '开始操作',
-        eventData: data,
-        metadata: { phase: 'start' }
-      })
-    },
-
-    handleActionProgress(data: any) {
-      if (data) {
-        this.actionProgress = {
-          completed: data.completed || 0,
-          total: data.total || 0,
-          status: data.status || ''
+      const messages = this.messagesBySession[targetSessionId]
+      const toolMsg = messages?.findLast(m => m.eventType === 'tool_exec' && m.eventData?.status === 'executing')
+      if (toolMsg && toolMsg.eventData?.start) {
+        // 已有活跃工具执行 → 累积参数到 start.params
+        if (!toolMsg.eventData.start.params) toolMsg.eventData.start.params = {}
+        if (data?.arguments) {
+          const existing = toolMsg.eventData.start.params['arguments'] || ''
+          toolMsg.eventData.start.params['arguments'] = existing + data.arguments
+        }
+        if (data?.name) toolMsg.eventData.start.params['name'] = data.name
+        if (data?.id) toolMsg.eventData.start.params['id'] = data.id
+      } else {
+        // 还没有 tool_exec_start → 暂存（GoReact 时序保证：delta 先于 start）
+        this.pendingToolUseDelta = {
+          index: data?.index ?? 0,
+          id: data?.id || '',
+          name: data?.name || '',
+          arguments: data?.arguments || ''
         }
       }
     },
 
-    handleActionResult(data: any, opts?: { session_id?: string; title?: string }) {
+    // --- GoReact ToolExecStart ---
+    // 来源: goreact/events/tool_exec.go → ToolExecStartData {tool_name, params, predicted_tokens}
+    // 触发时机: goreact/agents/runtime.go executeSingleTool() L1370 emit
+    handleToolExecStart(data: any, opts?: { session_id?: string; title?: string }) {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
+
+      // tool_name 优先级: data.tool_name > pendingToolUseDelta.name > opts.title > '工具'
+      const toolName = data?.tool_name || this.pendingToolUseDelta?.name || opts?.title || '工具'
+      this.currentAction = toolName
+      this.isProcessing = true
+
+      // 直接透传 GoReact 原始数据，如有缓存的 delta 则合并 arguments 到 params
+      const startData = { ...data }
+      // 如果 GoReact 没传 tool_name（旧版兼容），用我们确定的名称回填
+      if (!startData.tool_name && toolName !== '工具') {
+        startData.tool_name = toolName
+      }
+      if (this.pendingToolUseDelta && !startData.params) {
+        try {
+          startData.params = JSON.parse(this.pendingToolUseDelta.arguments)
+        } catch {
+          startData.params = { arguments: this.pendingToolUseDelta.arguments }
+        }
+        this.pendingToolUseDelta = null
+      }
+
       this.addMessage(targetSessionId, {
-        role: 'action',
-        content: typeof data === 'string' ? data : JSON.stringify(data, null, 2),
-        eventType: 'action_result',
-        eventTitle: `${data?.tool_name || '工具'} ${data?.success ? '成功' : '失败'}`,
-        eventData: data,
-        metadata: { phase: 'result', success: data?.success }
+        role: 'tool',
+        content: '',
+        eventType: 'tool_exec',
+        eventTitle: toolName,
+        eventData: {
+          start: startData,
+          end: null,
+          status: 'executing'
+        },
+        metadata: { phase: 'active' }
       })
     },
 
-    handleActionEnd(data: any, opts?: { session_id?: string }) {
+    // --- GoReact ToolExecEnd ---
+    // 来源: goreact/events/tool_exec.go → ToolExecEndData {tool_name, tool_call_id, success, result, error, duration_ms}
+    // 触发时机: goreact/agents/runtime.go executeSingleTool() L1393 emit
+    handleToolExecEnd(data: any, opts?: { session_id?: string; title?: string }) {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
-      this.currentAction = null
-      this.actionProgress = null
+      const messages = this.messagesBySession[targetSessionId]
 
-      this.addMessage(targetSessionId, {
-        role: 'system',
-        content: data?.summary || `操作完成: ${data?.success || 0}/${data?.total || 0} 成功`,
-        eventType: 'action_end',
-        eventTitle: '操作完成',
-        eventData: data
-      })
+      const toolMsg = messages?.findLast(m => m.eventType === 'tool_exec' && m.eventData?.status === 'executing')
+      if (toolMsg && toolMsg.eventData) {
+        toolMsg.eventData.end = data
+        toolMsg.eventData.status = data?.success !== false ? 'done' : 'failed'
+
+        this.currentAction = null
+      }
     },
 
     handleFinalAnswer(data: any, opts?: { session_id?: string; title?: string }) {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
 
-      // 使用缓冲的完整内容（如果有）
       const finalContent = this.pendingContentBySession[targetSessionId] || data || ''
-      // 清除缓冲
       delete this.pendingContentBySession[targetSessionId]
 
       this.addMessage(targetSessionId, {
@@ -496,8 +577,6 @@ export const useChatStore = defineStore('chat', {
         this.saveTokenStats()
         console.log('[MindX] Token stats updated:', { tokensUsed, cost, total: this.totalTokensUsed })
       }
-
-      // 内部系统事件，不显示在消息历史中
     },
 
     handleError(data: any, opts?: { session_id?: string; title?: string }) {
@@ -592,10 +671,6 @@ export const useChatStore = defineStore('chat', {
         eventData: data,
         metadata: { phase: 'denied' }
       })
-    },
-
-    handleCycleEnd(data: any, opts?: { session_id?: string }) {
-      // 内部系统事件，不创建消息显示
     },
 
     handleTaskSummary(data: any, opts?: { session_id?: string; title?: string; meta?: any }) {
@@ -753,11 +828,5 @@ export const useChatStore = defineStore('chat', {
       this.sessionTokensUsed = 0
       this.sessionCost = 0
     }
-  },
-
-  persist: {
-    key: 'mindx-chat-messages',
-    storage: localStorage,
-    paths: ['messagesBySession']
   }
 })

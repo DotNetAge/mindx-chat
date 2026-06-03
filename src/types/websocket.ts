@@ -12,10 +12,13 @@ export enum ResponseType {
 
   ThinkingDelta = 'thinking_delta',
   ThinkingDone = 'thinking_done',
-  ActionStart = 'action_start',
-  ActionProgress = 'action_progress',
-  ActionResult = 'action_result',
-  ActionEnd = 'action_end',
+
+  // --- GoReact tool execution events (严格对齐 goreact/events/types.go) ---
+  // 这些类型与后端 gateway RespToolXxx 恒等映射，不再有中间层篡改
+  ToolUseDelta = 'tool_use_delta',
+  ToolExecStart = 'tool_exec_start',
+  ToolExecEnd = 'tool_exec_end',
+
   SubtaskSpawned = 'subtask_spawned',
   SubtaskCompleted = 'subtask_completed',
   FinalAnswer = 'final_answer',
@@ -37,7 +40,6 @@ export enum ResponseType {
   Compaction = 'compaction',
   MaxTurnsReached = 'max_turns_reached',
   ContentDelta = 'content_delta',
-  ToolUseDelta = 'tool_use_delta',
   FSList = 'fs_list',
   FSHome = 'fs_home'
 }
@@ -105,15 +107,18 @@ export interface AgentConfig {
   meta?: Record<string, any>;
 }
 
+// SessionMessage — 与 goreact/session.Message 完全对齐
+// 来源: session.get RPC → handleSessionGet → []goreactsession.Message → JSON
 export interface SessionMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  reasoning_content?: string; // thinking/reasoning stream (DeepSeek-R1 etc.)
   timestamp: number;
-  tool_call_id?: string;
-  tool_calls?: Array<{
+  tool_call_id?: string;     // for role="tool" messages
+  tool_calls?: Array<{       // for role="assistant" messages, GoReact 扁平格式
     id: string;
-    type: string;
-    function: { name: string; arguments: string };
+    name: string;
+    arguments: string;
   }>;
 }
 
@@ -155,4 +160,162 @@ export interface FSEntry {
   is_dir: boolean;
   mode: string;
   mod_time: string;
+}
+
+// --- Token Usage Statistics Types ---
+
+export interface DailyUsage {
+  date: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost: number;
+  request_count: number;
+  model: string;
+}
+
+export interface ModelUsageSummary {
+  model: string;
+  provider: string;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_cost: number;
+  request_count: number;
+  avg_tokens_per_request: number;
+}
+
+export interface MonthlyUsageStats {
+  year: number;
+  month: number;
+  total_cost: number;
+  total_tokens: number;
+  total_requests: number;
+  daily_usage: DailyUsage[];
+  model_breakdown: ModelUsageSummary[];
+}
+
+export interface TokenUsageOverview {
+  current_month: MonthlyUsageStats;
+  previous_month?: MonthlyUsageStats;
+  available_models: string[];
+}
+
+export interface ProviderInfo {
+  name: string;
+  title: string;
+  base_url: string;
+  api_key: boolean;
+  is_local: boolean;
+}
+
+export interface ProviderCreateParams {
+  name: string;
+  title: string;
+  base_url: string;
+  api_key: string;
+  auth_token?: string;
+  is_local?: boolean;
+}
+
+export interface ProviderUpdateParams {
+  name: string;
+  title?: string;
+  base_url?: string;
+  api_key?: string;
+  auth_token?: string;
+  is_local?: boolean;
+}
+
+export interface ModelCreateParams {
+  name: string;
+  title: string;
+  description?: string;
+  provider: string;
+  base_url?: string;
+  api_key?: string;
+  auth_token?: string;
+  max_tokens?: number;
+  context_length?: number;
+  is_local?: boolean;
+  func_calling?: boolean;
+  structuring?: boolean;
+  web_searching?: boolean;
+  prefix_con?: boolean;
+  context_cache?: boolean;
+  top_p?: number;
+  top_k?: number;
+  temperature?: number;
+  repetition_penalty?: number;
+  frequency_penalty?: number;
+  enabled?: boolean;
+  max_turns?: number;
+  cost_per_1m_in?: number;
+  cost_per_1m_out?: number;
+}
+
+export interface ModelUpdateParams {
+  name: string;
+  title?: string;
+  description?: string;
+  provider?: string;
+  base_url?: string;
+  api_key?: string;
+  auth_token?: string;
+  max_tokens?: number | null;
+  context_length?: number | null;
+  is_local?: boolean | null;
+  func_calling?: boolean | null;
+  structuring?: boolean | null;
+  web_searching?: boolean | null;
+  prefix_con?: boolean | null;
+  context_cache?: boolean | null;
+  top_p?: number | null;
+  top_k?: number | null;
+  temperature?: number | null;
+  repetition_penalty?: number | null;
+  frequency_penalty?: number | null;
+  enabled?: boolean | null;
+  max_turns?: number | null;
+  cost_per_1m_in?: number | null;
+  cost_per_1m_out?: number | null;
+}
+
+// ============================================================================
+// GoReact 工具执行事件数据结构（严格对齐 goreact/events/*.go）
+// 这些是后端透传的原始数据，前端直接消费，不做任何中间层转换
+// ============================================================================
+
+/** ToolUseDelta — LLM 流式输出工具调用参数片段
+ *  来源: goreact/events/tool_use_delta.go → ToolUseDeltaData
+ *  触发时机: LLM 返回 tool_call 时逐 chunk 发送
+ */
+export interface ToolUseDeltaData {
+  index: number
+  id: string
+  name: string
+  arguments: string
+}
+
+/** ToolExecStart — 工具即将开始执行
+ *  来源: goreact/events/tool_exec.go → ToolExecStartData
+ *  触发时机: executeSingleTool() 在工具执行前 emit
+ */
+export interface ToolExecStartData {
+  tool_name: string
+  params: Record<string, any>
+  predicted_tokens: number
+}
+
+/** ToolExecEnd — 工具执行结束（成功或失败）
+ *  来源: goreact/events/tool_exec.go → ToolExecEndData
+ *  触发时机: executeSingleTool() 在工具执行后 emit
+ */
+export interface ToolExecEndData {
+  tool_name: string
+  tool_call_id: string
+  success: boolean
+  result: string
+  error: string
+  duration_ms: number
 }

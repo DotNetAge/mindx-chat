@@ -37,19 +37,63 @@ const emit = defineEmits(['update:visible', 'select', 'update:currentSelection']
 const connectionStore = useConnectionStore()
 
 const currentPath = ref('')
+const pathInput = ref('')
 const entries = ref<FSEntry[]>([])
 const loading = ref(false)
+const homePrefix = ref('')
+
+function shortenPath(absPath: string): string {
+  if (!absPath) return ''
+  if (homePrefix.value && absPath.startsWith(homePrefix.value)) {
+    return '~' + absPath.slice(homePrefix.value.length)
+  }
+  return absPath
+}
+
+function expandPath(displayPath: string): string {
+  if (!displayPath) return ''
+  if (displayPath.startsWith('~/') || displayPath === '~') {
+    return homePrefix.value + displayPath.slice(1)
+  }
+  if (displayPath.startsWith('~')) {
+    return homePrefix.value + displayPath.slice(1)
+  }
+  return displayPath
+}
+
+const displayPath = computed(() => shortenPath(currentPath.value))
+const displayPathInput = computed({
+  get: () => shortenPath(pathInput.value),
+  set: (val: string) => { pathInput.value = expandPath(val) }
+})
 
 const sortedEntries = computed(() => {
-  const filtered = entries.value.filter(e => !e.name.startsWith('.'))
-  const dirs = filtered.filter(e => e.is_dir).sort((a, b) => a.name.localeCompare(b.name))
-  const files = filtered.filter(e => !e.is_dir).sort((a, b) => a.name.localeCompare(b.name))
-  return [...dirs, ...files]
+  if (!Array.isArray(entries.value)) return []
+  return entries.value
+    .filter(e => e.is_dir && !e.name.startsWith('.'))
+    .sort((a, b) => a.name.localeCompare(b.name))
+})
+
+const showRootLink = computed(() => {
+  if (!currentPath.value) return false
+  const disp = shortenPath(currentPath.value)
+  return disp.startsWith('~/') && disp.length > 2
 })
 
 const breadcrumbSegments = computed(() => {
   if (!currentPath.value) return []
-  const parts = currentPath.value.split('/').filter(Boolean)
+  const disp = shortenPath(currentPath.value)
+  if (disp === '~') return []
+  if (disp.startsWith('~/')) {
+    const rest = disp.slice(2)
+    if (!rest) return []
+    const parts = rest.split('/').filter(Boolean)
+    return parts.map((part, idx) => {
+      const fullPath = '~/' + parts.slice(0, idx + 1).join('/')
+      return { label: part, path: fullPath }
+    })
+  }
+  const parts = disp.split('/').filter(Boolean)
   return parts.map((part, idx) => {
     const fullPath = '/' + parts.slice(0, idx + 1).join('/')
     return { label: part, path: fullPath }
@@ -90,6 +134,14 @@ async function fetchFSList(path: string) {
     }
     entries.value = await connectionStore.fetchFSList(path)
     currentPath.value = path
+    pathInput.value = path
+    if (!homePrefix.value && path) {
+      const parts = path.split('/').filter(Boolean)
+      if (parts.length > 1) {
+        parts.pop()
+        homePrefix.value = '/' + parts.join('/')
+      }
+    }
     emit('update:currentSelection', path)
   } catch (err: any) {
     ElMessage.error({ message: err?.message || '无法访问该路径', duration: 3000 })
@@ -109,9 +161,14 @@ async function handleOpen() {
       targetPath = await connectionStore.fetchFSHome()
     }
     if (targetPath) {
+      const parts = targetPath.split('/').filter(Boolean)
+      if (parts.length > 1) {
+        parts.pop()
+        homePrefix.value = '/' + parts.join('/')
+      }
       await fetchFSList(targetPath)
     } else {
-      await fetchFSList('/')
+      ElMessage.error({ message: '无法获取用户主目录', duration: 3000 })
     }
   } catch (err: any) {
     ElMessage.error({ message: err?.message || '获取主目录失败，请检查连接状态', duration: 3000 })
@@ -129,18 +186,22 @@ function handleSelect() {
 }
 
 function navigateTo(path: string) {
-  fetchFSList(path)
+  fetchFSList(expandPath(path))
 }
 
 function goUp() {
-  const parent = currentPath.value.replace(/\/+$/, '').split('/').slice(0, -1).join('/') || '/'
-  fetchFSList(parent)
+  const disp = shortenPath(currentPath.value)
+  if (disp === '~') return
+  const parts = disp.replace(/\/+$/, '').split('/').filter(Boolean)
+  parts.pop()
+  const parentDisp = parts.length > 0 ? '~/' + parts.join('/') : '~'
+  fetchFSList(expandPath(parentDisp))
 }
 
 function goToInputPath() {
-  const target = currentPath.value.trim()
+  const target = pathInput.value.trim()
   if (!target) return
-  fetchFSList(target.startsWith('/') ? target : '/' + target)
+  fetchFSList(expandPath(target))
 }
 
 function handleEntryClick(entry: FSEntry) {
@@ -159,7 +220,7 @@ watch(() => props.visible, (val) => {
   if (val) {
     handleOpen()
   }
-})
+}, { immediate: true })
 </script>
 
 <template>
@@ -185,8 +246,8 @@ watch(() => props.visible, (val) => {
       <div class="path-input-row">
         <el-icon class="home-icon" @click="handleOpen"><House /></el-icon>
         <el-input
-          v-model="currentPath"
-          placeholder="输入绝对路径..."
+          v-model="displayPathInput"
+          placeholder="输入路径 (支持 ~ 缩写)..."
           size="default"
           class="path-input"
           @keyup.enter="goToInputPath"
@@ -202,8 +263,8 @@ watch(() => props.visible, (val) => {
 
       <div class="breadcrumb-row">
         <el-breadcrumb separator="/">
-          <el-breadcrumb-item v-if="currentPath !== '/'">
-            <a class="breadcrumb-link" @click.prevent="navigateTo('/')">/</a>
+          <el-breadcrumb-item v-if="showRootLink">
+            <a class="breadcrumb-link" @click.prevent="navigateTo('~')">~</a>
           </el-breadcrumb-item>
           <el-breadcrumb-item
             v-for="seg in breadcrumbSegments"
@@ -267,7 +328,7 @@ watch(() => props.visible, (val) => {
       <div class="dialog-footer">
         <div class="current-path-display">
           <span class="path-label">当前:</span>
-          <code class="path-code" :title="currentPath">{{ currentPath || '/' }}</code>
+          <code class="path-code" :title="currentPath">{{ displayPath || '/' }}</code>
         </div>
         <div class="action-buttons">
           <el-button class="cancel-btn" @click="handleClose">取消</el-button>
@@ -283,8 +344,8 @@ watch(() => props.visible, (val) => {
     <div class="path-input-row">
       <el-icon class="home-icon" @click="handleOpen"><House /></el-icon>
       <el-input
-        v-model="currentPath"
-        placeholder="输入绝对路径..."
+        v-model="displayPathInput"
+        placeholder="输入路径 (支持 ~ 缩写)..."
         size="default"
         class="path-input"
         @keyup.enter="goToInputPath"
@@ -300,8 +361,8 @@ watch(() => props.visible, (val) => {
 
     <div class="breadcrumb-row">
       <el-breadcrumb separator="/">
-        <el-breadcrumb-item v-if="currentPath !== '/'">
-          <a class="breadcrumb-link" @click.prevent="navigateTo('/')">/</a>
+        <el-breadcrumb-item v-if="showRootLink">
+          <a class="breadcrumb-link" @click.prevent="navigateTo('~')">~</a>
         </el-breadcrumb-item>
         <el-breadcrumb-item
           v-for="seg in breadcrumbSegments"
@@ -430,6 +491,8 @@ watch(() => props.visible, (val) => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  max-height: calc(100vh - 200px);
+  overflow: hidden;
 }
 
 .path-input-row {
@@ -482,20 +545,18 @@ watch(() => props.visible, (val) => {
 }
 
 .go-btn {
-  background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
-  border: none;
-  color: white;
-  font-weight: 600;
-  font-size: 13px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
   border-radius: 8px;
   padding: 8px 14px;
   flex-shrink: 0;
-  transition: all 0.25s ease;
+  transition: all 0.2s ease;
 }
 
 .go-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 15px rgba(6, 182, 212, 0.35);
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
 }
 
 .refresh-btn {
@@ -558,6 +619,7 @@ watch(() => props.visible, (val) => {
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
+  max-height: 420px;
 }
 
 .loading-overlay {
