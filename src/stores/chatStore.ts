@@ -53,6 +53,9 @@ export const useChatStore = defineStore('chat', {
     sessionCost: 0 as number,
     tokenPricePerMillion: 1 as number,
 
+    // 按 session 持久化的用量统计 (sessionId → { tokensUsed, cost })
+    sessionTokenStats: {} as Record<string, { tokensUsed: number; cost: number }>,
+
     pendingCorrelationId: null as string | null,
     pendingContentBySession: {} as Record<string, string>,
     // GoReact 发送顺序: tool_use_delta → tool_exec_start → tool_exec_end
@@ -904,6 +907,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     saveTokenStats() {
+      const sessionStore = useSessionStore()
       try {
         localStorage.setItem('mindx_token_stats', JSON.stringify({
           totalTokensUsed: this.totalTokensUsed,
@@ -911,9 +915,39 @@ export const useChatStore = defineStore('chat', {
           totalConversations: this.totalConversations,
           tokenPricePerMillion: this.tokenPricePerMillion
         }))
+
+        // 同时持久化当前 session 的用量
+        if (sessionStore.activeSessionId) {
+          this.sessionTokenStats[sessionStore.activeSessionId] = {
+            tokensUsed: this.sessionTokensUsed,
+            cost: this.sessionCost
+          }
+          localStorage.setItem('mindx_session_token_stats', JSON.stringify(this.sessionTokenStats))
+        }
       } catch (e) {
         console.error('[MindX] Failed to save token stats:', e)
       }
+    },
+
+    loadSessionTokenStats(sessionId: string) {
+      try {
+        const raw = localStorage.getItem('mindx_session_token_stats')
+        if (raw) {
+          const allStats = JSON.parse(raw)
+          const stats = allStats[sessionId]
+          if (stats && typeof stats.tokensUsed === 'number') {
+            this.sessionTokensUsed = stats.tokensUsed
+            this.sessionCost = stats.cost
+            this.sessionTokenStats = allStats
+            console.log(`[MindX] Restored session token stats for ${sessionId}:`, stats)
+            return
+          }
+        }
+      } catch (e) {
+        console.error('[MindX] Failed to load session token stats:', e)
+      }
+      this.sessionTokensUsed = 0
+      this.sessionCost = 0
     },
 
     resetSessionStats() {

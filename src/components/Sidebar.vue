@@ -175,6 +175,9 @@ async function selectSession(sessionId: string) {
   sessionStore.setActiveSession(sessionId)
   connectionStore.setLastSession(sessionId)
 
+  // 恢复当前 session 的 token 用量统计
+  chatStore.loadSessionTokenStats(sessionId)
+
   try {
     const detail = await connectionStore.fetchSessionDetail(sessionId)
     if (detail?.messages && detail.messages.length > 0) {
