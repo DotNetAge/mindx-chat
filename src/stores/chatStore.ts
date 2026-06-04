@@ -303,6 +303,34 @@ export const useChatStore = defineStore('chat', {
       this.pendingFileModifications = []
     },
 
+    cancelProcessing() {
+      // 1. 发送停止信号到后端
+      const client = getMindXClient()
+      if (client) {
+        client.call('message.cancel', {}).catch((err: any) => {
+          console.warn('[MindX] Cancel execution error:', err)
+        })
+      }
+
+      // 2. 将所有正在执行的工具标记为"已取消"
+      for (const sessionId in this.messagesBySession) {
+        const messages = this.messagesBySession[sessionId]
+        for (const msg of messages) {
+          if (msg.eventType === 'tool_exec' && msg.eventData?.status === 'executing') {
+            msg.eventData.status = 'failed'
+            msg.eventData.end = {
+              success: false,
+              error: '用户取消了操作',
+              tool_name: msg.eventTitle || ''
+            }
+          }
+        }
+      }
+
+      // 3. 重置本地处理状态
+      this.resetProcessingState()
+    },
+
     sendMessage(text: string) {
       const connectionStore = useConnectionStore()
       const sessionStore = useSessionStore()
@@ -643,6 +671,23 @@ export const useChatStore = defineStore('chat', {
       })
 
       this.isProcessing = false
+    },
+
+    handleTokenUsageRecorded(data: any, envelope?: { session_id?: string; title?: string; meta?: any }) {
+      if (data && typeof data === 'object') {
+        const tokensUsed = data.total_tokens || 0
+        const inputTokens = data.prompt_tokens || 0
+        const outputTokens = data.completion_tokens || 0
+        const cost = (tokensUsed / 1_000_000) * this.tokenPricePerMillion
+
+        this.sessionTokensUsed += tokensUsed
+        this.sessionCost += cost
+        this.totalTokensUsed += tokensUsed
+        this.totalCost += cost
+
+        this.saveTokenStats()
+        console.log('[MindX] Token usage recorded:', { inputTokens, outputTokens, tokensUsed, cost, total: this.totalTokensUsed })
+      }
     },
 
     handleExecutionSummary(data: any, envelope?: { session_id?: string; title?: string; meta?: any }) {

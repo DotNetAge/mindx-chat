@@ -465,6 +465,15 @@ export const useConnectionStore = defineStore('connection', {
         }
       })
 
+      client.on('token_usage_recorded', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.handleTokenUsageRecorded(envelope.data, {
+          session_id: targetSessionId,
+          title: envelope.title,
+          meta: envelope.meta
+        })
+      })
+
       // cycle_end: 内部系统事件，不需要处理（chatStore 中直接 break）
 
       client.on('task_summary', (envelope) => {

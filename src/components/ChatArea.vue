@@ -277,7 +277,7 @@ async function handlePermissionDeny(reason?: string) {
           <code class="preview-code">{{ chatStore.currentThinking.slice(-60) }}</code>
         </div>
 
-        <button class="stop-btn" @click="chatStore.resetProcessingState()" title="停止处理">
+        <button class="stop-btn" @click="chatStore.cancelProcessing()" title="停止处理">
           <el-icon><VideoPause /></el-icon>
         </button>
       </div>

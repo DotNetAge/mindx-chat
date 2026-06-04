@@ -46,6 +46,8 @@ const durationText = computed(() => {
   if (props.end?.duration_ms) return formatDuration(props.end.duration_ms)
   // 执行中：客户端实时计时
   if (props.status === 'executing') return formatDuration(elapsedMs.value)
+  // 完成后无服务端数据时，退回到客户端计时
+  if (elapsedMs.value > 0) return formatDuration(elapsedMs.value)
   return ''
 })
 
