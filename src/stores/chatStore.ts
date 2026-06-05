@@ -695,17 +695,21 @@ export const useChatStore = defineStore('chat', {
       const targetSessionId = envelope?.session_id || sessionStore.activeSessionId
 
       if (data && typeof data === 'object') {
+        // 优先从 meta 读取结构化 token 数据（后端 WithResponseMeta 提供）
+        const metaTokens = envelope?.meta?.tokens_used
+        const dataTokens = data.tokens_used
+        const tokensUsed = metaTokens?.total_tokens || dataTokens?.total_tokens || dataTokens || 0
+
         this.executionStats = {
-          totalIterations: data.iterations || 0,
-          toolCalls: data.tool_calls || 0,
+          totalIterations: envelope?.meta?.iterations || data.iterations || 0,
+          toolCalls: envelope?.meta?.tool_calls || data.tool_calls || 0,
           toolsUsed: data.tools_used || [],
-          duration: data.duration || '',
-          tokensUsed: data.tokens_used?.total_tokens || data.tokens_used || 0,
-          inputTokens: data.tokens_used?.input_tokens || 0,
-          outputTokens: data.tokens_used?.output_tokens || 0
+          duration: envelope?.meta?.duration || data.duration || '',
+          tokensUsed,
+          inputTokens: metaTokens?.input_tokens || dataTokens?.input_tokens || 0,
+          outputTokens: metaTokens?.output_tokens || dataTokens?.output_tokens || 0
         }
 
-        const tokensUsed = this.executionStats.tokensUsed
         const cost = (tokensUsed / 1_000_000) * this.tokenPricePerMillion
 
         this.sessionTokensUsed += tokensUsed
@@ -715,7 +719,7 @@ export const useChatStore = defineStore('chat', {
         this.totalConversations += 1
 
         this.saveTokenStats()
-        console.log('[MindX] Token stats updated:', { tokensUsed, cost, total: this.totalTokensUsed })
+        console.log('[MindX] Token stats updated from ExecutionSummary:', { tokensUsed, cost, total: this.totalTokensUsed })
       }
     },
 
@@ -818,22 +822,11 @@ export const useChatStore = defineStore('chat', {
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
       const summaryText = typeof data === 'string' ? data : (data?.summary || data || '')
 
+      // 注意：token 统一由 ExecutionSummary（权威来源）和 token_usage_recorded（实时）更新
+      // TaskSummary 不再重复更新 token 计数，避免与 ExecutionSummary 重复计算
       const inputTokens = opts?.meta?.input_tokens || data?.token_usage?.input_tokens || data?.input_tokens || 0
       const outputTokens = opts?.meta?.output_tokens || data?.token_usage?.output_tokens || data?.output_tokens || 0
       const totalTokens = typeof data === 'object' ? (data.token_usage?.total_tokens || data.total_tokens || inputTokens + outputTokens) : inputTokens + outputTokens
-
-      if (totalTokens > 0) {
-        const cost = (totalTokens / 1_000_000) * this.tokenPricePerMillion
-
-        this.sessionTokensUsed += totalTokens
-        this.sessionCost += cost
-        this.totalTokensUsed += totalTokens
-        this.totalCost += cost
-        this.totalConversations += 1
-
-        this.saveTokenStats()
-        console.log('[MindX] Token stats updated from TaskSummary:', { totalTokens, cost })
-      }
 
       this.addMessage(targetSessionId, {
         role: 'assistant',

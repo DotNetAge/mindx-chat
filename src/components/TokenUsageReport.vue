@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useConnectionStore } from '../stores/connectionStore'
 import type { MonthlyUsageStats, ModelUsageSummary } from '../types/websocket'
 
@@ -135,8 +135,10 @@ function getRequestAreaPath(modelName: string): string {
 }
 
 async function loadData() {
+  console.log('[TOKEN-REPORT-DEBUG] loadData called', { isConnected: connectionStore.isConnected, visible: props.visible })
   if (!connectionStore.isConnected) {
     error.value = '请先连接到服务器'
+    console.log('[TOKEN-REPORT-DEBUG] not connected, aborting')
     return
   }
 
@@ -144,8 +146,11 @@ async function loadData() {
   error.value = null
 
   try {
+    console.log('[TOKEN-REPORT-DEBUG] calling fetchTokenUsageMonthly', currentYear.value, currentMonth.value)
     const data = await connectionStore.fetchTokenUsageMonthly(currentYear.value, currentMonth.value)
+    console.log('[TOKEN-REPORT-DEBUG] received data', JSON.stringify(data))
     monthlyData.value = data
+    console.log('[TOKEN-REPORT-DEBUG] monthlyData set', { total_cost: data?.total_cost, total_tokens: data?.total_tokens })
   } catch (err: any) {
     console.error('[TokenUsageReport] Failed to load:', err)
     error.value = err.message || '加载失败'
@@ -213,9 +218,14 @@ function handleExport() {
 
 watch(() => props.visible, (val) => {
   if (val) loadData()
-})
+}, { immediate: true })
 
 watch([currentYear, currentMonth], () => {
+  if (props.visible) loadData()
+})
+
+// 确保 v-if 创建组件时立即加载数据
+onMounted(() => {
   if (props.visible) loadData()
 })
 </script>
@@ -228,7 +238,6 @@ watch([currentYear, currentMonth], () => {
     width="860px"
     class="token-usage-report"
     append-to-body
-    destroy-on-close
   >
     <template #header>
       <div class="report-header">

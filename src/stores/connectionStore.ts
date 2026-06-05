@@ -706,8 +706,12 @@ export const useConnectionStore = defineStore('connection', {
     async fetchTokenUsageMonthly(year: number, month: number): Promise<MonthlyUsageStats> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
+      console.log('[TOKEN-REPORT-DEBUG] fetchTokenUsageMonthly called', { year, month, isConnected: this.isConnected })
       const result = await client.call<MonthlyUsageStats>('token.usage.monthly', { year, month })
-      return result || this.emptyMonthlyStats(year, month)
+      console.log('[TOKEN-REPORT-DEBUG] RPC response', JSON.stringify(result))
+      const final = result || this.emptyMonthlyStats(year, month)
+      console.log('[TOKEN-REPORT-DEBUG] final result', JSON.stringify(final))
+      return final
     },
 
     async fetchTokenUsageByModel(model: string, year?: number, month?: number): Promise<ModelUsageSummary[]> {

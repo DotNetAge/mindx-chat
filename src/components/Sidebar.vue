@@ -639,6 +639,9 @@ watch(() => connectionStore.state, async (newState, oldState) => {
           </div>
         </el-popover>
       </div>
+
+    <!-- Token Usage Footer (inside sidebar-footer, always visible when expanded) -->
+    <TokenUsageFooter v-show="!isCollapsed" @click="showTokenReport = true" style="cursor: pointer;" />
     </div>
 
     <!-- Connection Dialog -->
@@ -739,9 +742,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       </template>
     </el-dialog>
 
-    <TokenUsageFooter v-show="!isCollapsed" @click="showTokenReport = true" style="cursor: pointer;" />
-
-    <TokenUsageReport v-if="showTokenReport" v-model:visible="showTokenReport" />
+    <TokenUsageReport v-show="showTokenReport" v-model:visible="showTokenReport" />
   </aside>
 </template>
 
