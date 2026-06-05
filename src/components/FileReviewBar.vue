@@ -105,9 +105,15 @@ async function rollbackAll() {
 .file-review-bar {
   padding: 8px 28px;
   flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .review-card {
+  width: 100%;
+  max-width: 920px;
   background: linear-gradient(135deg, rgba(245, 158, 11, 0.06), rgba(245, 158, 11, 0.04));
   border: 1px solid rgba(245, 158, 11, 0.25);
   border-radius: 14px;
