@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import MarkdownIt from 'markdown-it'
+import { ref, computed, watch, useTemplateRef, nextTick } from 'vue'
+import { CopyDocument, Document, Download } from '@element-plus/icons-vue'
+import { useMarkdown } from '../../composables/useMarkdown'
 
 const props = defineProps({
   content: {
@@ -31,15 +32,10 @@ const props = defineProps({
 
 const showRaw = ref(false)
 const copySuccess = ref(false)
+const downloadSuccess = ref(false)
 
-const md = new MarkdownIt({
-  html: true,
-  linkify: true,
-  typographer: true,
-  highlight: function (str: string, lang: string) {
-    return `<pre class="code-block"><code class="language-${lang || 'text'}">${md.utils.escapeHtml(str)}</code></pre>`
-  }
-})
+// 共享的 markdown-it + hljs + mermaid 实例（与 ToolExecView 共用同一份配置）
+const { md, renderMermaidInRoot } = useMarkdown()
 
 const formattedContent = computed(() => {
   if (!props.content) return ''
@@ -54,6 +50,56 @@ async function copyToClipboard() {
     setTimeout(() => { copySuccess.value = false }, 2000)
   }
 }
+
+// 根据 title 推断安全的文件名（去Windows/macOS禁用字符）
+function deriveDownloadFilename(): string {
+  if (props.title) {
+    const safe = props.title
+      .replace(/[\\/:*?"<>|\r\n\t]+/g, '_')
+      .replace(/^\s+|\s+$/g, '')
+      .slice(0, 80)
+    if (safe) return `${safe}.md`
+  }
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  return `mindx-output-${ts}.md`
+}
+
+function downloadAsMarkdown() {
+  if (!props.content) return
+  try {
+    const blob = new Blob([props.content], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = deriveDownloadFilename()
+    a.style.display = 'none'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    setTimeout(() => {
+      URL.revokeObjectURL(url)
+      a.remove()
+    }, 100)
+    downloadSuccess.value = true
+    setTimeout(() => { downloadSuccess.value = false }, 2000)
+  } catch (e) {
+    console.warn('[OutputView] download failed:', e)
+  }
+}
+
+// ===== Mermaid 渲染 =====
+// OutputView 没有弹窗，content 变化时（消息流式到达）就需要扫描渲染
+const formattedRef = useTemplateRef<HTMLElement>('formatted')
+
+watch(
+  [() => props.content, () => props.format, showRaw],
+  async () => {
+    if (showRaw.value || props.format === 'raw') return
+    await nextTick()
+    await renderMermaidInRoot(formattedRef.value)
+  },
+  { flush: 'post', immediate: true }
+)
 </script>
 
 <template>
@@ -61,19 +107,24 @@ async function copyToClipboard() {
     <div v-if="!showRaw" class="formatted-content markdown-body" v-html="formattedContent"></div>
     <pre v-else class="raw-content"><code>{{ content }}</code></pre>
 
-    <div class="actions">
-      <button class="action-btn" @click.stop="copyToClipboard" title="复制">
-        <el-icon><CopyDocument /></el-icon>
-        <span v-if="copySuccess" class="copy-success">✓</span>
-      </button>
-      <button class="action-btn" @click.stop="showRaw = !showRaw" title="原始">
-        <el-icon><Document /></el-icon>
-      </button>
-    </div>
-
     <div class="meta" v-if="tokensOut > 0 || duration">
       <span v-if="tokensOut > 0" class="meta-item">{{ tokensOut }} tokens</span>
       <span v-if="duration" class="meta-item">{{ duration }}ms</span>
+    </div>
+
+    <!-- 尾部工具栏（图标 only，default 样式） -->
+    <div class="actions actions-footer">
+      <button class="action-btn" @click.stop="copyToClipboard" title="复制 Markdown 原文" aria-label="复制">
+        <el-icon><CopyDocument /></el-icon>
+        <span v-if="copySuccess" class="action-success">✓</span>
+      </button>
+      <button class="action-btn" @click.stop="downloadAsMarkdown" title="下载为 Markdown" aria-label="下载">
+        <el-icon><Download /></el-icon>
+        <span v-if="downloadSuccess" class="action-success">✓</span>
+      </button>
+      <button class="action-btn" @click.stop="showRaw = !showRaw" :title="showRaw ? '渲染视图' : '原始视图'" aria-label="切换原始/渲染">
+        <el-icon><Document /></el-icon>
+      </button>
     </div>
   </div>
 </template>
@@ -87,16 +138,15 @@ async function copyToClipboard() {
   width: 100%;
 }
 
+/* ===== 尾部工具栏（图标 only，default 样式，常驻可见） ===== */
 .actions {
   display: flex;
+  justify-content: flex-end;
   gap: 4px;
-  margin-bottom: 8px;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.output-block:hover .actions {
-  opacity: 1;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(6, 182, 212, 0.1);
+  /* 修：之前 opacity:0 + 错父选择器 .output-block:hover 导致按钮永久不可见 */
 }
 
 .action-btn {
@@ -121,6 +171,12 @@ async function copyToClipboard() {
 .copy-success {
   font-size: 10px;
   color: #10b981;
+}
+
+.action-success {
+  font-size: 10px;
+  color: #10b981;
+  margin-left: 1px;
 }
 
 .formatted-content {
@@ -175,13 +231,31 @@ async function copyToClipboard() {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   line-height: 1.6;
-  color: #22d3ee;
+  /* hljs 主题（atom-one-dark）会接管 .hljs 子元素的 color；这里保留浅色作为降级 */
+  color: #e2e8f0;
 }
 
 .formatted-content :deep(.code-block) code {
   background: none;
   padding: 0;
   border: none;
+  color: inherit;
+}
+
+/* Mermaid 容器：聊天消息里的流程图 */
+.formatted-content :deep(.mermaid) {
+  background: #161b22;
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 10px 0;
+  overflow-x: auto;
+  text-align: center;
+  min-height: 60px;
+}
+.formatted-content :deep(.mermaid svg) {
+  max-width: 100%;
+  height: auto;
 }
 
 .formatted-content :deep(ul),

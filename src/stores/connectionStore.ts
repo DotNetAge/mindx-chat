@@ -735,18 +735,56 @@ export const useConnectionStore = defineStore('connection', {
 
     // --- Log RPC ---
 
-    async fetchLogs(offset = 0, limit = 10): Promise<{
-      lines: string[]; total: number; returned: number; offset: number; has_more: boolean; path: string
+    async fetchLogs(offset = 0, limit = 10, stream: 'main' | 'error' = 'main'): Promise<{
+      lines: string[]; total: number; returned: number; offset: number; has_more: boolean; path: string; stream: 'main' | 'error'
     }> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      return client.call('log.read', { offset, limit })
+      return client.call('log.read', { offset, limit, stream })
     },
 
-    async clearLogs(confirmed = false): Promise<{ status: string; path: string }> {
+    async clearLogs(confirmed = false): Promise<{ status: string; cleared?: string[] }> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
       return client.call('log.clear', { confirmed })
+    },
+
+    async fetchLogCounts(): Promise<{
+      counts: Record<'main' | 'error', { lines: number; bytes: number; exists: 0 | 1 }>
+    }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('log.count', {})
+    },
+
+    // 推导 HTTP base URL：mindx WebServer 默认在 1313，WebSocket 在 1314
+    // ws://host:1314/ws → http://host:1313
+    httpBaseUrl(): string {
+      const wsUrl = this.serverUrl || 'ws://localhost:1314/ws'
+      try {
+        const u = new URL(wsUrl)
+        const httpScheme = u.protocol === 'wss:' ? 'https:' : 'http:'
+        // WebServer 默认端口 1313 — 如果未来支持配置，再改成从握手响应取
+        return `${httpScheme}//${u.hostname}:1313`
+      } catch {
+        return 'http://localhost:1313'
+      }
+    },
+
+    downloadLogUrl(stream: 'main' | 'error' = 'main'): string {
+      return `${this.httpBaseUrl()}/api/log/download?stream=${stream}`
+    },
+
+    triggerLogDownload(stream: 'main' | 'error' = 'main'): void {
+      const url = this.downloadLogUrl(stream)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = stream === 'error' ? 'error.log' : 'mindx.log'
+      a.style.display = 'none'
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => a.remove(), 100)
     },
 
     // --- Memory RPC ---
