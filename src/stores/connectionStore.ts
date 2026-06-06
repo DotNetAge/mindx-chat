@@ -41,7 +41,8 @@ export const useConnectionStore = defineStore('connection', {
     lastAgentName: '' as string,
     lastSessionId: '' as string,
     providerTitleMap: {} as Record<string, string>,
-    rawProviders: [] as ProviderInfo[]
+    rawProviders: [] as ProviderInfo[],
+    serverVersion: '' as string
   }),
 
   getters: {
@@ -228,6 +229,12 @@ export const useConnectionStore = defineStore('connection', {
       if (!client) throw new Error('WebSocket client not initialized')
       try {
         const result = await client.call<any>('user.config', {})
+
+        // 保存服务端版本号
+        if (result?.version) {
+          this.serverVersion = result.version
+          document.title = `MindX v${result.version}`
+        }
 
         console.group('📋 [MindX] User Config (user.config)')
         console.log('%c✅ 成功获取用户配置', 'color: #10b981; font-weight: bold;')

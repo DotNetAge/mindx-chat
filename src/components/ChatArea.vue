@@ -215,6 +215,8 @@ async function handlePermissionDeny(reason?: string) {
       </div>
 
       <div class="header-right">
+        <a class="nav-pill nav-link" href="https://github.com/dotNetAge/mindx" target="_blank" title="GitHub" rel="noopener noreferrer">GitHub</a>
+        <a class="nav-pill nav-link" href="https://gitee.com/ray_liang/mindx" target="_blank" title="Gitee" rel="noopener noreferrer">Gitee</a>
         <button class="nav-pill" @click="openLogDrawer" title="查看日志">日志</button>
         <button class="nav-pill" @click="openMemoryModal" title="查询记忆">记忆</button>
       </div>
@@ -444,6 +446,9 @@ async function handlePermissionDeny(reason?: string) {
   color: #a78bfa;
   background: rgba(139, 92, 246, 0.12);
   border-color: rgba(139, 92, 246, 0.3);
+}
+.nav-link {
+  text-decoration: none;
 }
 
 .provider-info {

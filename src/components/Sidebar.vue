@@ -352,7 +352,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
         <transition name="fade">
           <div v-if="!isCollapsed" class="logo-text">
             <h1>MindX</h1>
-            <span>v2.0.1</span>
+            <span>v{{ connectionStore.serverVersion || '?.?' }}</span>
           </div>
         </transition>
       </div>
