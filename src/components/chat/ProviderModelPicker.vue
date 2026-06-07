@@ -77,8 +77,15 @@ function openAddProvider() {
 }
 
 function openEditProvider(p: ProviderInfo) {
+  const full = connectionStore.rawProviders.find(rp => rp.name === p.name)
   editingProvider.value = p
-  providerForm.value = { ...p }
+  providerForm.value = {
+    name: full?.name || p.name,
+    title: full?.title || '',
+    base_url: full?.base_url || '',
+    api_key: '',
+    auth_token: ''
+  }
   showProviderForm.value = true
 }
 
