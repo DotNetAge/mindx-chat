@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const props = defineProps({
   formData: {
@@ -70,7 +73,7 @@ function handleSubmit() {
         </div>
 
         <div class="title-section">
-          <h4 class="form-title">需要澄清</h4>
+          <h4 class="form-title">{{ t('form.title') }}</h4>
           <p class="form-subtitle" v-if="displayText">{{ displayText.slice(0, 60) }}{{ displayText.length > 60 ? '...' : '' }}</p>
         </div>
       </div>
@@ -87,7 +90,7 @@ function handleSubmit() {
         </div>
 
         <div class="options-block" v-if="options.length > 0">
-          <div class="options-label">📌 请选择</div>
+          <div class="options-label">📌 {{ t('form.pleaseSelect') }}</div>
           <div class="options-grid">
             <button
               v-for="(option, index) in options"
@@ -103,7 +106,7 @@ function handleSubmit() {
         </div>
 
         <div class="fields-block" v-if="extraFields.length > 0">
-          <div class="fields-label">📋 详情</div>
+          <div class="fields-label">📋 {{ t('form.details') }}</div>
           <div class="fields-grid">
             <div v-for="field in extraFields" :key="field.key" class="field-card">
               <span class="field-key">{{ field.key }}</span>
@@ -113,7 +116,7 @@ function handleSubmit() {
         </div>
 
         <div class="input-block">
-          <div class="input-label">✍️ 你的回复</div>
+          <div class="input-label">✍️ {{ t('form.yourReply') }}</div>
           <textarea
             v-model="freeformInput"
             class="response-input"
@@ -131,7 +134,7 @@ function handleSubmit() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" fill="currentColor"/>
             </svg>
-            提交回复
+            {{ t('form.submit') }}
           </button>
         </div>
       </div>

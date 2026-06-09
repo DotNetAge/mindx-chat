@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, watch, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { Setting, Calendar } from '@element-plus/icons-vue'
 import { useChatStore } from '../stores/chatStore'
@@ -37,6 +38,7 @@ const props = defineProps({
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const connectionStore = useConnectionStore()
+const { t } = useI18n()
 const messageInput = ref('')
 const chatContainer = ref(null)
 
@@ -60,8 +62,8 @@ const showScheduleView = ref(false)
 
 const currentActionLabel = computed(() => {
   if (chatStore.currentAction) return chatStore.currentAction
-  if (chatStore.isProcessing && chatStore.currentThinking) return '深度思考中...'
-  if (chatStore.isProcessing) return 'Agent 处理中...'
+  if (chatStore.isProcessing && chatStore.currentThinking) return t('chat.thinking')
+  if (chatStore.isProcessing) return t('chat.processing')
   return null
 })
 
@@ -94,14 +96,14 @@ async function sendMessage() {
       }
 
       if (!sessionStore.activeSessionId) {
-        ElMessage.error('无法创建会话，请手动点击"新建对话"按钮')
+        ElMessage.error(t('chat.cannotCreateSession'))
         return
       }
 
       console.log('[MindX] Session created:', sessionStore.activeSessionId)
     } catch (err: any) {
       console.error('[MindX] Failed to create session:', err)
-      ElMessage.error(`创建会话失败: ${err?.message || '未知错误'}`)
+      ElMessage.error(t('chat.createSessionFailed', { msg: err?.message || t('common.unknownError') }))
       return
     }
   }
@@ -217,8 +219,8 @@ async function handlePermissionDeny(reason?: string) {
       <div class="header-right">
         <a class="nav-pill nav-link" href="https://github.com/dotNetAge/mindx" target="_blank" title="GitHub" rel="noopener noreferrer">GitHub</a>
         <a class="nav-pill nav-link" href="https://gitee.com/ray_liang/mindx" target="_blank" title="Gitee" rel="noopener noreferrer">Gitee</a>
-        <button class="nav-pill" @click="openLogDrawer" title="查看日志">日志</button>
-        <button class="nav-pill" @click="openMemoryModal" title="查询记忆">记忆</button>
+        <button class="nav-pill" @click="openLogDrawer" :title="t('chat.logTab')">{{ t('chat.logTab') }}</button>
+        <button class="nav-pill" @click="openMemoryModal" :title="t('chat.memoryTab')">{{ t('chat.memoryTab') }}</button>
       </div>
     </header>
 
@@ -240,10 +242,10 @@ async function handlePermissionDeny(reason?: string) {
           <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4c-1.48 0-2.85.43-4.01 1.17l1.42 1.43C9.93 6.22 10.93 6 12 6c3.04 0 5.5 2.46 5.5 5.5v.5H19c1.66 0 3 1.34 3 3 0 .99-.47 1.87-1.2 2.41l1.41 1.41C23.25 20.54 24 18.83 24 17c0-2.64-2.05-4.78-4.65-4.96zM3 5.27l2.75 2.74C2.56 8.15 0 10.77 0 14h3c0-1.68.69-3.21 1.79-4.31L5 13.09v4.41c0 .28.22.5.5.5h1c.28 0 .5-.22.5-.5V13.91l2.5-2.5V9l-2-2V3H3v2.27z" fill="currentColor"/>
         </svg>
         
-        <span class="offline-text">离线模式 - 消息已保存到本地</span>
+        <span class="offline-text">{{ t('chat.offlineMode') }}</span>
 
         <span class="queue-count" v-if="chatStore.offlineMessageQueue.length > 0">
-          {{ chatStore.offlineMessageQueue.length }} 条待发送
+          {{ chatStore.offlineMessageQueue.length }} {{ t('chat.pendingSend') }}
         </span>
       </div>
     </div>
@@ -328,13 +330,13 @@ async function handlePermissionDeny(reason?: string) {
         
         <p class="empty-desc">
           <template v-if="!connectionStore.isOfflineMode && connectionStore.isConnected">
-            发送消息给 AI Agent，观察实时的思考过程、工具调用和最终输出
+            {{ t('chat.welcome.description') }}
           </template>
           <template v-else-if="connectionStore.isOfflineMode">
-            当前处于离线模式，请连接服务器后使用
+            {{ t('chat.welcome.offlineHint') }}
           </template>
           <template v-else>
-            正在建立安全连接...
+            {{ t('chat.welcome.connecting') }}
           </template>
         </p>
 

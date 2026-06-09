@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onBeforeUnmount } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useConnectionStore } from '../stores/connectionStore'
 
 const connectionStore = useConnectionStore()
+const { t } = useI18n()
 
 const visible = ref(false)
 const fullscreen = ref(false)
@@ -28,8 +30,8 @@ const PAGE_SIZE = 100
 type LogStream = 'main' | 'error'
 const currentStream = ref<LogStream>('main')
 const STREAM_OPTIONS: { value: LogStream; label: string; title: string }[] = [
-  { value: 'main', label: '主日志', title: '~/.mindx/logs/mindx.log' },
-  { value: 'error', label: '错误日志', title: '~/.mindx/logs/error.log' }
+  { value: 'main', label: '', title: '~/.mindx/logs/mindx.log' },
+  { value: 'error', label: '', title: '~/.mindx/logs/error.log' }
 ]
 
 // 各流的行数（用于标签徽章）
@@ -269,7 +271,7 @@ defineExpose({ visible, open, close })
       <div v-if="visible" class="log-drawer" :class="{ fullscreen }">
         <!-- 工具栏 -->
         <div class="drawer-toolbar">
-          <span class="toolbar-title">📋 日志终端</span>
+          <span class="toolbar-title">📋 {{ t('logDrawer.title') }}</span>
 
           <!-- 日志流切换器 -->
           <div class="stream-switcher" role="tablist" aria-label="日志流">
@@ -283,7 +285,7 @@ defineExpose({ visible, open, close })
               :aria-selected="currentStream === opt.value"
               @click="switchStream(opt.value)"
             >
-              {{ opt.label }}
+              {{ opt.value === 'main' ? t('logDrawer.mainStream') : t('logDrawer.errorStream') }}
               <span
                 v-if="counts[opt.value] && counts[opt.value].lines > 0"
                 class="tab-badge"
@@ -295,8 +297,8 @@ defineExpose({ visible, open, close })
             </button>
           </div>
 
-          <span class="toolbar-info" v-if="totalLines">{{ totalLines }} 行</span>
-          <span class="toolbar-info" v-if="currentOffset > 0">第{{ currentPageIndex }}页</span>
+          <span class="toolbar-info" v-if="totalLines">{{ totalLines }} {{ t('logDrawer.lines') }}</span>
+          <span class="toolbar-info" v-if="currentOffset > 0">{{ t('logDrawer.pageN') }}{{ currentPageIndex }}</span>
 
           <!-- 关键字过滤 -->
           <div class="filter-box">
@@ -304,14 +306,14 @@ defineExpose({ visible, open, close })
               v-model="filter"
               type="text"
               class="filter-input"
-              placeholder="🔍 过滤当前已加载的日志…"
+              :placeholder="t('logDrawer.filterPlaceholder')"
               spellcheck="false"
             />
             <button
               v-if="filter"
               class="filter-clear"
               @click="clearFilter"
-              title="清除过滤"
+              :title="t('logDrawer.clearFilter')"
             >✕</button>
             <span v-if="filter" class="filter-info">
               {{ applyFilter().length }} / {{ lines.length }}
@@ -319,28 +321,28 @@ defineExpose({ visible, open, close })
           </div>
 
           <div class="toolbar-actions">
-            <button class="toolbar-btn" @click="loadOlder" :disabled="!hasMore || loadingMore" title="加载上一页">
-              ◀ 上一页
+            <button class="toolbar-btn" @click="loadOlder" :disabled="!hasMore || loadingMore" :title="t('logDrawer.prevPage')">
+              ◀ {{ t('logDrawer.prevPage') }}
             </button>
-            <button class="toolbar-btn" @click="downloadCurrent" :title="`下载 ${currentStream === 'error' ? 'error.log' : 'mindx.log'}`">
+            <button class="toolbar-btn" @click="downloadCurrent" :title="`${t('logDrawer.download')} ${currentStream === 'error' ? 'error.log' : 'mindx.log'}`">
               ⬇
             </button>
-            <button class="toolbar-btn" @click="fullscreen = !fullscreen" :title="fullscreen ? '退出全屏' : '全屏'">
+            <button class="toolbar-btn" @click="fullscreen = !fullscreen" :title="fullscreen ? t('logDrawer.exitFullscreen') : t('logDrawer.fullscreen')">
               {{ fullscreen ? '⤓' : '⤢' }}
             </button>
-            <button class="toolbar-btn danger" @click="showConfirmClear = true" title="清空日志">🗑</button>
-            <button class="toolbar-btn close" @click="visible = false" title="关闭">✕</button>
+            <button class="toolbar-btn danger" @click="showConfirmClear = true" :title="t('logDrawer.clearLogs')">🗑</button>
+            <button class="toolbar-btn close" @click="visible = false" :title="t('common.close')">✕</button>
           </div>
         </div>
 
         <!-- 终端内容区 -->
         <div class="terminal-body" ref="logContainer" @scroll="onScroll">
           <!-- 加载更多指示器（顶部） -->
-          <div v-if="loadingMore" class="load-more-top">⏳ 加载更早日志...</div>
-          <div v-else-if="!hasMore && lines.length >= totalLines && totalLines > 0" class="load-more-top done">— 已到最早 —</div>
+          <div v-if="loadingMore" class="load-more-top">⏳ {{ t('logDrawer.loadingEarlier') }}...</div>
+          <div v-else-if="!hasMore && lines.length >= totalLines && totalLines > 0" class="load-more-top done">— {{ t('logDrawer.reachedEarliest') }} —</div>
 
           <!-- 加载中 -->
-          <div v-if="loading && !lines.length" class="terminal-loading">加载中...</div>
+          <div v-if="loading && !lines.length" class="terminal-loading">{{ t('common.loading') }}...</div>
           <pre v-else-if="!error" class="terminal-content"><template v-for="(line, idx) in lines" :key="idx">{{ line }}
 </template></pre>
           <div v-else class="terminal-error">{{ error }}</div>
@@ -352,12 +354,12 @@ defineExpose({ visible, open, close })
     <transition name="modal-fade">
       <div v-if="showConfirmClear" class="confirm-overlay" @click.self="showConfirmClear = false">
         <div class="confirm-dialog">
-          <h4>⚠️ 确认清空日志</h4>
-          <p>此操作将永久删除 <code>~/.mindx/logs/mindx.log</code> 的全部内容，且不可恢复。</p>
-          <p>确定要继续吗？</p>
+          <h4>⚠️ {{ t('logDrawer.confirmClearTitle') }}</h4>
+          <p>{{ t('logDrawer.confirmClearMessage', { path: '~/.mindx/logs/mindx.log' }) }}</p>
+          <p>{{ t('logDrawer.confirmClearQuestion') }}</p>
           <div class="confirm-actions">
-            <button class="btn-cancel" @click="showConfirmClear = false">取消</button>
-            <button class="btn-danger" @click="confirmClear">确认清空</button>
+            <button class="btn-cancel" @click="showConfirmClear = false">{{ t('common.cancel') }}</button>
+            <button class="btn-danger" @click="confirmClear">{{ t('logDrawer.clearConfirm') }}</button>
           </div>
         </div>
       </div>

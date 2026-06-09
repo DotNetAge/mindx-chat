@@ -3,6 +3,9 @@ import { getMindXClient, createMindXClient } from '../services/websocket'
 import { useChatStore } from './chatStore'
 import { useSessionStore } from './sessionStore'
 import type { AgentConfig, ModelConfig, SkillInfo, ServerSessionInfo, FSEntry, TokenUsageOverview, MonthlyUsageStats, ModelUsageSummary, ProviderInfo, ProviderCreateParams, ProviderUpdateParams, ModelCreateParams, ModelUpdateParams } from '../types/websocket'
+import i18n from '../i18n'
+
+const t = (key: string) => i18n.global.t(key)
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error'
 
@@ -85,11 +88,11 @@ export const useConnectionStore = defineStore('connection', {
 
     statusLabel: (state): string => {
       const labels: Record<ConnectionState, string> = {
-        disconnected: '未连接',
-        connecting: '连接中...',
-        connected: '已连接',
-        reconnecting: '重连中...',
-        error: '连接错误'
+        disconnected: t('sidebar.status.disconnected'),
+        connecting: t('sidebar.status.connecting'),
+        connected: t('sidebar.status.connected'),
+        reconnecting: t('sidebar.status.reconnecting'),
+        error: t('sidebar.status.error')
       }
       return labels[state.state]
     },
@@ -238,7 +241,7 @@ export const useConnectionStore = defineStore('connection', {
 
         console.group('📋 [MindX] User Config (user.config)')
         console.log('%c✅ 成功获取用户配置', 'color: #10b981; font-weight: bold;')
-        console.log('%c数据来源: ~/.mindx/mindh.json', 'color: #64748b; font-size: 11px;')
+        console.log('%c数据来源: ~/.mindx/mindx.json', 'color: #64748b; font-size: 11px;')
         console.log('─────────────────────────────────────')
         console.table(result)
         console.log('%c完整 JSON:', 'color: #8b5cf6; font-weight: bold;')

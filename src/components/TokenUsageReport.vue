@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useConnectionStore } from '../stores/connectionStore'
 import type { MonthlyUsageStats, ModelUsageSummary } from '../types/websocket'
 
@@ -10,6 +11,7 @@ const props = defineProps<{
 const emit = defineEmits(['update:visible'])
 
 const connectionStore = useConnectionStore()
+const { t } = useI18n()
 
 const loading = ref(false)
 const currentYear = ref(new Date().getFullYear())
@@ -32,7 +34,7 @@ const formatCompactNumber = (num: number): string => {
   return num.toString()
 }
 
-const monthLabel = computed(() => `${currentYear.value}年 ${String(currentMonth.value).padStart(2, '0')}月`)
+const monthLabel = computed(() => `${currentYear.value} ${t('tokenUsage.month', { m: String(currentMonth.value).padStart(2, '0') })}`)
 
 const daysInMonth = computed(() => {
   return new Date(currentYear.value, currentMonth.value, 0).getDate()
@@ -137,7 +139,7 @@ function getRequestAreaPath(modelName: string): string {
 async function loadData() {
   console.log('[TOKEN-REPORT-DEBUG] loadData called', { isConnected: connectionStore.isConnected, visible: props.visible })
   if (!connectionStore.isConnected) {
-    error.value = '请先连接到服务器'
+    error.value = t('tokenUsage.connectFirst')
     console.log('[TOKEN-REPORT-DEBUG] not connected, aborting')
     return
   }
@@ -153,7 +155,7 @@ async function loadData() {
     console.log('[TOKEN-REPORT-DEBUG] monthlyData set', { total_cost: data?.total_cost, total_tokens: data?.total_tokens })
   } catch (err: any) {
     console.error('[TokenUsageReport] Failed to load:', err)
-    error.value = err.message || '加载失败'
+    error.value = err.message || t('common.error')
     monthlyData.value = null
   } finally {
     loading.value = false
@@ -182,26 +184,26 @@ function handleExport() {
   if (!monthlyData.value) return
 
   const lines: string[] = []
-  lines.push(`MindX Token 使用量报表 - ${monthLabel.value}`)
+  lines.push(`${t('tokenUsage.reportTitle')} - ${monthLabel.value}`)
   lines.push('')
-  lines.push(`=== 概览 ===`)
-  lines.push(`总费用: ${formatCost(monthlyData.value.total_cost)}`)
-  lines.push(`总 Tokens: ${formatNumber(monthlyData.value.total_tokens)}`)
-  lines.push(`总请求数: ${formatNumber(monthlyData.value.total_requests)}`)
+  lines.push(`=== ${t('tokenUsage.overview')} ===`)
+  lines.push(`${t('tokenUsage.totalCost')}: ${formatCost(monthlyData.value.total_cost)}`)
+  lines.push(`${t('tokenUsage.totalTokens')}: ${formatNumber(monthlyData.value.total_tokens)}`)
+  lines.push(`${t('tokenUsage.totalRequests')}: ${formatNumber(monthlyData.value.total_requests)}`)
   lines.push('')
 
   if (monthlyData.value.model_breakdown.length > 0) {
-    lines.push('=== 模型明细 ===')
+    lines.push(`=== ${t('tokenUsage.modelBreakdown')} ===`)
     monthlyData.value.model_breakdown.forEach((m: ModelUsageSummary) => {
       lines.push(`${m.model} (${m.provider})`)
-      lines.push(`  Tokens: ${formatNumber(m.total_tokens)} | 请求: ${formatNumber(m.request_count)} | 费用: ${formatCost(m.total_cost)}`)
+      lines.push(`  ${t('tokenUsage.tokens')}: ${formatNumber(m.total_tokens)} |  ${t('tokenUsage.requests')}: ${formatNumber(m.request_count)} |  ${t('tokenUsage.cost')}: ${formatCost(m.total_cost)}`)
     })
     lines.push('')
   }
 
   if (monthlyData.value.daily_usage.length > 0) {
-    lines.push('=== 每日明细 ===')
-    lines.push('日期\t模型\t输入Tokens\t输出Tokens\t总Tokens\t费用\t请求次数')
+    lines.push(`=== ${t('tokenUsage.dailyBreakdown')} ===`)
+    lines.push(`${t('tokenUsage.date')}\t${t('tokenUsage.model')}\t${t('tokenUsage.inputTokens')}\t${t('tokenUsage.outputTokens')}\t${t('tokenUsage.totalTokens')}\t${t('tokenUsage.cost')}\t${t('tokenUsage.requestCount')}`)
     monthlyData.value.daily_usage.forEach(d => {
       lines.push(`${d.date}\t${d.model}\t${d.input_tokens}\t${d.output_tokens}\t${d.total_tokens}\t${d.cost.toFixed(4)}\t${d.request_count}`)
     })
@@ -231,9 +233,10 @@ onMounted(() => {
 </script>
 
 <template>
+  <div v-if="visible">
   <el-dialog
-    :model-value="visible"
-    @update:model-value="emit('update:visible', $event)"
+    :model-value="true"
+    @update:model-value="emit('update:visible', false)"
     title=""
     width="860px"
     class="token-usage-report"
@@ -241,14 +244,14 @@ onMounted(() => {
   >
     <template #header>
       <div class="report-header">
-        <h2 class="report-title">📊 每月用量</h2>
+        <h2 class="report-title">📊 {{ t('tokenUsage.monthlyUsage') }}</h2>
         <div class="header-controls">
           <div class="month-picker">
             <button class="picker-btn" @click="prevMonth" :disabled="loading">‹</button>
             <span class="month-label">{{ monthLabel }}</span>
             <button class="picker-btn" @click="nextMonth" :disabled="loading">›</button>
           </div>
-          <el-button size="small" @click="handleExport" :disabled="!monthlyData || loading">导出</el-button>
+          <el-button size="small" @click="handleExport" :disabled="!monthlyData || loading">{{ t('tokenUsage.export') }}</el-button>
         </div>
       </div>
     </template>
@@ -256,14 +259,14 @@ onMounted(() => {
     <div v-loading="loading" class="report-body">
       <div v-if="error" class="error-state">
         <p>{{ error }}</p>
-        <el-button size="small" type="primary" @click="loadData">重试</el-button>
+        <el-button size="small" type="primary" @click="loadData">{{ t('common.retry') }}</el-button>
       </div>
 
       <template v-else-if="monthlyData">
         <!-- Cost Overview -->
         <section class="section cost-overview">
           <div class="cost-summary">
-            <span class="cost-label">消费金额</span>
+            <span class="cost-label">{{ t('tokenUsage.spending') }}</span>
             <span class="cost-value">{{ formatCost(monthlyData.total_cost) }}</span>
           </div>
 
@@ -302,7 +305,7 @@ onMounted(() => {
             <!-- API Requests Chart -->
             <div class="model-chart-card">
               <div class="card-header">
-                <span class="card-title">API 请求次数</span>
+                <span class="card-title">{{ t('tokenUsage.apiRequests') }}</span>
                 <span class="card-value">{{ formatNumber(model.request_count) }}</span>
               </div>
               <div class="mini-chart">
@@ -367,11 +370,12 @@ onMounted(() => {
 
         <!-- Empty State -->
         <div v-if="!monthlyData.model_breakdown.length && !loading" class="empty-state">
-          <p>该月份暂无使用记录</p>
+          <p>{{ t('tokenUsage.noRecord') }}</p>
         </div>
       </template>
     </div>
   </el-dialog>
+  </div>
 </template>
 
 <style scoped>

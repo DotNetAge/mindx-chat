@@ -10,6 +10,22 @@ import type { ServerSessionInfo } from '../types/websocket'
 import DirectoryBrowser from './DirectoryBrowser.vue'
 import TokenUsageFooter from './TokenUsageFooter.vue'
 import TokenUsageReport from './TokenUsageReport.vue'
+import { useI18n } from 'vue-i18n'
+
+const { t, locale } = useI18n()
+const currentLocale = ref(locale.value)
+
+const langOptions = [
+  { value: 'zh', label: '简体中文' },
+  { value: 'en', label: 'English' },
+  { value: 'zh-TW', label: '繁體中文' }
+]
+
+function switchLocale(val: string) {
+  currentLocale.value = val
+  locale.value = val
+  localStorage.setItem('mindx-locale', val)
+}
 
 const props = defineProps({
   isCollapsed: {
@@ -70,11 +86,11 @@ const displaySelectedPath = computed(() => shortenPath(setupSelectedPath.value))
 const connectionStatus = computed(() => {
   const state = connectionStore.state
   const statusMap: Record<string, { label: string; color: string }> = {
-    disconnected: { label: '离线模式', color: '#94a3b8' },
-    connecting: { label: '连接中...', color: '#f59e0b' },
-    connected: { label: '已连接', color: '#10b981' },
-    reconnecting: { label: '重连中...', color: '#f59e0b' },
-    error: { label: '错误', color: '#ef4444' }
+    disconnected: { label: t('sidebar.status.disconnected'), color: '#94a3b8' },
+    connecting: { label: t('sidebar.status.connecting'), color: '#f59e0b' },
+    connected: { label: t('sidebar.status.connected'), color: '#10b981' },
+    reconnecting: { label: t('sidebar.status.reconnecting'), color: '#f59e0b' },
+    error: { label: t('sidebar.status.error'), color: '#ef4444' }
   }
   return statusMap[state] || statusMap.disconnected
 })
@@ -96,7 +112,7 @@ const sessions = computed(() => {
     })
     .map(s => ({
       id: s.session_id,
-      title: s.title || '<空>',
+      title: s.title || t('common.noData'),
       subtitle: shortenPath(s.project_dir || ''),
       subtitleFull: s.project_dir || '',
       time: formatTime(s.updated_at),
@@ -121,10 +137,10 @@ function formatTime(timeStr?: string): string {
   const diffMs = now.getTime() - date.getTime()
   const diffMins = Math.floor(diffMs / 60000)
   
-  if (diffMins < 1) return '刚刚'
-  if (diffMins < 60) return `${diffMins}分钟前`
-  if (diffMins < 1440) return `${Math.floor(diffMins / 60)}小时前`
-  return `${Math.floor(diffMins / 1440)}天前`
+  if (diffMins < 1) return t('sidebar.timeAgo.justNow')
+  if (diffMins < 60) return t('sidebar.timeAgo.minutesAgo', { n: diffMins })
+  if (diffMins < 1440) return t('sidebar.timeAgo.hoursAgo', { n: Math.floor(diffMins / 60) })
+  return t('sidebar.timeAgo.daysAgo', { n: Math.floor(diffMins / 1440) })
 }
 
 function selectAgent(agentName: string) {
@@ -140,7 +156,7 @@ async function loadSessionsForAgent(agentName?: string) {
     const mapped = serverSessions.map(s => ({
       session_id: s.session_id,
       agent_name: s.agent_name || agentName || '',
-      title: s.title || '<空>',  // 服务端已从 meta.json 返回 title（首条 user 消息）
+      title: s.title || t('common.noData'),  // 服务端已从 meta.json 返回 title（首条 user 消息）
       created_at: s.created_at,
       updated_at: s.last_activity_at,
       message_count: 0,  // messages 通过 session.get 动态加载，列表不返回
@@ -200,7 +216,7 @@ async function handleConnect() {
       connectionStore.setConnectionState(newState)
       if (newState === 'error') {
         const client = getMindXClient()
-        connectionStore.setServerError(client?.lastError.value || '连接错误')
+        connectionStore.setServerError(client?.lastError.value || t('sidebar.status.error'))
       }
     })
 
@@ -237,15 +253,15 @@ async function handleDeleteSession(sessionId: string, event: Event) {
   event.stopPropagation()
 
   const session = sessionStore.sessions.find(s => s.session_id === sessionId)
-  const sessionTitle = session?.title || '此会话'
+  const sessionTitle = session?.title || t('sidebar.sessionList')
 
   try {
     await ElMessageBox.confirm(
-      `确定要删除会话 "${sessionTitle}" 吗？此操作无法撤销。`,
-      '删除会话确认',
+      t('sidebar.deleteConfirmMsg'),
+      t('sidebar.deleteConfirmTitle'),
       {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t('common.delete'),
+        cancelButtonText: t('common.cancel'),
         type: 'warning',
         confirmButtonClass: 'el-button--danger'
       }
@@ -331,7 +347,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       console.log(`[MindX] ✅ Loaded ${agents.length} agents and ${models.length} models`)
     } catch (err) {
       console.error('Failed to load initial data:', err)
-      connectionStore.setServerError(`数据加载失败: ${err}`)
+      connectionStore.setServerError(`${t('common.error')}: ${err}`)
     }
   }
 })
@@ -343,11 +359,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     <div class="sidebar-header">
       <div class="logo-section">
         <div class="logo-icon">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+          <img src="/icon.svg" alt="MindX" width="48" height="48" />
         </div>
         <transition name="fade">
           <div v-if="!isCollapsed" class="logo-text">
@@ -356,10 +368,64 @@ watch(() => connectionStore.state, async (newState, oldState) => {
           </div>
         </transition>
       </div>
-      <button class="collapse-btn" @click="$emit('toggle-collapse')">
-        <el-icon v-if="isCollapsed"><Expand /></el-icon>
-        <el-icon v-else><Fold /></el-icon>
-      </button>
+      <el-popover placement="bottom-end" :width="300" trigger="click">
+        <template #reference>
+          <el-button text circle class="settings-btn">
+            <el-icon><Setting /></el-icon>
+          </el-button>
+        </template>
+
+        <div class="settings-panel">
+          <h4>⚙️ {{ t('sidebar.settings') }}</h4>
+
+          <!-- Connection Settings -->
+          <div class="setting-section">
+            <h5>{{ t('sidebar.connectionConfig') }}</h5>
+            <div class="setting-item">
+              <label>{{ t('sidebar.connectionConfig') }}</label>
+              <el-input
+                v-model="serverUrl"
+                size="small"
+                placeholder="ws://localhost:1314/ws"
+              />
+            </div>
+
+            <div class="setting-actions">
+              <el-button
+                v-if="!connectionStore.isConnected"
+                type="primary"
+                size="small"
+                @click="handleConnect"
+                :loading="connectionStore.state === 'connecting'"
+              >
+                {{ connectionStore.state === 'connecting' ? t('sidebar.status.connecting') : t('sidebar.connect') }}
+              </el-button>
+
+              <el-button
+                v-else
+                size="small"
+                @click="handleDisconnect"
+              >
+                {{ t('sidebar.disconnect') }}
+              </el-button>
+            </div>
+          </div>
+
+          <!-- Language Switcher -->
+          <div class="setting-section">
+            <h5>语言</h5>
+            <div class="lang-switcher">
+              <button
+                v-for="opt in langOptions"
+                :key="opt.value"
+                class="lang-btn"
+                :class="{ active: currentLocale === opt.value }"
+                @click="switchLocale(opt.value)"
+              >{{ opt.label }}</button>
+            </div>
+          </div>
+        </div>
+      </el-popover>
     </div>
 
     <!-- Connection Status -->
@@ -376,7 +442,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
           @click="showConnectionDialog = true"
         >
           <el-icon><Link /></el-icon>
-          连接
+          {{ t('sidebar.connect') }}
         </button>
         
         <button 
@@ -420,14 +486,14 @@ watch(() => connectionStore.state, async (newState, oldState) => {
           </transition>
 
           <transition name="fade">
-            <span v-if="!isCollapsed && agent.isActive" class="active-badge">当前</span>
+            <span v-if="!isCollapsed && agent.isActive" class="active-badge">{{ t('common.current') }}</span>
           </transition>
         </li>
       </ul>
 
       <div v-else class="empty-agents">
         <el-icon :size="24" color="#64748b"><Monitor /></el-icon>
-        <p>{{ connectionStore.isConnected ? '暂无可用 Agent' : '连接后显示 Agents' }}</p>
+        <p>{{ connectionStore.isConnected ? t('chat.noAgent') : t('sidebar.connect') + ' Agents' }}</p>
       </div>
     </section>
 
@@ -444,7 +510,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       >
         <el-icon class="btn-icon"><Plus /></el-icon>
         <transition name="fade">
-          <span v-if="!isCollapsed">新建对话</span>
+          <span v-if="!isCollapsed">{{ t('sidebar.newChat') }}</span>
         </transition>
       </el-button>
     </div>
@@ -453,7 +519,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     <div class="search-wrapper" v-show="!isCollapsed && sessions.length > 0">
       <el-input
         v-model="searchQuery"
-        placeholder="搜索历史对话..."
+        :placeholder="t('common.search') + '...'"
         :prefix-icon="Search"
         clearable
         class="search-input"
@@ -464,12 +530,12 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     <nav class="sessions-nav">
       <div class="nav-header" v-show="!isCollapsed">
         <span class="nav-title">
-          {{ connectionStore.currentAgent ? `${connectionStore.currentAgent.name} 对话` : '所有对话' }}
+          {{ connectionStore.currentAgent ? `${connectionStore.currentAgent.name} ${t('sidebar.sessionList')}` : t('common.all') + ' ' + t('sidebar.sessionList') }}
         </span>
         <span class="session-count">{{ sessions.length }}</span>
         
         <span class="session-hint" v-if="!connectionStore.isConnected">
-          离线模式
+          {{ t('chat.offlineMode') }}
         </span>
       </div>
       
@@ -500,7 +566,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
             v-if="!isCollapsed" 
             class="delete-session-btn"
             @click="handleDeleteSession(session.id, $event)"
-            title="删除会话"
+            :title="t('sidebar.deleteConfirmTitle')"
           >
             <el-icon><Close /></el-icon>
           </button>
@@ -510,7 +576,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       <!-- Empty State -->
       <div v-else class="empty-sessions">
         <el-icon :size="32" color="#64748b"><FolderAdd /></el-icon>
-        <p>{{ connectionStore.currentAgent ? `暂无与 ${connectionStore.currentAgent.name} 的对话` : (connectionStore.isConnected ? '暂无对话' : '请先连接服务器') }}</p>
+        <p>{{ connectionStore.currentAgent ? `${t('common.noData')} ${connectionStore.currentAgent.name}` : (connectionStore.isConnected ? t('common.noData') : t('chat.notConnected')) }}</p>
         <el-button 
           size="small" 
           round 
@@ -518,7 +584,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
           @click="handleNewSession"
           v-if="!connectionStore.isConnected"
         >
-          创建会话
+          {{ t('common.create') }} {{ t('sidebar.sessionList') }}
         </el-button>
       </div>
     </nav>
@@ -527,12 +593,12 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     <div class="sidebar-footer" v-show="!isCollapsed">
       <div class="project-dir-info" v-if="connectionStore.currentProjectDir">
         <el-icon><FolderOpened /></el-icon>
-        <span class="project-dir-label">工作目录</span>
+        <span class="project-dir-label">{{ t('sidebar.localCache') }}</span>
         <code class="project-dir-path">{{ connectionStore.currentProjectDir }}</code>
         <button
           class="open-browser-btn"
           @click="emit('toggle-file-browser')"
-          title="打开文件浏览器"
+          :title="t('common.search')"
         >
           <el-icon><FolderOpened /></el-icon>
         </button>
@@ -556,88 +622,6 @@ watch(() => connectionStore.state, async (newState, oldState) => {
             </template>
           </span>
         </div>
-        
-        <el-popover placement="top-end" :width="300" trigger="click">
-          <template #reference>
-            <el-button text circle class="settings-btn">
-              <el-icon><Setting /></el-icon>
-            </el-button>
-          </template>
-          
-          <div class="settings-panel">
-            <h4>⚙️ 设置面板</h4>
-            
-            <!-- Connection Settings -->
-            <div class="setting-section">
-              <h5>连接配置</h5>
-              <div class="setting-item">
-                <label>服务器地址</label>
-                <el-input 
-                  v-model="serverUrl" 
-                  size="small" 
-                  placeholder="ws://localhost:1314/ws" 
-                />
-              </div>
-              
-              <div class="setting-actions">
-                <el-button 
-                  v-if="!connectionStore.isConnected"
-                  type="primary" 
-                  size="small" 
-                  @click="handleConnect"
-                  :loading="connectionStore.state === 'connecting'"
-                >
-                  {{ connectionStore.state === 'connecting' ? '连接中...' : '连接' }}
-                </el-button>
-                
-                <el-button 
-                  v-else
-                  size="small" 
-                  @click="handleDisconnect"
-                >
-                  断开
-                </el-button>
-              </div>
-            </div>
-
-            <!-- Local Data Info -->
-            <div class="setting-section">
-              <h5>本地缓存</h5>
-              <div class="cache-stats">
-                <div class="stat-item">
-                  <span class="stat-value">{{ sessionStore.sessions.length }}</span>
-                  <span class="stat-label">会话数</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-value">{{ Object.values(chatStore.messagesBySession).reduce((sum, msgs) => sum + msgs.length, 0) }}</span>
-                  <span class="stat-label">消息总数</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Danger Zone -->
-            <div class="setting-section danger">
-              <h5>数据与报表</h5>
-              <el-button
-                size="small"
-                type="primary"
-                plain
-                @click="showTokenReport = true"
-                style="margin-bottom: 8px; width: 100%;"
-              >
-                📊 Token 用量报表
-              </el-button>
-              <el-button 
-                size="small" 
-                type="danger" 
-                plain
-                @click="sessionStore.clearAll(); chatStore?.clearAll()"
-              >
-                🗑️ 清除所有本地数据
-              </el-button>
-            </div>
-          </div>
-        </el-popover>
       </div>
 
     <!-- Token Usage Footer (inside sidebar-footer, always visible when expanded) -->
@@ -647,7 +631,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     <!-- Connection Dialog -->
     <el-dialog
       v-model="showConnectionDialog"
-      title="连接到 MindX Daemon"
+      :title="t('sidebar.connect') + ' MindX Daemon'"
       width="420px"
       :close-on-click-modal="false"
       class="connection-dialog"
@@ -667,11 +651,11 @@ watch(() => connectionStore.state, async (newState, oldState) => {
           </svg>
         </div>
         
-        <p class="dialog-desc">请输入 MindX Daemon 的 WebSocket 地址以建立连接</p>
-        <p class="dialog-hint">💡 即使不连接，您也可以使用本地功能创建会话和查看历史消息</p>
+        <p class="dialog-desc">{{ t('chat.notConnected') }}</p>
+        <p class="dialog-hint">💡 {{ t('chat.offlineMode') }}</p>
         
         <el-form label-position="top">
-          <el-form-item label="WebSocket 地址">
+          <el-form-item :label="t('sidebar.connectionConfig')">
             <el-input 
               v-model="serverUrl" 
               size="large" 
@@ -698,19 +682,19 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       </div>
       
       <template #footer>
-        <el-button @click="showConnectionDialog = false">稍后再说</el-button>
+        <el-button @click="showConnectionDialog = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" @click="handleConnect" :loading="connectionStore.state === 'connecting'">
-          {{ connectionStore.state === 'connecting' ? '正在连接...' : '立即连接' }}
+          {{ connectionStore.state === 'connecting' ? t('sidebar.status.connecting') : t('sidebar.connect') }}
         </el-button>
         <el-button type="success" plain @click="showConnectionDialog = false; handleNewSession()">
-          先用离线模式
+          {{ t('chat.offlineMode') }}
         </el-button>
       </template>
     </el-dialog>
 
     <el-dialog
       :model-value="props.showSetupDialog"
-      title="选择工作目录"
+      :title="t('chat.selectWorkspace')"
       width="640px"
       :close-on-click-modal="false"
       class="setup-dialog"
@@ -720,7 +704,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     >
       <div class="setup-info" style="padding: 0 0 12px 0;">
         <p>Agent: <strong>{{ props.setupAgentName }}</strong></p>
-        <p class="setup-hint">每个会话需要对应一个目录存放工作文件，请先选择一个目录</p>
+        <p class="setup-hint">{{ t('chat.selectWorkspace') }}</p>
       </div>
       <DirectoryBrowser
         :visible="true"
@@ -730,12 +714,12 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       <template #footer>
         <div style="display: flex; align-items: center; gap: 12px; justify-content: space-between;">
           <div style="font-size: 12px; color: var(--text-secondary);">
-            当前: <code style="color: var(--accent-cyan); font-family: 'JetBrains Mono', monospace;">{{ displaySelectedPath || '(未选择)' }}</code>
+            {{ t('common.current') }}: <code style="color: var(--accent-cyan); font-family: 'JetBrains Mono', monospace;">{{ displaySelectedPath || '(' + t('common.none') + ')' }}</code>
           </div>
           <div style="display: flex; gap: 8px;">
-            <el-button @click="emit('setupCancel')">取消</el-button>
+            <el-button @click="emit('setupCancel')">{{ t('common.cancel') }}</el-button>
             <el-button type="primary" @click="confirmSetup" :disabled="!setupSelectedPath">
-              创建会话
+              {{ t('common.create') }} {{ t('sidebar.sessionList') }}
             </el-button>
           </div>
         </div>
@@ -794,13 +778,10 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 .logo-icon {
   width: 40px;
   height: 40px;
-  background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
-  box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3);
   flex-shrink: 0;
 }
 
@@ -825,27 +806,6 @@ watch(() => connectionStore.state, async (newState, oldState) => {
   padding: 2px 6px;
   background: rgba(6, 182, 212, 0.15);
   border-radius: 4px;
-}
-
-.collapse-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: none;
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.collapse-btn:hover {
-  background: var(--bg-card);
-  color: var(--accent-cyan);
-  transform: scale(1.05);
 }
 
 /* Connection Status */
@@ -1537,6 +1497,49 @@ watch(() => connectionStore.state, async (newState, oldState) => {
   font-size: 10px;
   color: var(--text-muted);
   text-transform: uppercase;
+}
+
+.lang-switcher {
+  display: flex;
+  gap: 0;
+  width: 100%;
+}
+
+.lang-btn {
+  flex: 1;
+  padding: 7px 0;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(55, 65, 81, 0.6);
+  background: rgba(15, 23, 42, 0.8);
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.lang-btn:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.lang-btn:last-child {
+  border-radius: 0 8px 8px 0;
+}
+
+.lang-btn:not(:last-child) {
+  border-right: none;
+}
+
+.lang-btn:hover {
+  color: #06b6d4;
+  background: rgba(6, 182, 212, 0.08);
+}
+
+.lang-btn.active {
+  background: linear-gradient(135deg, #06b6d4, #3b82f6);
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 2px 8px rgba(6, 182, 212, 0.3);
 }
 
 /* Dialog */

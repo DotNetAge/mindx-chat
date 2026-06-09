@@ -71,9 +71,9 @@ function toggleCollapse() {
 
         <div class="title-section">
           <h3 class="subtask-title">
-            <template v-if="isSpawned">子任务已派发</template>
-            <template v-else-if="!isSpawned && success === true">子任务完成</template>
-            <template v-else>子任务失败</template>
+            <template v-if="isSpawned">{{ t('subtask.spawned') }}</template>
+            <template v-else-if="!isSpawned && success === true">{{ t('subtask.completed') }}</template>
+            <template v-else>{{ t('subtask.failed') }}</template>
           </h3>
 
           <div class="header-tags">
@@ -108,13 +108,13 @@ function toggleCollapse() {
 
         <template v-else>
           <div class="body-section" v-if="success === true && answer">
-            <div class="section-label section-label-success">执行结果</div>
+            <div class="section-label section-label-success">{{ t('subtask.result') }}</div>
             <pre class="result-code"><code>{{ truncatedAnswer }}</code></pre>
             <span v-if="answer.length > 300" class="truncated-hint">内容已截断至 300 字符</span>
           </div>
 
           <div class="body-section" v-if="success === false && error">
-            <div class="section-label section-label-error">错误信息</div>
+            <div class="section-label section-label-error">{{ t('subtask.errorMsg') }}</div>
             <pre class="error-code"><code>{{ error }}</code></pre>
           </div>
         </template>

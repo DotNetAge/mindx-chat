@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import ThinkingView from './ThinkingView.vue'
 import ToolExecView from './ToolExecView.vue'
 import ChoicesPanel from './ChoicesPanel.vue'
@@ -12,6 +13,8 @@ import CompactionView from './CompactionView.vue'
 import MaxTurnsView from './MaxTurnsView.vue'
 import FormView from './FormView.vue'
 import DiffView from './DiffView.vue'
+
+const { t } = useI18n()
 
 const props = defineProps({
   message: {
@@ -177,7 +180,7 @@ function formatContent(content: string): string {
     <!-- Error Component -->
     <ErrorView
       v-else-if="componentType === 'error'"
-      :message="message.content || message.eventTitle || '发生错误'"
+      :message="message.content || message.eventTitle || t('message.error')"
       :code="message.eventData?.code || ''"
       :details="typeof message.eventData === 'string' ? message.eventData : JSON.stringify(message.eventData, null, 2)"
       :isRecoverable="true"

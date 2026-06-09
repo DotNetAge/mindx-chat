@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useConnectionStore } from '../stores/connectionStore'
 
 const connectionStore = useConnectionStore()
+const { t } = useI18n()
 
 const visible = ref(false)
 const queryText = ref('')
@@ -62,7 +64,7 @@ defineExpose({ visible, open, close })
         <div class="memory-modal">
           <!-- 头部 -->
           <div class="mm-header">
-            <h3>🧠 长期记忆查询</h3>
+            <h3>🧠 {{ t('memoryModal.title') }}</h3>
             <button class="mm-close" @click="visible = false">&times;</button>
           </div>
 
@@ -71,30 +73,30 @@ defineExpose({ visible, open, close })
             <input
               v-model="queryText"
               type="text"
-              placeholder="输入关键词搜索记忆..."
+              :placeholder="t('memoryModal.searchPlaceholder')"
               class="mm-input"
               @keydown="onKeydown"
               autofocus
             />
             <button class="mm-search-btn" @click="doSearch" :disabled="searching || !queryText.trim()">
-              {{ searching ? '...' : '搜索' }}
+              {{ searching ? '...' : t('common.search') }}
             </button>
           </div>
 
           <!-- 结果列表 -->
           <div class="mm-results">
             <!-- 加载中 -->
-            <div v-if="searching" class="mm-empty">搜索中...</div>
+            <div v-if="searching" class="mm-empty">{{ t('common.loading') }}...</div>
 
             <!-- 错误 -->
             <div v-else-if="error" class="mm-error">{{ error }}</div>
 
             <!-- 空状态 -->
             <div v-else-if="!results.length && queryText.trim()" class="mm-empty">
-              未找到匹配的记忆条目
+              {{ t('memoryModal.noMatch') }}
             </div>
             <div v-else-if="!results.length && !queryText.trim()" class="mm-hint">
-              输入关键词后按回车或点击搜索
+              {{ t('memoryModal.searchHint') }}
             </div>
 
             <!-- 结果项 -->
@@ -107,7 +109,7 @@ defineExpose({ visible, open, close })
                 <div class="mm-item-header" @click="toggleExpand(item.id)">
                   <span class="mm-idx">#{{ idx + 1 }}</span>
                   <span class="mm-score" :class="{ high: item.score > 0.8, mid: item.score > 0.5 }">
-                    匹配度 {{ (item.score * 100).toFixed(1) }}%
+                    {{ t('memoryModal.matchRate', { rate: (item.score * 100).toFixed(1) }) }}%
                   </span>
                   <span class="mm-time">{{ new Date(item.created_at).toLocaleString() }}</span>
                   <span class="mm-toggle">{{ isExpanded(item.id) ? '▲' : '▼' }}</span>

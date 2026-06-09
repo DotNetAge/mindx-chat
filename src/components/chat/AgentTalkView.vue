@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const props = defineProps({
   isStart: {
@@ -65,10 +68,10 @@ function hasContent(): boolean {
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
             <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" fill="currentColor"/>
           </svg>
-          已回复
+          {{ t('agentTalk.replied') }}
         </span>
 
-        <button class="collapse-btn" v-if="hasContent()" :title="isCollapsed ? '展开' : '收起'">
+        <button class="collapse-btn" v-if="hasContent()" :title="isCollapsed ? t('agentTalk.expand') : t('agentTalk.collapse')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
             <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
                   :style="{ transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0)', transition: 'transform 0.25s ease' }"/>
@@ -83,7 +86,7 @@ function hasContent(): boolean {
           <div class="chat-bubble sent-bubble">
             <div class="bubble-label">
               <span class="label-icon">📤</span>
-              发送消息
+              发送消息 → {{ t('agentTalk.sendMessage') }}
             </div>
             <div class="bubble-content">{{ message }}</div>
           </div>
@@ -93,14 +96,14 @@ function hasContent(): boolean {
           <div v-if="error" class="chat-bubble error-bubble">
             <div class="bubble-label">
               <span class="label-icon">⚠️</span>
-              对话错误
+              {{ t('agentTalk.talkError') }}
             </div>
             <div class="bubble-content error-text">{{ error }}</div>
           </div>
           <div v-else-if="reply" class="chat-bubble received-bubble">
             <div class="bubble-label">
               <span class="label-icon">📥</span>
-              收到回复
+              {{ t('agentTalk.receivedReply') }}
             </div>
             <div class="bubble-content">{{ reply }}</div>
           </div>

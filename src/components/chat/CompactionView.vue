@@ -63,7 +63,7 @@ const compactedPercent = computed(() => {
     <div class="compaction-body">
       <div class="window-bar-section">
         <div class="bar-labels">
-          <span class="bar-label">上下文窗口</span>
+          <span class="bar-label">{{ t('compactionView.window') }}</span>
           <span class="bar-value">{{ formatNumber(remainingAfter) }} / {{ formatNumber(windowSize) }}</span>
         </div>
         <div class="window-bar-track">
@@ -98,7 +98,7 @@ const compactedPercent = computed(() => {
           <span class="stat-icon remaining">📋</span>
           <div class="stat-info">
             <span class="stat-value">{{ formatNumber(remainingAfter) }}</span>
-            <span class="stat-label">保留消息</span>
+            <span class="stat-label">{{ t('compactionView.retainedMessages') }}</span>
           </div>
         </div>
 

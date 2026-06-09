@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import ChatLayout from './components/ChatLayout.vue'
 import { useConnectionStore } from './stores/connectionStore'
 import { useSessionStore } from './stores/sessionStore'
@@ -9,6 +10,7 @@ import { ElConfigProvider, ElMessage } from 'element-plus'
 const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
 const chatStore = useChatStore()
+const { t } = useI18n()
 
 const showSetupDialog = ref(false)
 const setupAgentName = ref('')
@@ -27,11 +29,11 @@ async function initializeAfterConnect() {
     // 这里仅处理 Model 初始化
 
     // ========================================
-    // 🎯 Model 初始化：只从服务端 ~/.mindx/mindh.json 读取
+    // 🎯 Model 初始化：只从服务端 ~/.mindx.json 读取
     // ❌ 不再从 Agent.model 读取
     // ❌ 不再从 localStorage 缓存读取
     // ========================================
-    console.log(`[MindX] 📋 Fetching user config from server (~/.mindx/mindh.json)...`)
+    console.log(`[MindX] 📋 Fetching user config from server (/home/mindx/.mindx/mindx.json)...`)
 
     try {
       const userConfig = await connectionStore.fetchUserConfig()
@@ -63,7 +65,7 @@ async function initializeAfterConnect() {
 
 async function handleDirectoryConfirm() {
   if (!selectedDirectory.value.trim()) {
-    ElMessage.warning({ message: '请先选择一个工作目录', duration: 3000 })
+    ElMessage.warning({ message: t('chat.selectWorkspace'), duration: 3000 })
     return
   }
   if (!setupAgentName.value) {
@@ -108,7 +110,7 @@ async function handleDirectoryConfirm() {
 
     showSetupDialog.value = false
     pendingSetup.value = false
-    ElMessage.success({ message: `会话已${existingSession ? '恢复' : '创建'}`, duration: 2000 })
+    ElMessage.success({ message: t(existingSession ? 'chat.sessionRestored' : 'chat.sessionCreated'), duration: 2000 })
   } catch (e) {
     console.error('[MindX] Failed to setup session:', e)
   }

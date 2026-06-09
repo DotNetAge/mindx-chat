@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import {
   Folder,
@@ -35,6 +36,7 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'select', 'update:currentSelection'])
 
 const connectionStore = useConnectionStore()
+const { t } = useI18n()
 
 const currentPath = ref('')
 const pathInput = ref('')
@@ -130,7 +132,7 @@ async function fetchFSList(path: string) {
   loading.value = true
   try {
     if (!connectionStore.isConnected) {
-      throw new Error('未连接到 MindX 服务，请先建立连接')
+      throw new Error(t('directoryBrowser.notConnected'))
     }
     entries.value = await connectionStore.fetchFSList(path)
     currentPath.value = path
@@ -144,7 +146,7 @@ async function fetchFSList(path: string) {
     }
     emit('update:currentSelection', path)
   } catch (err: any) {
-    ElMessage.error({ message: err?.message || '无法访问该路径', duration: 3000 })
+    ElMessage.error({ message: err?.message || t('directoryBrowser.cannotAccessPath'), duration: 3000 })
   } finally {
     loading.value = false
   }
@@ -156,7 +158,7 @@ async function handleOpen() {
     let targetPath = props.initialPath
     if (!targetPath) {
       if (!connectionStore.isConnected) {
-        throw new Error('未连接到 MindX 服务，请先建立连接')
+        throw new Error(t('directoryBrowser.notConnected'))
       }
       targetPath = await connectionStore.fetchFSHome()
     }
@@ -168,10 +170,10 @@ async function handleOpen() {
       }
       await fetchFSList(targetPath)
     } else {
-      ElMessage.error({ message: '无法获取用户主目录', duration: 3000 })
+      ElMessage.error({ message: t('directoryBrowser.cannotGetHomeDir'), duration: 3000 })
     }
   } catch (err: any) {
-    ElMessage.error({ message: err?.message || '获取主目录失败，请检查连接状态', duration: 3000 })
+    ElMessage.error({ message: err?.message || t('directoryBrowser.getHomeDirFailed'), duration: 3000 })
     loading.value = false
   }
 }
@@ -238,7 +240,7 @@ watch(() => props.visible, (val) => {
     <template #header>
       <div class="dialog-title-bar">
         <span class="dialog-title-icon">📁</span>
-        <span class="dialog-title-text">选择工作目录</span>
+        <span class="dialog-title-text">{{ t('directoryBrowser.title') }}</span>
       </div>
     </template>
 
@@ -247,7 +249,7 @@ watch(() => props.visible, (val) => {
         <el-icon class="home-icon" @click="handleOpen"><House /></el-icon>
         <el-input
           v-model="displayPathInput"
-          placeholder="输入路径 (支持 ~ 缩写)..."
+          :placeholder="t('directoryBrowser.pathLabel')"
           size="default"
           class="path-input"
           @keyup.enter="goToInputPath"
@@ -278,7 +280,7 @@ watch(() => props.visible, (val) => {
       <div class="entry-list-wrapper">
         <div v-if="loading && entries.length === 0" class="loading-overlay">
           <el-icon class="loading-spinner" :size="32"><Loading /></el-icon>
-          <span>加载中...</span>
+          <span>{{ t('common.loading') }}...</span>
         </div>
 
         <table v-else class="entry-table">
@@ -287,7 +289,7 @@ watch(() => props.visible, (val) => {
               <td class="entry-name-cell">
                 <span class="entry-icon">📁</span>
                 <span class="entry-name">..</span>
-                <span class="entry-hint">(上级目录)</span>
+                <span class="entry-hint">({{ t('directoryBrowser.parentDir') }})</span>
               </td>
               <td class="entry-size-cell"></td>
               <td class="entry-date-cell"></td>
@@ -316,7 +318,7 @@ watch(() => props.visible, (val) => {
 
             <tr v-if="!loading && sortedEntries.length === 0">
               <td colspan="3" class="empty-cell">
-                <span>此目录为空</span>
+                <span>{{ t('directoryBrowser.dirEmpty') }}</span>
               </td>
             </tr>
           </tbody>
@@ -327,13 +329,13 @@ watch(() => props.visible, (val) => {
     <template #footer>
       <div class="dialog-footer">
         <div class="current-path-display">
-          <span class="path-label">当前:</span>
+          <span class="path-label">{{ t('directoryBrowser.currentPath') }}:</span>
           <code class="path-code" :title="currentPath">{{ displayPath || '/' }}</code>
         </div>
         <div class="action-buttons">
-          <el-button class="cancel-btn" @click="handleClose">取消</el-button>
+          <el-button class="cancel-btn" @click="handleClose">{{ t('common.cancel') }}</el-button>
           <el-button type="primary" class="select-btn" @click="handleSelect">
-            ✓ 选择此目录
+            ✓ {{ t('directoryBrowser.confirm') }}
           </el-button>
         </div>
       </div>
@@ -345,21 +347,21 @@ watch(() => props.visible, (val) => {
       <el-icon class="home-icon" @click="handleOpen"><House /></el-icon>
       <el-input
         v-model="displayPathInput"
-        placeholder="输入路径 (支持 ~ 缩写)..."
-        size="default"
-        class="path-input"
-        @keyup.enter="goToInputPath"
-      />
-      <el-button size="default" class="go-btn" @click="goToInputPath">
-        <el-icon><Position /></el-icon>
-        Go
-      </el-button>
-      <el-button size="default" class="refresh-btn" :loading="loading" @click="refresh">
-        <el-icon><RefreshRight /></el-icon>
-      </el-button>
-    </div>
+        :placeholder="t('directoryBrowser.pathLabel')"
+          size="default"
+          class="path-input"
+          @keyup.enter="goToInputPath"
+        />
+        <el-button size="default" class="go-btn" @click="goToInputPath">
+          <el-icon><Position /></el-icon>
+          Go
+        </el-button>
+        <el-button size="default" class="refresh-btn" :loading="loading" @click="refresh">
+          <el-icon><RefreshRight /></el-icon>
+        </el-button>
+      </div>
 
-    <div class="breadcrumb-row">
+      <div class="breadcrumb-row">
       <el-breadcrumb separator="/">
         <el-breadcrumb-item v-if="showRootLink">
           <a class="breadcrumb-link" @click.prevent="navigateTo('~')">~</a>
@@ -376,7 +378,7 @@ watch(() => props.visible, (val) => {
     <div class="entry-list-wrapper">
       <div v-if="loading && entries.length === 0" class="loading-overlay">
         <el-icon class="loading-spinner" :size="32"><Loading /></el-icon>
-        <span>加载中...</span>
+        <span>{{ t('directoryBrowser.loading') }}</span>
       </div>
 
       <table v-else class="entry-table">
@@ -385,7 +387,7 @@ watch(() => props.visible, (val) => {
             <td class="entry-name-cell">
               <span class="entry-icon">📁</span>
               <span class="entry-name">..</span>
-              <span class="entry-hint">(上级目录)</span>
+              <span class="entry-hint">({{ t('directoryBrowser.parentDir') }})</span>
             </td>
             <td class="entry-size-cell"></td>
             <td class="entry-date-cell"></td>
@@ -414,7 +416,7 @@ watch(() => props.visible, (val) => {
 
           <tr v-if="!loading && sortedEntries.length === 0">
             <td colspan="3" class="empty-cell">
-              <span>此目录为空</span>
+              <span>{{ t('directoryBrowser.dirEmpty') }}</span>
             </td>
           </tr>
         </tbody>

@@ -98,7 +98,7 @@ function toggleCollapse() {
     <!-- Header：死文字 + 状态动画 + 折叠 toggle -->
     <div class="thinking-header" @click="toggleCollapse">
       <span class="header-icon">💭</span>
-      <span class="header-label">思考过程</span>
+      <span class="header-label">{{ t('message.thinking') }}</span>
       <span v-if="displayDuration" class="thinking-timer" :class="{ active: isActive, done: isComplete }">{{ displayDuration }}</span>
       <span v-if="isActive" class="loading-spinner"></span>
       <span v-else class="collapse-icon">{{ isCollapsed ? '▶' : '▼' }}</span>

@@ -62,7 +62,7 @@ function handleDismiss() {
           v-if="isRecoverable"
           class="retry-btn" 
           @click="handleRetry"
-          title="重试"
+          :title="t('errorView.retry')"
         >
           <el-icon><RefreshRight /></el-icon>
         </button>
@@ -71,12 +71,12 @@ function handleDismiss() {
           v-if="details"
           class="expand-btn" 
           @click="toggleExpand"
-          :title="'查看详情'"
+          :title="t('errorView.viewDetails')"
         >
           <el-icon><ArrowDown v-if="!isExpanded" /><ArrowUp v-else /></el-icon>
         </button>
 
-        <button class="dismiss-btn" @click="handleDismiss" title="关闭">
+        <button class="dismiss-btn" @click="handleDismiss" :title="t('errorView.close')">
           <el-icon><Close /></el-icon>
         </button>
       </div>
@@ -86,7 +86,7 @@ function handleDismiss() {
     <transition name="expand">
       <div class="error-details" v-show="isExpanded && details">
         <div class="details-header">
-          <span class="stack-label">📋 错误详情</span>
+          <span class="stack-label">📋 {{ t('errorView.detailTitle') }}</span>
         </div>
         
         <pre class="stack-trace"><code>{{ details }}</code></pre>
@@ -101,7 +101,7 @@ function handleDismiss() {
       </button>
       
       <button class="action-btn-secondary" @click="handleDismiss">
-        忽略并继续
+        {{ t('errorView.ignore') }}
       </button>
     </div>
   </div>

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Loading } from '@element-plus/icons-vue'
 import { getMindXClient } from '../../services/websocket'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   visible: boolean
@@ -74,7 +77,7 @@ watch(() => props.visible, (v) => {
 <template>
   <el-dialog
     :model-value="props.visible"
-    title="📅 计划任务日历"
+    :title="t('schedule.calendarTitle')"
     width="820px"
     :close-on-click-modal="false"
     @update:model-value="(v) => !v && handleClose()"
@@ -108,7 +111,7 @@ watch(() => props.visible, (v) => {
         </div>
 
         <div v-else-if="schedules.length === 0" class="empty-state">
-          暂无计划任务
+          {{ t('schedule.empty') }}
         </div>
 
         <div v-else class="schedule-list">
@@ -121,7 +124,7 @@ watch(() => props.visible, (v) => {
             <div class="schedule-header">
               <span class="schedule-agent">{{ s.agent }}</span>
               <span class="schedule-status" :class="{ active: s.enabled }">
-                {{ s.enabled ? '启用' : '暂停' }}
+                {{ s.enabled ? t('schedule.enable') : t('schedule.disable') }}
               </span>
             </div>
             <div class="schedule-body">

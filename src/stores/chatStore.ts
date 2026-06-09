@@ -3,6 +3,9 @@ import { useConnectionStore } from './connectionStore'
 import { useSessionStore } from './sessionStore'
 import { getMindXClient } from '../services/websocket'
 import type { SessionMessage } from '../types/websocket'
+import i18n from '../i18n'
+
+const t = (key: string, params?: Record<string, unknown>) => i18n.global.t(key, params)
 
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
 
@@ -177,7 +180,7 @@ export const useChatStore = defineStore('chat', {
               role: 'assistant',
               content: msg.reasoning_content,
               eventType: 'thinking_done',
-              eventTitle: '💭 思考过程',
+              eventTitle: '💭 ' + t('message.thinking'),
               metadata: { complete: true, duration_ms: thinkDurationMs },
               timestamp: new Date(msg.timestamp).toISOString(),
               sessionId
@@ -186,7 +189,7 @@ export const useChatStore = defineStore('chat', {
           for (const tc of toolCalls) {
             // GoReact 扁平格式 { id, name, arguments }
             pendingToolCalls.set(tc.id, {
-              name: tc.name || '工具',
+              name: tc.name || t('message.toolUse'),
               args: tc.arguments ? (() => { try { return JSON.parse(tc.arguments) } catch { return tc.arguments } })() : null
             })
             toolCallStartTimestamps.set(tc.id, msgTimestamp)
@@ -198,7 +201,7 @@ export const useChatStore = defineStore('chat', {
         // 通过 tool_call_id 精确匹配对应的工具调用
         if (msg.role === 'tool') {
           const match = pendingToolCalls.get(msg.tool_call_id || '')
-          const toolName = match?.name || '工具'
+          const toolName = match?.name || t('message.toolUse')
           const toolArgs = match?.args || null
           const startTs = toolCallStartTimestamps.get(msg.tool_call_id || '')
           const durationMs = startTs ? Math.round((msgTimestamp - startTs) * 1000) : 0
@@ -241,7 +244,7 @@ export const useChatStore = defineStore('chat', {
                 role: 'assistant',       // 保持原始 role，不造 thinking
                 content: msg.reasoning_content,
                 eventType: 'thinking_done',
-                eventTitle: '💭 思考过程',
+                eventTitle: '💭 ' + t('message.thinking'),
                 metadata: { complete: true, duration_ms: thinkDurationMs },
                 timestamp: new Date(msg.timestamp).toISOString(),
                 sessionId
@@ -320,7 +323,7 @@ export const useChatStore = defineStore('chat', {
             msg.eventData.status = 'failed'
             msg.eventData.end = {
               success: false,
-              error: '用户取消了操作',
+              error: t('message.userCancelled'),
               tool_name: msg.eventTitle || ''
             }
           }
@@ -359,7 +362,7 @@ export const useChatStore = defineStore('chat', {
         this.processingTimer = setTimeout(() => {
           console.warn('[MindX Chat] ⏰ Processing timeout - no response received, resetting state')
           this.resetProcessingState()
-          this.lastError = '处理超时，未收到服务器响应'
+          this.lastError = t('message.timeout', { msg: t('chat.store.timeout.serverNoResponse') })
         }, 60000)
 
         return { sent: true, queued: false }
@@ -370,7 +373,7 @@ export const useChatStore = defineStore('chat', {
           sessionId: targetSessionId
         })
 
-        this.lastError = '当前处于离线模式，消息将在重新连接后发送'
+        this.lastError = t('chat.offlineMode')
         this.isOfflineMode = true
 
         return { sent: false, queued: true }
@@ -482,7 +485,7 @@ export const useChatStore = defineStore('chat', {
           role: 'assistant',
           content: '',
           eventType: 'thinking_delta',
-          eventTitle: '💭 思考中',
+          eventTitle: '💭 ' + t('chat.thinking'),
           metadata: { complete: false }
         })
       }
@@ -516,7 +519,7 @@ export const useChatStore = defineStore('chat', {
           role: 'assistant',
           content,
           eventType: 'thinking_done',
-          eventTitle: '💭 思考过程',
+          eventTitle: '💭 ' + t('message.thinking'),
           metadata: { complete: true }
         })
       }
@@ -571,14 +574,14 @@ export const useChatStore = defineStore('chat', {
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
 
       // tool_name 优先级: data.tool_name > pendingToolUseDelta.name > opts.title > '工具'
-      const toolName = data?.tool_name || this.pendingToolUseDelta?.name || opts?.title || '工具'
+      const toolName = data?.tool_name || this.pendingToolUseDelta?.name || opts?.title || t('message.toolUse')
       this.currentAction = toolName
       this.isProcessing = true
 
       // 直接透传 GoReact 原始数据，如有缓存的 delta 则合并 arguments 到 params
       const startData = { ...data }
       // 如果 GoReact 没传 tool_name（旧版兼容），用我们确定的名称回填
-      if (!startData.tool_name && toolName !== '工具') {
+      if (!startData.tool_name && toolName !== t('message.toolUse')) {
         startData.tool_name = toolName
       }
       if (this.pendingToolUseDelta && !startData.params) {
@@ -667,7 +670,7 @@ export const useChatStore = defineStore('chat', {
         role: 'assistant',
         content: finalContent,
         eventType: 'final_answer',
-        eventTitle: opts?.title || '最终答案'
+        eventTitle: opts?.title || t('message.finalAnswer')
       })
 
       this.isProcessing = false
@@ -726,12 +729,12 @@ export const useChatStore = defineStore('chat', {
     handleError(data: any, opts?: { session_id?: string; title?: string }) {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
-      const errorContent = data || opts?.title || '发生错误'
+      const errorContent = data || opts?.title || t('message.error')
       this.addMessage(targetSessionId, {
         role: 'system',
         content: errorContent,
         eventType: 'error',
-        eventTitle: opts?.title || '❌ 错误',
+        eventTitle: opts?.title || '❌ ' + t('common.error'),
         eventData: data
       })
 
@@ -746,7 +749,7 @@ export const useChatStore = defineStore('chat', {
         role: 'system',
         content: typeof data === 'string' ? data : '',
         eventType: 'subtask_spawned',
-        eventTitle: opts?.title || '🌿 子任务生成',
+        eventTitle: opts?.title || '🌿 ' + t('message.subtaskSpawned'),
         eventData: data,
         metadata: { phase: 'subtask_spawned' }
       })
@@ -760,7 +763,7 @@ export const useChatStore = defineStore('chat', {
         role: 'system',
         content,
         eventType: 'subtask_completed',
-        eventTitle: data?.success ? '✅ 子任务完成' : '❌ 子任务失败',
+        eventTitle: data?.success ? '✅ ' + t('message.subtaskCompleted') : '❌ ' + t('message.subtaskFailed'),
         eventData: data,
         metadata: { phase: 'subtask_completed', success: data?.success }
       })
@@ -779,7 +782,7 @@ export const useChatStore = defineStore('chat', {
         role: 'system',
         content: '',
         eventType: 'permission_request',
-        eventTitle: opts?.title || '🔒 权限请求',
+        eventTitle: opts?.title || '🔒 ' + t('message.permissionRequest'),
         eventData: data,
         metadata: { phase: 'permission', correlationId }
       })
@@ -798,7 +801,7 @@ export const useChatStore = defineStore('chat', {
         role: 'system',
         content: '',
         eventType: 'form',
-        eventTitle: opts?.title || '💬 需要澄清',
+        eventTitle: opts?.title || '💬 ' + t('message.clarification'),
         eventData: data,
         metadata: { phase: 'clarify', correlationId }
       })
@@ -809,9 +812,9 @@ export const useChatStore = defineStore('chat', {
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
       this.addMessage(targetSessionId, {
         role: 'system',
-        content: data || '权限被拒绝',
+        content: data || t('message.permissionDenied'),
         eventType: 'permission_denied',
-        eventTitle: '🚫 权限拒绝',
+        eventTitle: '🚫 ' + t('message.permissionDenied'),
         eventData: data,
         metadata: { phase: 'denied' }
       })
@@ -832,7 +835,7 @@ export const useChatStore = defineStore('chat', {
         role: 'assistant',
         content: this.pendingContentBySession[targetSessionId] || summaryText,
         eventType: 'task_summary',
-        eventTitle: opts?.title || '📋 任务总结',
+        eventTitle: opts?.title || '📋 ' + t('message.taskSummary'),
         eventData: data,
         metadata: {
           phase: 'summary',
@@ -854,7 +857,7 @@ export const useChatStore = defineStore('chat', {
         role: 'system',
         content: typeof data === 'string' ? data : (data?.message || ''),
         eventType: 'agent_talk_start',
-        eventTitle: opts?.title || '🤖 Agent 对话开始',
+        eventTitle: opts?.title || '🤖 ' + t('message.agentTalkStart'),
         eventData: data,
         metadata: { phase: 'agent_talk_start', to: data?.to }
       })
@@ -868,7 +871,7 @@ export const useChatStore = defineStore('chat', {
         role: 'system',
         content,
         eventType: 'agent_talk_end',
-        eventTitle: '🤖 Agent 对话结束',
+        eventTitle: '🤖 ' + t('message.agentTalkEnd'),
         eventData: data,
         metadata: { phase: 'agent_talk_end', to: data?.to, hasError: !!data?.error }
       })
@@ -881,7 +884,7 @@ export const useChatStore = defineStore('chat', {
         role: 'system',
         content: '',
         eventType: 'compaction',
-        eventTitle: '📦 上下文压缩',
+        eventTitle: '📦 ' + t('message.compaction'),
         eventData: data,
         metadata: { phase: 'compaction' }
       })
@@ -892,9 +895,9 @@ export const useChatStore = defineStore('chat', {
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
       this.addMessage(targetSessionId, {
         role: 'system',
-        content: data?.suggestion || `已达到最大轮次 ${data?.turns_completed || '?'}/${data?.max_turns || '?'}`,
+        content: data?.suggestion || `${t('message.maxTurnsReached')} ${data?.turns_completed || '?'}/${data?.max_turns || '?'}`,
         eventType: 'max_turns_reached',
-        eventTitle: '⚠️ 达到最大轮次',
+        eventTitle: '⚠️ ' + t('message.maxTurnsReached'),
         eventData: data,
         metadata: { phase: 'max_turns' }
       })
@@ -916,7 +919,7 @@ export const useChatStore = defineStore('chat', {
     formatExecutionSummary(data: any): string {
       if (!data) return ''
 
-      let md = '### 📊 执行摘要\n\n'
+      let md = '### 📊 ' + t('message.executionSummary') + '\n\n'
 
       if (data.rows && Array.isArray(data.rows)) {
         data.rows.forEach((row: Record<string, string>) => {

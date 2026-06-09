@@ -2,6 +2,9 @@
 import { ref, computed, watch, useTemplateRef, nextTick } from 'vue'
 import { CopyDocument, Document, Download } from '@element-plus/icons-vue'
 import { useMarkdown } from '../../composables/useMarkdown'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const props = defineProps({
   content: {
@@ -122,7 +125,7 @@ watch(
         <el-icon><Download /></el-icon>
         <span v-if="downloadSuccess" class="action-success">✓</span>
       </button>
-      <button class="action-btn" @click.stop="showRaw = !showRaw" :title="showRaw ? '渲染视图' : '原始视图'" aria-label="切换原始/渲染">
+      <button class="action-btn" @click.stop="showRaw = !showRaw" :title="showRaw ? t('outputView.renderedView') : t('outputView.rawView')" :aria-label="t('outputView.toggleView')">
         <el-icon><Document /></el-icon>
       </button>
     </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useConnectionStore } from '../../stores/connectionStore'
 import type { ProviderInfo, ModelConfig, ProviderCreateParams, ModelCreateParams } from '../../types/websocket'
@@ -14,6 +15,7 @@ const emit = defineEmits<{
 }>()
 
 const connectionStore = useConnectionStore()
+const { t } = useI18n()
 
 const selectedProvider = ref('')
 const selectedModel = ref('')
@@ -91,7 +93,7 @@ function openEditProvider(p: ProviderInfo) {
 
 async function saveProvider() {
   if (!providerForm.value.name || !providerForm.value.base_url || !providerForm.value.api_key) {
-    ElMessage.warning('请填写必填字段（名称、BaseURL、API Key）')
+    ElMessage.warning(t('providerModel.requiredFields'))
     return
   }
 
@@ -99,17 +101,17 @@ async function saveProvider() {
   try {
     if (editingProvider.value) {
       await connectionStore.updateProvider(providerForm.value)
-      ElMessage.success(`已更新 ${providerForm.value.title || providerForm.value.name}`)
+      ElMessage.success(t('providerModel.updatedSuccess', { name: providerForm.value.title || providerForm.value.name }))
     } else {
       await connectionStore.createProvider(providerForm.value as ProviderCreateParams)
-      ElMessage.success(`已创建 ${providerForm.value.title || providerForm.value.name}`)
+      ElMessage.success(t('providerModel.createdSuccess', { name: providerForm.value.title || providerForm.value.name }))
       if (!selectedProvider.value) selectedProvider.value = providerForm.value.name
     }
     showProviderForm.value = false
     editingProvider.value = null
     await refreshData()
   } catch (err: any) {
-    ElMessage.error(err.message || '保存失败')
+    ElMessage.error(err.message || t('common.error'))
   } finally {
     saving.value = false
   }
@@ -119,19 +121,19 @@ async function deleteProvider(name: string) {
   const p = providerList.value.find(p => p.name === name)
   try {
     await ElMessageBox.confirm(
-      `确定要删除供应商 "${p?.title || name}" 吗？`,
-      '确认删除',
-      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+      t('providerModel.confirmDeleteProvider', { name: p?.title || name }),
+      t('common.confirm'),
+      { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning' }
     )
   } catch { return }
 
   try {
     await connectionStore.deleteProvider(name)
-    ElMessage.success(`已删除 ${name}`)
+    ElMessage.success(t('providerModel.deletedSuccess', { name }))
     if (selectedProvider.value === name) selectedProvider.value = ''
     await refreshData()
   } catch (err: any) {
-    ElMessage.error(err.message || '删除失败')
+    ElMessage.error(err.message || t('common.error'))
   }
 }
 
@@ -203,7 +205,7 @@ function openEditModel(m: ModelConfig) {
 
 async function saveModel() {
   if (!modelForm.value.name || !modelForm.value.title || !modelForm.value.provider) {
-    ElMessage.warning('请填写必填字段（名称、标题、供应商）')
+    ElMessage.warning(t('providerModel.requiredFieldsModel'))
     return
   }
 
@@ -211,16 +213,16 @@ async function saveModel() {
   try {
     if (editingModel.value) {
       await connectionStore.updateModel(modelForm.value)
-      ElMessage.success(`已更新 ${modelForm.value.title}`)
+      ElMessage.success(t('providerModel.updatedSuccess', { name: modelForm.value.title }))
     } else {
       await connectionStore.createModel(modelForm.value as ModelCreateParams)
-      ElMessage.success(`已创建 ${modelForm.value.title}`)
+      ElMessage.success(t('providerModel.createdSuccess', { name: modelForm.value.title }))
     }
     showModelForm.value = false
     editingModel.value = null
     await refreshData()
   } catch (err: any) {
-    ElMessage.error(err.message || '保存失败')
+    ElMessage.error(err.message || t('common.error'))
   } finally {
     saving.value = false
   }
@@ -230,19 +232,19 @@ async function deleteModel(name: string) {
   const m = currentModels.value.find(m => m.name === name)
   try {
     await ElMessageBox.confirm(
-      `确定要删除模型 "${m?.title || name}" 吗？`,
-      '确认删除',
-      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+      t('providerModel.confirmDeleteModel', { name: m?.title || name }),
+      t('common.confirm'),
+      { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning' }
     )
   } catch { return }
 
   try {
     await connectionStore.deleteModel(name)
-    ElMessage.success(`已删除 ${name}`)
+    ElMessage.success(t('providerModel.deletedSuccess', { name }))
     if (selectedModel.value === name) selectedModel.value = ''
     await refreshData()
   } catch (err: any) {
-    ElMessage.error(err.message || '删除失败')
+    ElMessage.error(err.message || t('common.error'))
   }
 }
 
@@ -273,7 +275,7 @@ watch(() => props.visible, async (val) => {
 <template>
   <el-dialog
     :model-value="props.visible"
-    title="模型与供应商设置"
+    :title="t('providerModel.title')"
     width="780px"
     :close-on-click-modal="false"
     @update:model-value="(v) => !v && handleClose()"
@@ -283,7 +285,7 @@ watch(() => props.visible, async (val) => {
       <!-- Left: Provider List -->
       <div class="panel-left">
         <div class="panel-header">
-          <span class="panel-title">供应商</span>
+          <span class="panel-title">{{ t('providerModel.providerTab') }}</span>
         </div>
 
         <div class="provider-list">
@@ -296,25 +298,25 @@ watch(() => props.visible, async (val) => {
           >
             <div class="provider-main">
               <span class="provider-name">{{ connectionStore.formatProviderTitle(p.name) }}</span>
-              <span class="provider-count">{{ p.models.length }} 模型</span>
+              <span class="provider-count">{{ p.models.length }} {{ t('providerModel.modelTab') }}</span>
             </div>
             <div class="item-actions" @click.stop>
-              <button class="action-btn" title="编辑" @click="openEditProvider(p)">✎</button>
-              <button class="action-btn danger" title="删除" @click="deleteProvider(p.name)">−</button>
-              <span v-if="!isProviderConfigured(p.name)" class="unconfigured-tag">未配置</span>
+              <button class="action-btn" :title="t('common.edit')" @click="openEditProvider(p)">✎</button>
+              <button class="action-btn danger" :title="t('common.delete')" @click="deleteProvider(p.name)">−</button>
+              <span v-if="!isProviderConfigured(p.name)" class="unconfigured-tag">{{ t('providerModel.unconfiguredBadge') }}</span>
             </div>
           </div>
 
-          <div v-if="!providerList.length" class="empty-hint">暂无供应商</div>
+          <div v-if="!providerList.length" class="empty-hint">{{ t('common.noData') }}</div>
         </div>
 
-        <button class="add-bottom-btn" @click="openAddProvider">+ 新增供应商</button>
+        <button class="add-bottom-btn" @click="openAddProvider">+ {{ t('providerModel.addProvider') }}</button>
       </div>
 
       <!-- Right: Model List -->
       <div class="panel-right">
         <div class="panel-header">
-          <span class="panel-title">{{ selectedProvider ? `${connectionStore.formatProviderTitle(selectedProvider)} 模型` : '模型列表' }}</span>
+          <span class="panel-title">{{ selectedProvider ? `${connectionStore.formatProviderTitle(selectedProvider)} ${t('providerModel.modelTab')}` : t('providerModel.modelList') }}</span>
         </div>
 
         <div class="model-list">
@@ -329,49 +331,49 @@ watch(() => props.visible, async (val) => {
               <div class="model-main">
                 <div class="model-info">
                   <span class="model-name">{{ m.title || m.name }}</span>
-                  <span v-if="m.name === connectionStore.currentModelName" class="current-badge">当前</span>
-                  <span v-if="!m.enabled" class="disabled-badge">禁用</span>
+                  <span v-if="m.name === connectionStore.currentModelName" class="current-badge">{{ t('providerModel.currentBadge') }}</span>
+                  <span v-if="!m.enabled" class="disabled-badge">{{ t('providerModel.disabledBadge') }}</span>
                 </div>
                 <div class="model-desc">{{ m.description }}</div>
                 <div class="model-meta">
                   <span>{{ m.context_length ? formatNumber(m.context_length) + ' ctx' : '' }}</span>
-                  <span v-if="m.is_local" class="local-tag">本地</span>
+                  <span v-if="m.is_local" class="local-tag">{{ t('providerModel.localBadge') }}</span>
                 </div>
               </div>
               <div class="item-actions" @click.stop>
-                <button class="action-btn" title="编辑" @click="openEditModel(m)">✎</button>
-                <button class="action-btn danger" title="删除" @click="deleteModel(m.name)">−</button>
+                <button class="action-btn" :title="t('common.edit')" @click="openEditModel(m)">✎</button>
+                <button class="action-btn danger" :title="t('common.delete')" @click="deleteModel(m.name)">−</button>
               </div>
             </div>
 
-            <div v-if="currentModels.length === 0" class="empty-hint">该供应商暂无模型</div>
+            <div v-if="currentModels.length === 0" class="empty-hint">{{ t('providerModel.noModels') }}</div>
           </template>
 
-          <div v-else class="empty-hint">← 请先选择左侧的供应商</div>
+          <div v-else class="empty-hint">← {{ t('providerModel.selectProviderFirst') }}</div>
         </div>
 
         <button
           v-if="selectedProvider"
           class="add-bottom-btn"
           @click="openAddModel"
-        >+ 新增模型</button>
+        >+ {{ t('providerModel.addModel') }}</button>
       </div>
     </div>
 
     <!-- Provider Form Dialog -->
     <el-dialog
       :model-value="showProviderForm"
-      :title="editingProvider ? '编辑供应商' : '新增供应商'"
+      :title="editingProvider ? t('providerModel.editProvider') : t('providerModel.addProviderTitle')"
       width="480px"
       append-to-body
       @update:model-value="showProviderForm = $event"
     >
       <el-form :model="providerForm" label-width="90px" label-position="top">
-        <el-form-item label="标识名 (name)" required>
+        <el-form-item :label="t('common.name') + ' (name)'" required>
           <el-input v-model="providerForm.name" placeholder="如: deepseek, dashscope" :disabled="!!editingProvider" />
         </el-form-item>
-        <el-form-item label="显示标题" required>
-          <el-input v-model="providerForm.title" placeholder="如: DeepSeek, Alibaba" />
+        <el-form-item :label="t('providerModel.displayTitle')" required>
+          <el-input v-model="providerForm.title" :placeholder="t('providerModel.placeholderProviderTitle')" />
         </el-form-item>
         <el-form-item label="Base URL" required>
           <el-input v-model="providerForm.base_url" placeholder="https://api.deepseek.com" />
@@ -384,32 +386,32 @@ watch(() => props.visible, async (val) => {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showProviderForm = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveProvider">保存</el-button>
+        <el-button @click="showProviderForm = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="saveProvider">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
 
     <!-- Model Form Dialog -->
     <el-dialog
       :model-value="showModelForm"
-      :title="editingModel ? '编辑模型' : '新增模型'"
+      :title="editingModel ? t('providerModel.editModel') : t('providerModel.addModelTitle')"
       width="560px"
       append-to-body
       @update:model-value="showModelForm = $event"
     >
       <el-form :model="modelForm" label-width="100px" label-position="top">
         <div class="form-row">
-          <el-form-item label="标识名" required style="flex:1">
-            <el-input v-model="modelForm.name" placeholder="如: gpt-4o" :disabled="!!editingModel" />
+          <el-form-item :label="t('common.name')" required style="flex:1">
+            <el-input v-model="modelForm.name" :placeholder="t('providerModel.placeholderModelName')" :disabled="!!editingModel" />
           </el-form-item>
-          <el-form-item label="显示标题" required style="flex:1">
+          <el-form-item :label="t('providerModel.displayTitle')" required style="flex:1">
             <el-input v-model="modelForm.title" placeholder="GPT-4o" />
           </el-form-item>
         </div>
-        <el-form-item label="描述">
-          <el-input v-model="modelForm.description" type="textarea" :rows="2" placeholder="模型特点说明..." />
+        <el-form-item :label="t('common.description')">
+          <el-input v-model="modelForm.description" type="textarea" :rows="2" :placeholder="t('providerModel.placeholderModelDesc')" />
         </el-form-item>
-        <el-form-item label="所属供应商" required>
+        <el-form-item :label="t('providerModel.providerField')" required>
           <el-select v-model="modelForm.provider" style="width:100%">
             <el-option v-for="p in providerList" :key="p.name" :label="connectionStore.formatProviderTitle(p.name)" :value="p.name" />
           </el-select>
@@ -430,33 +432,33 @@ watch(() => props.visible, async (val) => {
             <el-slider v-model="modelForm.top_p" :min="0" :max="1" :step="0.05" show-input :show-input-controls="false" input-size="small" />
           </el-form-item>
         </div>
-        <el-divider content-position="left">能力开关</el-divider>
+        <el-divider content-position="left">{{ t('providerModel.capabilityTitle') }}</el-divider>
         <div class="capability-grid">
-          <el-checkbox v-model="modelForm.func_calling">函数调用</el-checkbox>
-          <el-checkbox v-model="modelForm.structuring">结构化输出</el-checkbox>
-          <el-checkbox v-model="modelForm.web_searching">联网搜索</el-checkbox>
-          <el-checkbox v-model="modelForm.context_cache">上下文缓存</el-checkbox>
-          <el-checkbox v-model="modelForm.prefix_con">前缀连续</el-checkbox>
-          <el-checkbox v-model="modelForm.is_local">本地模型</el-checkbox>
+          <el-checkbox v-model="modelForm.func_calling">{{ t('providerModel.capabilityFunctionCall') }}</el-checkbox>
+          <el-checkbox v-model="modelForm.structuring">{{ t('providerModel.capabilityStructuredOutput') }}</el-checkbox>
+          <el-checkbox v-model="modelForm.web_searching">{{ t('providerModel.capabilityWebSearch') }}</el-checkbox>
+          <el-checkbox v-model="modelForm.context_cache">{{ t('providerModel.capabilityContextCache') }}</el-checkbox>
+          <el-checkbox v-model="modelForm.prefix_con">{{ t('providerModel.capabilityPrefixCon') }}</el-checkbox>
+          <el-checkbox v-model="modelForm.is_local">{{ t('providerModel.capabilityLocalModel') }}</el-checkbox>
         </div>
-        <el-form-item label="启用">
+        <el-form-item :label="t('common.enabled')">
           <el-switch v-model="modelForm.enabled" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showModelForm = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveModel">保存</el-button>
+        <el-button @click="showModelForm = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="saveModel">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
 
     <template #footer>
-      <el-button @click="handleClose">关闭</el-button>
+      <el-button @click="handleClose">{{ t('common.close') }}</el-button>
       <el-button
         type="primary"
         :disabled="!selectedModel"
         @click="confirmModel"
       >
-        切换到选中模型
+        {{ t('providerModel.switchModel') }}
       </el-button>
     </template>
   </el-dialog>

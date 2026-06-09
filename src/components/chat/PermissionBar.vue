@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const props = defineProps({
   toolName: {
@@ -80,7 +83,7 @@ function toggleExpand() {
         </div>
 
         <div class="title-section">
-          <h4 class="perm-title">权限请求</h4>
+          <h4 class="perm-title">{{ t('permission.title') }}</h4>
           <p class="tool-name">{{ toolName }}</p>
         </div>
       </div>
@@ -106,20 +109,20 @@ function toggleExpand() {
       <div class="perm-body" v-show="isExpanded">
         <!-- Reason -->
         <div class="reason-block" v-if="reason">
-          <div class="reason-label">📋 执行原因</div>
+          <div class="reason-label">📋 {{ t('permission.reasonLabel') }}</div>
           <p class="reason-text">{{ reason }}</p>
         </div>
 
         <!-- Parameters -->
         <div class="params-block" v-if="Object.keys(params).length > 0">
           <div class="params-header">
-            <span class="params-label">⚙️ 参数详情</span>
+            <span class="params-label">⚙️ {{ t('permission.paramDetails') }}</span>
             <button 
               class="modify-btn"
               @click="showCustomInput = !showCustomInput"
             >
               <el-icon><EditPen /></el-icon>
-              修改参数
+              {{ t('permission.modifyParams') }}
             </button>
           </div>
 
@@ -168,20 +171,20 @@ function toggleExpand() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" fill="currentColor"/>
             </svg>
-            拒绝执行
+            {{ t('permission.deny') }}
           </button>
           
           <button class="grant-btn" @click="handleGrant" :style="{ background: `linear-gradient(135deg, ${levelConfig.color}, ${levelConfig.color}dd)` }">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" fill="currentColor"/>
             </svg>
-            授权执行
+            {{ t('permission.allow') }}
           </button>
         </div>
 
         <!-- Security Notice -->
         <div class="security-notice" v-if="securityLevel === 'high'">
-          ⚠️ 此操作涉及高风险操作，请仔细检查参数后再授权
+          ⚠️ {{ t('permission.securityNotice') }}
         </div>
       </div>
     </transition>

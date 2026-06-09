@@ -4,7 +4,7 @@ import { ref, computed } from 'vue'
 const props = defineProps({
   prompt: {
     type: String,
-    default: '请选择'
+    default: () => t('choices.pleaseSelect')
   },
   options: {
     type: Array as () => string[],
@@ -129,7 +129,7 @@ function cancelSelection() {
         <div v-if="isInputActive" class="input-wrapper">
           <el-input
             v-model="customText"
-            placeholder="输入其他选项..."
+            :placeholder="t('choices.inputPlaceholder')"
             size="large"
             clearable
             class="custom-input"
@@ -144,7 +144,7 @@ function cancelSelection() {
 
     <!-- Action Buttons -->
     <div class="action-bar">
-      <el-button @click="cancelSelection" class="cancel-btn">取消</el-button>
+      <el-button @click="cancelSelection" class="cancel-btn">{{ t('choices.cancelBtn') }}</el-button>
       <el-button 
         type="primary" 
         @click="confirmSelection"
@@ -160,10 +160,10 @@ function cancelSelection() {
 
     <!-- Keyboard Hints -->
     <div class="keyboard-hints" v-if="!isInputActive">
-      <span><kbd>↑↓</kbd> 导航</span>
-      <span><kbd>Space</kbd> 选择</span>
-      <span><kbd>Enter</kbd> 确认</span>
-      <span><kbd>Esc</kbd> 取消</span>
+      <span><kbd>↑↓</kbd> {{ t('choices.navigate') }}</span>
+      <span><kbd>Space</kbd> {{ t('choices.select') }}</span>
+      <span><kbd>Enter</kbd> {{ t('choices.confirm') }}</span>
+      <span><kbd>Esc</kbd> {{ t('choices.cancel') }}</span>
     </div>
   </div>
 </template>

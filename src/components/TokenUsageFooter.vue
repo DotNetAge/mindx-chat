@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
 
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
+const { t } = useI18n()
 
 const formatNumber = (num: number): string => {
   if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M'
@@ -28,12 +30,12 @@ const totalConversations = computed(() => chatStore.totalConversations)
   <div class="token-usage-footer">
     <div class="stat-group session">
       <div class="stat-item">
-        <span class="stat-label">会话</span>
+        <span class="stat-label">{{ t('tokenUsage.footerSessions') }}</span>
         <span class="stat-value">{{ sessionTokens }}</span>
       </div>
       <div class="stat-divider"></div>
       <div class="stat-item">
-        <span class="stat-label">费用</span>
+        <span class="stat-label">{{ t('tokenUsage.footerCost') }}</span>
         <span class="stat-value cost">{{ sessionCost }}</span>
       </div>
     </div>
@@ -42,17 +44,17 @@ const totalConversations = computed(() => chatStore.totalConversations)
 
     <div class="stat-group total">
       <div class="stat-item">
-        <span class="stat-label">总计</span>
+        <span class="stat-label">{{ t('tokenUsage.footerTotal') }}</span>
         <span class="stat-value">{{ totalTokens }}</span>
       </div>
       <div class="stat-divider"></div>
       <div class="stat-item">
-        <span class="stat-label">费用</span>
+        <span class="stat-label">{{ t('tokenUsage.footerCost') }}</span>
         <span class="stat-value cost">{{ totalCost }}</span>
       </div>
       <div class="stat-divider"></div>
       <div class="stat-item">
-        <span class="stat-label">对话</span>
+        <span class="stat-label">{{ t('tokenUsage.footerDialogues') }}</span>
         <span class="stat-value">{{ totalConversations }}</span>
       </div>
     </div>

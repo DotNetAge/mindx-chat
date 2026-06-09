@@ -45,7 +45,7 @@ function toggleFileBrowser() {
 
 async function handleRequestNewSession() {
   if (!connectionStore.isConnected || !connectionStore.currentAgent) {
-    throw new Error('未连接或未选择 Agent')
+    throw new Error(t('chat.notConnectedOrNoAgent'))
   }
 
   emit('toggleSetupDialog')

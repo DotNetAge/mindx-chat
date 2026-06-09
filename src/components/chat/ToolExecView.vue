@@ -27,7 +27,7 @@ const showDetail = ref(false)
 const isFailed = computed(() => props.status === 'failed')
 const isDone = computed(() => props.status === 'done' || props.status === 'failed')
 
-const toolName = computed(() => props.start?.tool_name || props.end?.tool_name || props.title || '工具')
+const toolName = computed(() => props.start?.tool_name || props.end?.tool_name || props.title || t('tool.tool'))
 
 // ===== 计时器：执行中实时计时，完成后显示服务端 duration_ms =====
 const startTime = ref<number>(0)
@@ -462,12 +462,12 @@ watch(
 
       <template v-else-if="isDone && !isFailed">
         <span class="timer done">{{ durationText }}</span>
-        <button class="detail-btn" @click="showDetail = true">查看结果</button>
+        <button class="detail-btn" @click="showDetail = true">{{ t('tool.viewResult') }}</button>
       </template>
 
       <template v-else-if="isFailed">
         <span class="timer failed">{{ durationText }}</span>
-        <button class="error-btn" @click="showDetail = true">查看错误</button>
+        <button class="error-btn" @click="showDetail = true">{{ t('tool.viewError') }}</button>
       </template>
     </div>
   </div>
@@ -479,13 +479,13 @@ watch(
         <div ref="modalDialog" class="modal-dialog" :class="{ 'dialog-failed': isFailed }">
           <!-- 对话框头部 -->
           <div class="modal-header">
-            <span class="modal-title">{{ isFailed ? `${toolName} — 执行失败` : `${toolName} — 执行结果` }}</span>
+            <span class="modal-title">{{ isFailed ? `${toolName} — ${t('tool.executionFailed')}` : `${toolName} — ${t('tool.executionResult')}` }}</span>
             <button class="close-btn" @click="showDetail = false">&times;</button>
           </div>
 
           <!-- 参数（始终在顶部） -->
           <div v-if="cleanParams(start?.params)" class="modal-section modal-params">
-            <div class="section-label">参数</div>
+            <div class="section-label">{{ t('tool.params') }}</div>
             <pre class="params-json"><code>{{ JSON.stringify(cleanParams(start.params), null, 2) }}</code></pre>
           </div>
 
@@ -501,12 +501,12 @@ watch(
                   pattern: <code>{{ fileListHeaderPattern }}</code>
                 </span>
                 <span class="file-list-stats">
-                  {{ fileListStats.total }} 项
+                  {{ fileListStats.total }} {{ t('tool.item') }}
                   <template v-if="fileListStats.dirs > 0 && fileListStats.files > 0">
-                    · {{ fileListStats.dirs }} 目录 · {{ fileListStats.files }} 文件
+                    · {{ fileListStats.dirs }} {{ t('tool.directory') }} · {{ fileListStats.files }} {{ t('tool.file') }}
                   </template>
                   <template v-else-if="fileListStats.files > 0">
-                    · {{ fileListStats.files }} 文件
+                    · {{ fileListStats.files }} {{ t('tool.file') }}
                   </template>
                 </span>
               </div>
@@ -538,7 +538,7 @@ watch(
                   <span
                     v-if="copiedPath && copiedPath === row.item.path"
                     class="file-copied-badge"
-                  >已复制</span>
+                  >{{ t('common.copied') }}</span>
                   <span class="file-size">{{ formatSize(row.item.size) }}</span>
                   <span class="file-mtime">{{ formatModTime(row.item.modTime) }}</span>
                 </li>
@@ -546,7 +546,7 @@ watch(
             </div>
             <div class="modal-section raw-toggle-row">
               <button class="raw-toggle" @click="showRawResult = !showRawResult">
-                {{ showRawResult ? '🙈 隐藏原始 JSON' : '🔍 查看原始 JSON' }}
+                {{ showRawResult ? t('tool.hideRawJson') : t('tool.viewRawJson') }}
               </button>
               <pre v-if="showRawResult" class="result-json"><code>{{ resultText }}</code></pre>
             </div>
@@ -569,23 +569,23 @@ watch(
                 <span
                   v-if="parsedResult.metadata.total_lines !== undefined"
                   class="meta-pill"
-                  :title="`文件总行数`"
+                  :title="t('tool.totalLines')"
                 >
-                  总 {{ parsedResult.metadata.total_lines }} 行
+                  {{ t('tool.totalLinesLabel', { n: parsedResult.metadata.total_lines }) }}
                 </span>
                 <span
                   v-if="parsedResult.metadata.start_line !== undefined && parsedResult.metadata.lines_read !== undefined"
                   class="meta-pill"
-                  :title="`已读取的行范围`"
+                  :title="t('tool.readRange')"
                 >
-                  读 {{ parsedResult.metadata.start_line }}–{{ parsedResult.metadata.start_line + parsedResult.metadata.lines_read - 1 }}
+                  {{ t('tool.readRange', { start: parsedResult.metadata.start_line, end: parsedResult.metadata.start_line + parsedResult.metadata.lines_read - 1 }) }}
                 </span>
                 <span
                   v-if="parsedResult.metadata.has_more"
                   class="meta-pill warn"
-                  :title="`还有更多内容，下一次可从 offset ${parsedResult.metadata.next_offset ?? '?'} 继续`"
+                  :title="t('tool.moreAvailable', { offset: parsedResult.metadata.next_offset ?? '?' })"
                 >
-                  ⏩ 还有更多 (next offset: {{ parsedResult.metadata.next_offset ?? '?' }})
+                  ⏩ {{ t('tool.moreAvailable', { offset: parsedResult.metadata.next_offset ?? '?' }) }}
                 </span>
                 <!-- 兜底：其它没在白名单里的元数据键 -->
                 <span
@@ -606,7 +606,7 @@ watch(
             </div>
             <div class="modal-section raw-toggle-row">
               <button class="raw-toggle" @click="showRawResult = !showRawResult">
-                {{ showRawResult ? '🙈 隐藏原始' : '🔍 查看原始 JSON' }}
+                {{ showRawResult ? t('tool.hideRawJson') : t('tool.viewRawJson') }}
               </button>
               <pre v-if="showRawResult" class="result-json"><code>{{ resultText }}</code></pre>
             </div>

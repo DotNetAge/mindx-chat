@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   Folder,
   Document,
@@ -27,6 +28,7 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'open-file'])
 
 const connectionStore = useConnectionStore()
+const { t } = useI18n()
 
 const currentPath = ref('')
 const entries = ref<FSEntry[]>([])
@@ -96,7 +98,7 @@ async function fetchFSList(path: string) {
   error.value = null
   try {
     if (!connectionStore.isConnected) {
-      throw new Error('未连接到 MindX 服务')
+      throw new Error(t('fileBrowser.notConnected'))
     }
 
     const result = await connectionStore.fetchFSList(path)
@@ -119,7 +121,7 @@ async function fetchFSList(path: string) {
     currentPath.value = path
   } catch (err: any) {
     console.error('[FileBrowser] Failed to fetch directory:', err)
-    error.value = err?.message || '加载目录失败'
+    error.value = err?.message || t('fileBrowser.loadFailed')
   } finally {
     loading.value = false
   }
@@ -135,7 +137,7 @@ async function handleOpen() {
       console.log(`[FileBrowser] ✅ Got home directory: ${targetPath}`)
     } catch (err) {
       console.error('[FileBrowser] Failed to fetch home:', err)
-      error.value = '无法获取用户目录，请先创建或选择一个会话'
+      error.value = t('fileBrowser.cannotGetHomeDir')
       loading.value = false
       return
     }
@@ -144,7 +146,7 @@ async function handleOpen() {
   if (targetPath) {
     await fetchFSList(targetPath)
   } else {
-    error.value = '未设置工作目录'
+    error.value = t('fileBrowser.noWorkingDir')
   }
 }
 
@@ -203,13 +205,13 @@ watch(() => props.visible, (val) => {
       <div class="drawer-header">
         <div class="drawer-title">
           <el-icon><Folder /></el-icon>
-          <span>文件浏览器</span>
+          <span>{{ t('fileBrowser.title') }}</span>
         </div>
         <div class="drawer-actions">
-          <el-button text circle @click="refresh" :loading="loading" title="刷新">
+          <el-button text circle @click="refresh" :loading="loading" :title="t('common.refresh')">
             <el-icon><RefreshRight /></el-icon>
           </el-button>
-          <el-button text circle @click="closeDrawer" title="关闭">
+          <el-button text circle @click="closeDrawer" :title="t('common.close')">
             <el-icon><Close /></el-icon>
           </el-button>
         </div>
@@ -242,19 +244,19 @@ watch(() => props.visible, (val) => {
             <el-icon class="is-loading" :size="32"><RefreshRight /></el-icon>
           </div>
           <div class="loading-text">
-            <span class="loading-title">正在加载目录...</span>
-            <span class="loading-subtitle">请稍候，正在获取文件列表</span>
+            <span class="loading-title">{{ t('common.loading') }}...</span>
+            <span class="loading-subtitle">{{ t('fileBrowser.loadingDir') }}</span>
           </div>
         </div>
 
         <div v-else-if="error && entries.length === 0" class="error-state">
           <el-icon :size="40" color="#ef4444"><Close /></el-icon>
           <div class="error-text">
-            <span class="error-title">加载失败</span>
+            <span class="error-title">{{ t('common.error') }}</span>
             <span class="error-message">{{ error }}</span>
           </div>
           <el-button type="primary" size="small" @click="refresh" :loading="loading">
-            重试
+            {{ t('common.retry') }}
           </el-button>
         </div>
 
@@ -291,7 +293,7 @@ watch(() => props.visible, (val) => {
 
         <div v-if="!loading && sortedEntries.length === 0" class="empty-state">
           <el-icon :size="40"><Folder /></el-icon>
-          <span>此目录为空</span>
+          <span>{{ t('fileBrowser.dirEmpty') }}</span>
         </div>
       </div>
 
@@ -305,7 +307,7 @@ watch(() => props.visible, (val) => {
                 <code class="viewer-path">{{ selectedFile.path }}</code>
               </div>
               <div class="viewer-actions">
-                <el-button text circle @click="closeFileViewer" title="关闭">
+                <el-button text circle @click="closeFileViewer" :title="t('fileBrowser.close')">
                   <el-icon><Close /></el-icon>
                 </el-button>
               </div>

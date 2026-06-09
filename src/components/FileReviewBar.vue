@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { Check, Close } from '@element-plus/icons-vue'
 import { useChatStore } from '../stores/chatStore'
@@ -9,6 +10,7 @@ import { useSessionStore } from '../stores/sessionStore'
 const chatStore = useChatStore()
 const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
+const { t } = useI18n()
 
 const confirming = ref(false)
 const rollingBack = ref(false)
@@ -22,11 +24,11 @@ async function confirmAll() {
     const confirmed = await connectionStore.confirmFiles(sessionId)
     console.log('[FileReviewBar] Files confirmed:', confirmed)
     chatStore.pendingFileModifications = []
-    ElMessage.success(`已确认 ${confirmed.length} 个文件的修改`)
+    ElMessage.success(t('fileReview.confirmed', { count: confirmed.length }))
   } catch (err: any) {
     console.error('[FileReviewBar] Confirm failed:', err)
-    const msg = (err && err.message) || '未知错误'
-    ElMessage.error(`确认文件失败: ${msg}`)
+    const msg = (err && err.message) || t('common.error')
+    ElMessage.error(t('fileReview.confirmFailed', { msg }))
   } finally {
     confirming.value = false
   }
@@ -41,11 +43,11 @@ async function rollbackAll() {
     const rolledBack = await connectionStore.rollbackFiles(sessionId)
     console.log('[FileReviewBar] Files rolled back:', rolledBack)
     chatStore.pendingFileModifications = []
-    ElMessage.success(`已回滚 ${rolledBack.length} 个文件的修改`)
+    ElMessage.success(t('fileReview.rollbackSuccess', { count: rolledBack.length }))
   } catch (err: any) {
     console.error('[FileReviewBar] Rollback failed:', err)
-    const msg = (err && err.message) || '未知错误'
-    ElMessage.error(`回滚文件失败: ${msg}`)
+    const msg = (err && err.message) || t('common.error')
+    ElMessage.error(t('fileReview.rollbackFailed', { msg }))
   } finally {
     rollingBack.value = false
   }
@@ -59,7 +61,7 @@ async function rollbackAll() {
         <span class="header-icon">
           <el-icon :size="18"><WarningFilled /></el-icon>
         </span>
-        <span class="header-title">{{ chatStore.pendingFileModifications.length }} 个文件被修改</span>
+        <span class="header-title">{{ chatStore.pendingFileModifications.length }} {{ t('fileReview.filesModified') }}</span>
       </div>
       <div class="review-body">
         <div class="review-files">
@@ -85,7 +87,7 @@ async function rollbackAll() {
           @click="confirmAll"
         >
           <el-icon :size="14"><Check /></el-icon>
-          {{ confirming ? '确认中...' : '全部确认' }}
+          {{ confirming ? t('fileReview.confirming') : t('fileReview.confirmAll') }}
         </el-button>
         <el-button
           size="small"
@@ -94,7 +96,7 @@ async function rollbackAll() {
           @click="rollbackAll"
         >
           <el-icon :size="14"><Close /></el-icon>
-          {{ rollingBack ? '回滚中...' : '全部回滚' }}
+          {{ rollingBack ? t('fileReview.rollingBack') : t('fileReview.rollbackAll') }}
         </el-button>
       </div>
     </div>
