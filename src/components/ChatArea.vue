@@ -204,7 +204,8 @@ async function handlePermissionDeny(reason?: string) {
     <!-- Header -->
     <header class="chat-header">
       <div class="header-left">
-        <div class="provider-info" v-if="connectionStore.isConnected && connectionStore.currentModel">
+        <!-- Configured: show provider + model info -->
+        <div v-if="connectionStore.isConnected && connectionStore.currentModel" class="provider-info">
           <span class="provider-label">{{ connectionStore.formatProviderTitle(connectionStore.currentModel.provider) }}</span>
           <span class="model-label">{{ connectionStore.currentModel.title || connectionStore.currentModel.name }}</span>
           <el-button text circle class="gear-btn" @click="showProviderPicker = true">
@@ -213,6 +214,22 @@ async function handlePermissionDeny(reason?: string) {
           <el-button text circle class="gear-btn" @click="showScheduleView = true">
             <el-icon><Calendar /></el-icon>
           </el-button>
+        </div>
+        <!-- Unconfigured: guide user to set up provider & API key -->
+        <div v-else-if="connectionStore.isConnected" class="provider-info unconfigured-state">
+          <span class="warning-dot"></span>
+          <span class="unconfigured-label">未配置 AI 供应商</span>
+          <el-tooltip
+            placement="bottom"
+            effect="dark"
+            content="点击配置 AI 供应商和 API Key"
+            :visible="false"
+            popper-class="config-tooltip"
+          >
+            <el-button text circle class="gear-btn pulse" @click="showProviderPicker = true">
+              <el-icon><Setting /></el-icon>
+            </el-button>
+          </el-tooltip>
         </div>
       </div>
 
@@ -494,6 +511,42 @@ async function handlePermissionDeny(reason?: string) {
 .gear-btn:hover {
   color: var(--accent-cyan);
   background: rgba(6, 182, 212, 0.1);
+}
+
+/* ── Unconfigured state ── */
+.provider-info.unconfigured-state {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.07);
+}
+
+.warning-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  flex-shrink: 0;
+  animation: pulse-red 2s ease-in-out infinite;
+}
+
+.unconfigured-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f87171;
+  white-space: nowrap;
+}
+
+.gear-btn.pulse {
+  animation: gear-attention 2s ease-in-out infinite;
+}
+
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+}
+
+@keyframes gear-attention {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.65; transform: scale(1.15); }
 }
 
 .session-meta {
@@ -910,5 +963,23 @@ async function handlePermissionDeny(reason?: string) {
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+</style>
+
+<style>
+/* ── Unconfigured tooltip override (popper teleported to body) ── */
+.config-tooltip {
+  background: #dc2626 !important;
+  border-color: #dc2626 !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  padding: 8px 14px !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 16px rgba(220, 38, 38, 0.4) !important;
+}
+.config-tooltip .popper__arrow,
+.config-tooltip .popper__arrow::after {
+  border-bottom-color: #dc2626 !important;
 }
 </style>

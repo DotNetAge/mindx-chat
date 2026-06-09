@@ -50,13 +50,11 @@ async function initializeAfterConnect() {
         connectionStore.setCurrentModel(modelFromConfig)
         console.log(`[MindX] ✅ Model set from server config: ${modelFromConfig}`)
       } else {
-        console.warn(`[MindX] ❌ No model in server config, showing picker...`)
-        showModelPicker.value = true
+        console.warn(`[MindX] ❌ No model in server config — user will configure via header gear button`)
       }
     } catch (configErr) {
       console.error(`[MindX] ❌ Failed to fetch user config:`, configErr)
-      console.warn(`[MindX] Falling back to model picker...`)
-      showModelPicker.value = true
+      console.warn(`[MindX] User can configure via header gear button`)
     }
   } catch (e) {
     console.error('[MindX] Initialization error:', e)

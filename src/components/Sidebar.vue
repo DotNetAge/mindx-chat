@@ -284,6 +284,7 @@ async function handleDeleteSession(sessionId: string, event: Event) {
 }
 
 onMounted(() => {
+  console.log(`[MindX] 📌 Sidebar mounted, serverVersion = "${connectionStore.serverVersion}"`)
 })
 
 watch(() => connectionStore.state, async (newState, oldState) => {
@@ -297,7 +298,8 @@ watch(() => connectionStore.state, async (newState, oldState) => {
         connectionStore.fetchAgents(),
         connectionStore.fetchModels(),
         connectionStore.fetchProviders(),
-        connectionStore.fetchUserConfig()
+        connectionStore.fetchUserConfig(),
+        connectionStore.fetchServerVersion()
       ])
 
       // 1. 先保存用户偏好设定（在 setAgents 之前，确保 watcher 触发时已就绪）

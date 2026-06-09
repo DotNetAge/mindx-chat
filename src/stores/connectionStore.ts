@@ -233,12 +233,6 @@ export const useConnectionStore = defineStore('connection', {
       try {
         const result = await client.call<any>('user.config', {})
 
-        // 保存服务端版本号
-        if (result?.version) {
-          this.serverVersion = result.version
-          document.title = `MindX v${result.version}`
-        }
-
         console.group('📋 [MindX] User Config (user.config)')
         console.log('%c✅ 成功获取用户配置', 'color: #10b981; font-weight: bold;')
         console.log('%c数据来源: ~/.mindx/mindx.json', 'color: #64748b; font-size: 11px;')
@@ -254,6 +248,22 @@ export const useConnectionStore = defineStore('connection', {
       } catch (err) {
         console.warn('[MindX] ⚠️ Failed to fetch user config:', err)
         return {}
+      }
+    },
+
+    async fetchServerVersion(): Promise<void> {
+      const client = getMindXClient()
+      if (!client) return
+      try {
+        const result = await client.call<any>('server.version', {})
+        console.log(`[MindX] server.version response:`, result)
+        if (result?.version) {
+          this.serverVersion = result.version
+          document.title = `MindX v${result.version}`
+          console.log(`[MindX] ✅ serverVersion set to: "${this.serverVersion}"`)
+        }
+      } catch (err) {
+        console.warn('[MindX] ⚠️ Failed to fetch server version:', err)
       }
     },
 

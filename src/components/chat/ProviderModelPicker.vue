@@ -529,7 +529,7 @@ watch(() => props.visible, async (val) => {
 }
 
 .provider-item.unconfigured {
-  opacity: 0.45;
+  opacity: 0.55;
 }
 
 .provider-item.unconfigured .provider-name,
@@ -538,10 +538,14 @@ watch(() => props.visible, async (val) => {
 }
 
 .unconfigured-tag {
-  font-size: 9px;
-  color: #94a3b8;
-  margin-left: 4px;
+  font-size: 10px;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
   white-space: nowrap;
+  font-weight: 500;
 }
 
 .provider-main {

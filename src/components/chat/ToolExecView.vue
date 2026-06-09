@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useMarkdown } from '../../composables/useMarkdown'
+
+const { t } = useI18n()
 
 /**
  * ToolExecView — 渲染 GoReact 原始工具执行事件
