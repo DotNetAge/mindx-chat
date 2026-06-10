@@ -12,13 +12,16 @@ import ScheduleView from './chat/ScheduleView.vue'
 import FileReviewBar from './FileReviewBar.vue'
 import LogDrawer from './LogDrawer.vue'
 import MemoryModal from './MemoryModal.vue'
+import GraphViewer from './GraphViewer.vue'
 
-// 日志/记忆组件 ref
+// 日志/记忆/图谱组件 ref
 const logDrawerRef = ref<InstanceType<typeof LogDrawer> | null>(null)
 const memoryModalRef = ref<InstanceType<typeof MemoryModal> | null>(null)
+const graphViewerVisible = ref(false)
 
 function openLogDrawer() { logDrawerRef.value?.open() }
 function openMemoryModal() { memoryModalRef.value?.open() }
+function openGraphViewer() { graphViewerVisible.value = true }
 
 const props = defineProps({
   isSidebarCollapsed: {
@@ -238,6 +241,10 @@ async function handlePermissionDeny(reason?: string) {
         <a class="nav-pill nav-link" href="https://gitee.com/ray_liang/mindx" target="_blank" title="Gitee" rel="noopener noreferrer">Gitee</a>
         <button class="nav-pill" @click="openLogDrawer" :title="t('chat.logTab')">{{ t('chat.logTab') }}</button>
         <button class="nav-pill" @click="openMemoryModal" :title="t('chat.memoryTab')">{{ t('chat.memoryTab') }}</button>
+        <button class="nav-pill kg-btn" @click="openGraphViewer" :title="t('kgViewer.title')">
+          KG
+          <span class="beta-tag">β</span>
+        </button>
       </div>
     </header>
 
@@ -396,9 +403,10 @@ async function handlePermissionDeny(reason?: string) {
       </div>
     </footer>
 
-    <!-- 全局组件：日志抽屉 + 记忆模态框 -->
+    <!-- 全局组件：日志抽屉 + 记忆模态框 + 知识图谱 -->
     <LogDrawer ref="logDrawerRef" />
     <MemoryModal ref="memoryModalRef" />
+    <GraphViewer v-if="graphViewerVisible" @close="graphViewerVisible = false" />
   </main>
 </template>
 
@@ -468,6 +476,26 @@ async function handlePermissionDeny(reason?: string) {
 }
 .nav-link {
   text-decoration: none;
+}
+
+.kg-btn {
+  background: linear-gradient(135deg, rgba(6,182,212,.1), rgba(139,92,246,.1));
+  border-color: rgba(139,92,246,.25);
+  color: #a78bfa;
+  font-weight: 700;
+  letter-spacing: .5px;
+}
+.kg-btn:hover {
+  background: linear-gradient(135deg, rgba(6,182,212,.16), rgba(139,92,246,.16));
+  border-color: rgba(139,92,246,.4);
+  color: #c4b5fd;
+}
+.beta-tag {
+  font-size: 9px; font-weight: 800;
+  margin-left: 3px; padding: 0 4px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #fff;
 }
 
 .provider-info {
