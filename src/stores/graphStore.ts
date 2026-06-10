@@ -179,6 +179,8 @@ export const useGraphStore = defineStore('graph', {
       // Declare outside try so finally block can access them (avoids TDZ error)
       let nodesRes: PromiseSettledResult<any>, edgesRes: PromiseSettledResult<any>
       let stats: PromiseSettledResult<any>
+      let labelDist: PromiseSettledResult<any>, relDist: PromiseSettledResult<any>
+      let levelDist: PromiseSettledResult<any>, docs: PromiseSettledResult<any>
       try {
         const results = await Promise.allSettled([
           api.graphQuery('MATCH (n) RETURN n.id as id, labels(n) as labels, properties(n) as props LIMIT 2000'),

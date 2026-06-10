@@ -647,6 +647,7 @@ export const useConnectionStore = defineStore('connection', {
         const result = await client.call<ProviderInfo[]>('provider.list', {})
         if (Array.isArray(result)) {
           this.rawProviders = result
+          // console.log('[ConnectionStore] Fetched providers:', result)
           const map: Record<string, string> = {}
           for (const p of result) {
             if (p.title && p.name) {

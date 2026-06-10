@@ -114,8 +114,16 @@ watch(graphData, async (data) => {
 
 <template>
   <div class="graph-canvas-wrapper">
-    <!-- Empty state -->
-    <div v-if="!store.loading && !store.nodes.length" class="canvas-empty">
+    <!-- Error state -->
+    <div v-if="store.error" class="canvas-empty canvas-error">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+        <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <p>{{ store.error }}</p>
+      <button class="retry-btn" @click="store.loadAllData()">{{ t('kgViewer.retry') || '重试' }}</button>
+    </div>
+    <!-- Empty state (no data yet) -->
+    <div v-else-if="!store.nodes.length" class="canvas-empty">
       <svg width="80" height="80" viewBox="0 0 24 24" fill="none" style="opacity:.3">
         <circle cx="12" cy="12" r="10" stroke="#94a3b8" stroke-width=".5"/>
         <circle cx="8" cy="9" r="2" fill="#94a3b8"/>
@@ -193,4 +201,26 @@ watch(graphData, async (data) => {
   animation: spin .8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.canvas-error p {
+  color: #ef4444;
+  font-size: 13px;
+  max-width: 360px;
+  text-align: center;
+  line-height: 1.5;
+}
+.retry-btn {
+  padding: 6px 20px;
+  border: 1px solid rgba(6,182,212,.4);
+  border-radius: 6px;
+  background: rgba(6,182,212,.08);
+  color: var(--accent-cyan);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .2s, border-color .2s;
+}
+.retry-btn:hover {
+  background: rgba(6,182,212,.18);
+  border-color: var(--accent-cyan);
+}
 </style>

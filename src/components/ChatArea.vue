@@ -13,15 +13,16 @@ import FileReviewBar from './FileReviewBar.vue'
 import LogDrawer from './LogDrawer.vue'
 import MemoryModal from './MemoryModal.vue'
 import GraphViewer from './GraphViewer.vue'
+import { useGraphStore } from '../stores/graphStore'
 
 // 日志/记忆/图谱组件 ref
 const logDrawerRef = ref<InstanceType<typeof LogDrawer> | null>(null)
 const memoryModalRef = ref<InstanceType<typeof MemoryModal> | null>(null)
-const graphViewerVisible = ref(false)
+const graphStore = useGraphStore()
 
 function openLogDrawer() { logDrawerRef.value?.open() }
 function openMemoryModal() { memoryModalRef.value?.open() }
-function openGraphViewer() { graphViewerVisible.value = true }
+function openGraphViewer() { graphStore.open() }
 
 const props = defineProps({
   isSidebarCollapsed: {
@@ -82,12 +83,12 @@ async function sendMessage() {
     console.log('[MindX] No active session, attempting to create one...')
 
     if (!connectionStore.isConnected) {
-      ElMessage.warning('请先连接到 MindX 服务')
+      ElMessage.warning(t('chat.notConnected'))
       return
     }
 
     if (!connectionStore.currentAgent) {
-      ElMessage.warning('请先选择一个 Agent')
+      ElMessage.warning(t('chat.noAgent'))
       return
     }
 
@@ -193,7 +194,7 @@ async function handlePermissionDeny(reason?: string) {
   }
 
   try {
-    await connectionStore.respondToPermission(correlationId, 'deny', { reason: reason || '用户拒绝' })
+    await connectionStore.respondToPermission(correlationId, 'deny', { reason: reason || t('chat.userDenied') })
     console.log('[MindX] Permission denied:', { correlationId, reason })
     chatStore.pendingCorrelationId = null
   } catch (err) {
@@ -221,11 +222,11 @@ async function handlePermissionDeny(reason?: string) {
         <!-- Unconfigured: guide user to set up provider & API key -->
         <div v-else-if="connectionStore.isConnected" class="provider-info unconfigured-state">
           <span class="warning-dot"></span>
-          <span class="unconfigured-label">未配置 AI 供应商</span>
+          <span class="unconfigured-label">{{ t('chat.unconfiguredProvider') }}</span>
           <el-tooltip
             placement="bottom"
             effect="dark"
-            content="点击配置 AI 供应商和 API Key"
+            :content="t('chat.configureProviderHint')"
             :visible="false"
             popper-class="config-tooltip"
           >
@@ -242,8 +243,8 @@ async function handlePermissionDeny(reason?: string) {
         <button class="nav-pill" @click="openLogDrawer" :title="t('chat.logTab')">{{ t('chat.logTab') }}</button>
         <button class="nav-pill" @click="openMemoryModal" :title="t('chat.memoryTab')">{{ t('chat.memoryTab') }}</button>
         <button class="nav-pill kg-btn" @click="openGraphViewer" :title="t('kgViewer.title')">
-          KG
-          <span class="beta-tag">β</span>
+          {{ t('kgViewer.title') }}
+          <span class="beta-tag">beta</span>
         </button>
       </div>
     </header>
@@ -305,7 +306,7 @@ async function handlePermissionDeny(reason?: string) {
           <code class="preview-code">{{ chatStore.currentThinking.slice(-60) }}</code>
         </div>
 
-        <button class="stop-btn" @click="chatStore.cancelProcessing()" title="停止处理">
+        <button class="stop-btn" @click="chatStore.cancelProcessing()" :title="t('chat.stopProcessing')">
           <el-icon><VideoPause /></el-icon>
         </button>
       </div>
@@ -350,7 +351,7 @@ async function handlePermissionDeny(reason?: string) {
           </svg>
         </div>
         
-        <h3 class="empty-title">{{ !connectionStore.isOfflineMode && connectionStore.isConnected ? '开始与 Agent 对话' : (sessionStore.sessions.length > 0 ? '选择或创建会话开始对话' : '欢迎使用 MindX2') }}</h3>
+        <h3 class="empty-title">{{ !connectionStore.isOfflineMode && connectionStore.isConnected ? t('chat.welcome.startChat') : (sessionStore.sessions.length > 0 ? t('chat.welcome.selectOrCreate') : t('chat.welcome.default')) }}</h3>
         
         <p class="empty-desc">
           <template v-if="!connectionStore.isOfflineMode && connectionStore.isConnected">
@@ -365,10 +366,10 @@ async function handlePermissionDeny(reason?: string) {
         </p>
 
         <div class="quick-prompts" v-if="!connectionStore.isOfflineMode || sessionStore.sessions.length > 0">
-          <p class="prompts-label">💡 快速开始</p>
+          <p class="prompts-label">💡 {{ t('chat.quickStart') }}</p>
           <div class="prompt-buttons">
-            <el-button 
-              v-for="prompt in ['帮我分析这个项目', '代码审查建议', '设计 API 接口']" 
+            <el-button
+              v-for="prompt in [t('chat.prompt.analyzeProject'), t('chat.prompt.codeReview'), t('chat.prompt.designApi')]"
               :key="prompt"
               size="small"
               round
@@ -394,7 +395,7 @@ async function handlePermissionDeny(reason?: string) {
             type="textarea"
             :rows="2"
             resize="none"
-            :placeholder="!connectionStore.isOfflineMode && connectionStore.isConnected ? `与 ${connectionStore.currentAgent?.name || 'Agent'} 对话... (Enter 发送)` : (connectionStore.isOfflineMode ? '离线模式 - 消息将保存到本地' : '请先连接到 MindX 服务')"
+            :placeholder="!connectionStore.isOfflineMode && connectionStore.isConnected ? `${t('chat.inputChatWith')} ${connectionStore.currentAgent?.name || 'Agent'}... (Enter ${t('common.send')})` : (connectionStore.isOfflineMode ? t('chat.offlineInputPlaceholder') : t('chat.notConnected'))"
             @keypress="handleKeyPress"
             :disabled="false"
             class="message-input"
@@ -406,7 +407,8 @@ async function handlePermissionDeny(reason?: string) {
     <!-- 全局组件：日志抽屉 + 记忆模态框 + 知识图谱 -->
     <LogDrawer ref="logDrawerRef" />
     <MemoryModal ref="memoryModalRef" />
-    <GraphViewer v-if="graphViewerVisible" @close="graphViewerVisible = false" />
+    <!-- GraphViewer 通过 Teleport 渲染到 body，由 graphStore.visible 控制显隐 -->
+    <GraphViewer @close="graphStore.close()" />
   </main>
 </template>
 
