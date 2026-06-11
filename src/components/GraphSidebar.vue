@@ -1,10 +1,19 @@
 <script setup lang="ts">
+import { ref, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Document, Collection, DataAnalysis, Search, RefreshLeft, Delete } from '@element-plus/icons-vue'
+import {
+  Document, Collection, DataAnalysis, Search,
+  RefreshLeft, Delete, Monitor, VideoPause,
+  Link, FolderOpened
+} from '@element-plus/icons-vue'
 import { useGraphStore, CATEGORY_COLORS } from '../stores/graphStore'
+import type { FileStateResult } from '../stores/graphStore'
 
 const { t } = useI18n()
 const store = useGraphStore()
+
+const searchInput = ref('')
+const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
 
 const tabs = [
   { key: 'documents' as const, icon: Document, label: t('kgViewer.documents') },
@@ -12,14 +21,62 @@ const tabs = [
   { key: 'stats' as const, icon: DataAnalysis, label: t('kgViewer.stats') },
 ]
 
-// ── Documents ──
+// ── Lifecycle ──
+
+onMounted(() => {
+  store.refreshFilewatchStatus()
+})
+
+// ── Search ──
+
+function onSearchInput() {
+  if (!searchInput.value.trim()) {
+    store.clearSearch()
+    return
+  }
+  store.semanticSearch(searchInput.value.trim())
+}
+
+watch(searchInput, () => {
+  if (!searchInput.value) store.clearSearch()
+})
+
+// ── File index ──
+
+async function toggleIndexing() {
+  if (store.filewatchStatus?.running) {
+    await store.stopFilewatch()
+    stopPolling()
+  } else {
+    await store.startFilewatch()
+    startPolling()
+  }
+}
+
+function startPolling() {
+  stopPolling()
+  pollingTimer.value = setInterval(() => {
+    store.refreshFilewatchStatus()
+    // Refresh file states if there's a watched directory
+    if (store.filewatchStatus?.watched?.length) {
+      store.refreshFileStates(store.filewatchStatus.watched[0])
+    }
+  }, 5000)
+}
+
+function stopPolling() {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+}
+
+// ── Helpers ──
 
 function shortenDocId(id: string): string {
   if (id.length > 36) return id.slice(0, 18) + '...' + id.slice(-12)
   return id
 }
-
-// ── Entities ──
 
 function getLabelColor(label: string): string {
   for (const [cat, color] of Object.entries(CATEGORY_COLORS)) {
@@ -27,11 +84,67 @@ function getLabelColor(label: string): string {
   }
   return '#64748b'
 }
+
+function getStateLabel(state: string): string {
+  const map: Record<string, string> = {
+    indexed: t('kgViewer.indexedCount'),
+    changed: t('kgViewer.changedCount'),
+    new: t('kgViewer.newCount'),
+    removed: 'Removed',
+    skipped: 'Skipped',
+  }
+  return map[state] || state
+}
+
+function getStateColor(state: string): string {
+  const map: Record<string, string> = {
+    indexed: '#10b981',
+    changed: '#f59e0b',
+    new: '#06b6d4',
+    removed: '#ef4444',
+    skipped: '#64748b',
+  }
+  return map[state] || '#64748b'
+}
 </script>
 
 <template>
   <aside class="gv-sidebar">
-    <!-- Tab bar -->
+    <!-- ── Index Control Bar ── -->
+    <div class="index-bar" :class="{ running: store.filewatchStatus?.running }">
+      <div class="index-bar-header">
+        <span class="index-bar-title">
+          <span class="index-dot" :class="{ running: store.filewatchStatus?.running }"></span>
+          {{ t('kgViewer.indexControl') }}
+        </span>
+        <button
+          class="index-toggle-btn"
+          :class="{ running: store.filewatchStatus?.running }"
+          @click="toggleIndexing"
+          :disabled="store.filewatchStatus === null"
+        >
+          <el-icon :size="13">
+            <component :is="store.filewatchStatus?.running ? VideoPause : Monitor" />
+          </el-icon>
+          {{ store.filewatchStatus?.running ? t('kgViewer.indexStop') : t('kgViewer.indexStart') }}
+        </button>
+      </div>
+      <div v-if="store.fileStates" class="index-bar-stats">
+        <span
+          v-for="s in ['indexed', 'new', 'changed', 'removed']"
+          :key="s"
+          class="index-stat-item"
+          :style="{ color: getStateColor(s) }"
+        >
+          {{ getStateLabel(s) }} {{ (store.fileStates.counts as any)[s] ?? 0 }}
+        </span>
+      </div>
+      <div v-else class="index-bar-stats muted">
+        <span>{{ t('common.loading') }}</span>
+      </div>
+    </div>
+
+    <!-- ── Tab bar ── -->
     <div class="sidebar-tabs">
       <button
         v-for="tab in tabs"
@@ -45,18 +158,24 @@ function getLabelColor(label: string): string {
       </button>
     </div>
 
-    <!-- Search -->
+    <!-- ── Search bar ── -->
     <div class="sidebar-search">
       <el-input
-        v-model="store.searchQuery"
-        :placeholder="t('kgViewer.searchPlaceholder')"
+        v-model="searchInput"
+        :placeholder="t('kgViewer.searchKnowledge')"
         size="small"
         clearable
-        :prefix-icon="Search"
-      />
+        @input="onSearchInput"
+      >
+        <template #prefix>
+          <el-icon class="search-icon" :class="{ loading: store.searchLoading }">
+            <Search />
+          </el-icon>
+        </template>
+      </el-input>
     </div>
 
-    <!-- Content area -->
+    <!-- ── Content area ── -->
     <div class="sidebar-content">
       <!-- Loading / Error -->
       <div v-if="store.loading" class="sidebar-empty">
@@ -69,7 +188,63 @@ function getLabelColor(label: string): string {
         </button>
       </div>
 
-      <!-- Tab: Documents -->
+      <!-- ── Search Results (shown when available) ── -->
+      <template v-else-if="store.searchResults.length > 0 || store.searchLoading">
+        <div class="search-results-section">
+          <h4 class="section-title">{{ t('kgViewer.searchResults') }} ({{ store.searchResults.length }})</h4>
+
+          <!-- Loading skeleton -->
+          <div v-if="store.searchLoading" class="search-skeleton">
+            <div v-for="i in 3" :key="i" class="skeleton-item"></div>
+          </div>
+
+          <!-- Result items -->
+          <div v-else class="search-results">
+            <div
+              v-for="r in store.searchResults"
+              :key="r.id"
+              class="search-result-item"
+            >
+              <div class="result-header">
+                <span class="result-score" :style="{ color: r.score > 0.7 ? '#10b981' : r.score > 0.4 ? '#f59e0b' : '#64748b' }">
+                  {{ (r.score * 100).toFixed(0) }}%
+                </span>
+                <span class="result-doc-id" :title="r.doc_id">
+                  {{ shortenDocId(r.doc_id || '') }}
+                </span>
+              </div>
+              <div v-if="r.title" class="result-title">{{ r.title }}</div>
+              <p class="result-preview">{{ r.content?.slice(0, 120) }}{{ r.content?.length > 120 ? '...' : '' }}</p>
+              <div v-if="r.tags && r.tags.length" class="result-tags">
+                <span v-for="tag in r.tags.slice(0, 4)" :key="tag" class="result-tag">{{ tag }}</span>
+                <span v-if="r.tags.length > 4" class="result-tag-more">+{{ r.tags.length - 4 }}</span>
+              </div>
+              <div class="result-meta">
+                <el-icon :size="12"><FolderOpened /></el-icon>
+                <span class="result-source" :title="r.source">{{ r.source || r.doc_id }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Related Graph Paths ── -->
+        <div v-if="store.multiHopResult && store.multiHopResult.nodes.length > 0" class="related-paths-section">
+          <h4 class="section-title">{{ t('kgViewer.relatedPaths') }} ({{ store.multiHopResult.nodes.length }})</h4>
+          <div class="path-list">
+            <div
+              v-for="hn in store.multiHopResult.nodes.slice(0, 10)"
+              :key="hn.node.id"
+              class="path-item"
+              :style="{ paddingLeft: (hn.hopLevel * 16 + 8) + 'px' }"
+            >
+              <span class="hop-badge" :class="'hop-' + hn.hopLevel">{{ hn.hopLevel }}{{ t('kgViewer.hops') }}</span>
+              <span class="path-node-name">{{ hn.node.properties?.name || hn.node.id }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- ── Tab: Documents ── -->
       <template v-else-if="store.activeTab === 'documents'">
         <div v-if="!store.docs.length" class="sidebar-empty">
           <span>{{ t('kgViewer.noDocuments') }}</span>
@@ -88,7 +263,7 @@ function getLabelColor(label: string): string {
         </ul>
       </template>
 
-      <!-- Tab: Entities (label distribution) -->
+      <!-- ── Tab: Entities ── -->
       <template v-else-if="store.activeTab === 'entities'">
         <div v-if="!store.labelDistribution.length" class="sidebar-empty">
           <span>{{ t('kgViewer.noEntities') }}</span>
@@ -108,30 +283,29 @@ function getLabelColor(label: string): string {
         </ul>
       </template>
 
-      <!-- Tab: Stats -->
+      <!-- ── Tab: Stats ── -->
       <template v-else-if="store.activeTab === 'stats'">
         <div class="stats-grid">
           <div class="stat-card">
             <span class="stat-value">{{ store.stats.totalNodes.toLocaleString() }}</span>
-            <span class="stat-label">Nodes</span>
+            <span class="stat-label">{{ t('kgViewer.nodes') }}</span>
           </div>
           <div class="stat-card">
             <span class="stat-value">{{ store.stats.totalEdges.toLocaleString() }}</span>
-            <span class="stat-label">Edges</span>
+            <span class="stat-label">{{ t('kgViewer.edges') }}</span>
           </div>
           <div class="stat-card">
             <span class="stat-value">{{ store.nodes.length }}</span>
-            <span class="stat-label">Loaded Nodes</span>
+            <span class="stat-label">{{ t('kgViewer.loadedNodes') }}</span>
           </div>
           <div class="stat-card">
             <span class="stat-value">{{ store.edges.length }}</span>
-            <span class="stat-label">Loaded Edges</span>
+            <span class="stat-label">{{ t('kgViewer.loadedEdges') }}</span>
           </div>
         </div>
 
-        <!-- Level distribution -->
         <div v-if="store.levelDistribution.length" class="stat-section">
-          <h4>Knowledge Levels</h4>
+          <h4>{{ t('kgViewer.knowledgeLevels') }}</h4>
           <div class="level-bars">
             <div v-for="lv in store.levelDistribution" :key="lv.label" class="level-row">
               <span class="level-name">{{ lv.label }}</span>
@@ -149,7 +323,6 @@ function getLabelColor(label: string): string {
           </div>
         </div>
 
-        <!-- Relation type distribution -->
         <div v-if="store.relationDistribution.length" class="stat-section">
           <h4>{{ t('kgViewer.relationTypes') }}</h4>
           <ul class="rel-type-list">
@@ -162,9 +335,13 @@ function getLabelColor(label: string): string {
       </template>
     </div>
 
-    <!-- Footer: Clear filters -->
-    <div v-if="store.selectedDocId || store.selectedLabels.length || store.searchQuery" class="sidebar-footer">
-      <button class="clear-btn" @click="store.clearFilters()">
+    <!-- ── Footer: Clear filters ── -->
+    <div class="sidebar-footer">
+      <button
+        v-if="store.selectedDocId || store.selectedLabels.length || store.searchQuery || store.searchResults.length"
+        class="clear-btn"
+        @click="store.clearFilters(); store.clearSearch(); searchInput = ''"
+      >
         <el-icon><Delete /></el-icon> {{ t('kgViewer.clearFilters') }}
       </button>
     </div>
@@ -182,7 +359,95 @@ function getLabelColor(label: string): string {
   overflow: hidden;
 }
 
-/* Tabs */
+/* ── Index Control Bar ── */
+
+.index-bar {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(255,255,255,.02);
+  transition: background .2s;
+}
+.index-bar.running {
+  background: rgba(16,185,129,.04);
+}
+
+.index-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.index-bar-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.index-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #64748b;
+  transition: background .3s;
+}
+.index-dot.running {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16,185,129,.5);
+}
+
+.index-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #e2e8f0;
+  background: rgba(16,185,129,.15);
+  border: 1px solid rgba(16,185,129,.3);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.index-toggle-btn:hover { background: rgba(16,185,129,.25); }
+.index-toggle-btn.running {
+  background: rgba(239,68,68,.12);
+  border-color: rgba(239,68,68,.25);
+}
+.index-toggle-btn.running:hover { background: rgba(239,68,68,.22); }
+.index-toggle-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.index-bar-stats {
+  display: flex;
+  gap: 10px;
+  font-size: 10.5px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.index-bar-stats.muted {
+  color: var(--text-muted);
+}
+
+.index-stat-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.index-stat-item::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 2px;
+}
+
+/* ── Tabs ── */
+
 .sidebar-tabs {
   display: flex;
   gap: 2px;
@@ -213,7 +478,8 @@ function getLabelColor(label: string): string {
   border-bottom: 2px solid var(--accent-cyan);
 }
 
-/* Search */
+/* ── Search ── */
+
 .sidebar-search {
   padding: 10px 12px;
   flex-shrink: 0;
@@ -226,7 +492,13 @@ function getLabelColor(label: string): string {
   box-shadow: 0 0 0 1px rgba(139,92,246,.4) inset !important;
 }
 
-/* Content */
+.search-icon.loading {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Content ── */
+
 .sidebar-content {
   flex: 1;
   overflow-y: auto;
@@ -256,7 +528,176 @@ function getLabelColor(label: string): string {
 }
 .retry-btn:hover { background: rgba(239,68,68,.2); }
 
-/* Doc list */
+/* ── Search Results ── */
+
+.search-results-section,
+.related-paths-section {
+  padding: 8px 0;
+}
+
+.section-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 0 0 8px;
+  padding: 0 2px;
+}
+
+.search-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skeleton-item {
+  height: 48px;
+  background: rgba(255,255,255,.04);
+  border-radius: 6px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: .4; } 50% { opacity: .8; } }
+
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.search-result-item {
+  padding: 8px 10px;
+  background: rgba(139,92,246,.04);
+  border: 1px solid rgba(139,92,246,.1);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.search-result-item:hover {
+  background: rgba(139,92,246,.08);
+}
+
+.result-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+.result-score {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+.result-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.result-doc-id {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-preview {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.result-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--accent-cyan);
+}
+
+/* ── Result Tags ── */
+.result-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+.result-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(139, 92, 246, 0.12);
+  color: #a78bfa;
+  white-space: nowrap;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.result-tag-more {
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 1px 4px;
+}
+.result-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Related Paths ── */
+
+.related-paths-section {
+  border-top: 1px solid rgba(255,255,255,.06);
+  margin-top: 4px;
+}
+
+.path-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.path-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  transition: background .1s;
+}
+.path-item:hover { background: rgba(255,255,255,.04); }
+
+.hop-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.hop-badge.hop-0 { background: rgba(6,182,212,.15); color: #06b6d4; }
+.hop-badge.hop-1 { background: rgba(16,185,129,.12); color: #10b981; }
+.hop-badge.hop-2 { background: rgba(245,158,11,.12); color: #f59e0b; }
+.hop-badge.hop-3 { background: rgba(239,68,68,.1); color: #ef4444; }
+
+.path-node-name {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Doc list ── */
+
 .doc-list { list-style: none; margin: 0; padding: 0; }
 .doc-item {
   display: flex; align-items: center; gap: 8px;
@@ -278,7 +719,8 @@ function getLabelColor(label: string): string {
   font-family: 'JetBrains Mono', monospace; font-size: 11px;
 }
 
-/* Entity list */
+/* ── Entity list ── */
+
 .entity-list { list-style: none; margin: 0; padding: 0; }
 .entity-item {
   display: flex; align-items: center; gap: 8px;
@@ -301,7 +743,8 @@ function getLabelColor(label: string): string {
   padding: 1px 7px; border-radius: 10px;
 }
 
-/* Stats */
+/* ── Stats ── */
+
 .stats-grid {
   display: grid; grid-template-columns: 1fr 1fr;
   gap: 8px; margin-bottom: 16px;
@@ -328,7 +771,6 @@ function getLabelColor(label: string): string {
   color: var(--text-secondary); margin: 0 0 8px;
 }
 
-/* Level bars */
 .level-bars { display: flex; flex-direction: column; gap: 6px; }
 .level-row {
   display: flex; align-items: center; gap: 8px;
@@ -347,7 +789,6 @@ function getLabelColor(label: string): string {
   color: var(--text-muted); font-size: 11px;
 }
 
-/* Relation types */
 .rel-type-list { list-style: none; margin: 0; padding: 0; }
 .rel-item {
   display: flex; justify-content: space-between; align-items: center;
@@ -364,7 +805,8 @@ function getLabelColor(label: string): string {
   color: var(--text-muted); font-size: 11px;
 }
 
-/* Footer */
+/* ── Footer ── */
+
 .sidebar-footer {
   padding: 8px 12px;
   border-top: 1px solid var(--border-color);

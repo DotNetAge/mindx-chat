@@ -17,16 +17,26 @@ const props = defineProps<{
 
 // Map store data → relation-graph format
 const graphData = computed<RGJsonData>(() => {
-  const nodes = store.filteredNodes.map(n => ({
-    id: n.id,
-    text: n.properties.name || n.id,
-    nodeShape: 1,
-    color: getNodeColor(n),
-    borderColor: getNodeColor(n),
-    borderWidth: 0,
-    fontColor: '#e2e8f0',
-    fontSize: 12,
-  }))
+  const multiHopNodes = store.multiHopResult
+    ? new Map(store.multiHopResult.nodes.map(hn => [hn.node.id, hn.hopLevel]))
+    : new Map()
+
+  const nodes = store.filteredNodes.map(n => {
+    const hopLevel = multiHopNodes.get(n.id)
+    const opacity = hopLevel !== undefined ? Math.max(1 - hopLevel * 0.2, 0.3) : 1
+    const baseColor = getNodeColor(n)
+    return {
+      id: n.id,
+      text: n.properties.name || n.id,
+      nodeShape: 1,
+      color: baseColor,
+      borderColor: baseColor,
+      borderWidth: hopLevel !== undefined && hopLevel > 0 ? 1 : 0,
+      fontColor: `rgba(226,232,240,${opacity})`,
+      fontSize: hopLevel !== undefined && hopLevel > 2 ? 10 : 12,
+      opacity,
+    }
+  })
 
   const edges = store.filteredEdges.map(e => ({
     from: e.from_node_id,
@@ -90,6 +100,8 @@ function handleNodeClick(node: any, _e: any) {
 }
 
 async function handleNodeDblClick(node: any, _e: any) {
+  // Trigger multi-hop expansion on double-click
+  store.loadMultiHop(node.id, 3)
   props.onNodeDoubleClick?.(node.id)
 }
 

@@ -823,6 +823,42 @@ export const useConnectionStore = defineStore('connection', {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
       return client.call('memory.query', { query, top_k: topK })
+    },
+
+    async fetchMemoryChunks(page = 1, pageSize = 10): Promise<{
+      chunks: Array<{
+        id: string
+        content: string
+        doc_id?: string
+        parent_id?: string
+        mime_type?: string
+        metadata?: Record<string, any>
+        chunk_meta?: { index: number; start_pos?: number; end_pos?: number; heading_level?: number; heading_path?: string[] }
+      }>
+      page: number
+      page_size: number
+      total: number
+      has_more: boolean
+    }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('memory.chunks', { page, page_size: pageSize })
+    },
+
+    async fetchMemoryCount(): Promise<{ count: number }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('memory.count', {})
+    },
+
+    async fetchMemoryStats(projectDir: string): Promise<{
+      total_files: number
+      indexed_files: number
+      total_chunks: number
+    }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('memory.stats', { project_dir: projectDir })
     }
   }
 })

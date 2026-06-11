@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import * as api from '../services/graphApi'
 
 // Re-export types for convenience
-export type { GraphNode, GraphEdge, LabelCount, RelationTypeCount, DocChunk } from '../services/graphApi'
+export type { GraphNode, GraphEdge, LabelCount, RelationTypeCount, DocChunk, SearchResult, FileStateResult, FilewatchStatus, MultiHopResult, HopNode, HopEdge } from '../services/graphApi'
 
 // ── Category color mapping (aligned with theme CSS vars) ──
 export const CATEGORY_COLORS: Record<string, string> = {
@@ -43,6 +43,20 @@ export interface GraphViewerState {
   selectedDocId: string | null
   selectedLabels: string[]
   searchQuery: string
+
+  // Semantic search
+  searchResults: api.SearchResult[]
+  searchLoading: boolean
+
+  // Multi-hop graph
+  multiHopResult: api.MultiHopResult | null
+  multiHopLoading: boolean
+  multiHopRootId: string | null
+
+  // File index status
+  filewatchStatus: api.FilewatchStatus | null
+  fileStates: api.FileStateResult | null
+  fileStatesLoading: boolean
 }
 
 export const useGraphStore = defineStore('graph', {
@@ -63,6 +77,14 @@ export const useGraphStore = defineStore('graph', {
     selectedDocId: null,
     selectedLabels: [],
     searchQuery: '',
+    searchResults: [],
+    searchLoading: false,
+    multiHopResult: null,
+    multiHopLoading: false,
+    multiHopRootId: null,
+    filewatchStatus: null,
+    fileStates: null,
+    fileStatesLoading: false,
   }),
 
   getters: {
@@ -136,6 +158,11 @@ export const useGraphStore = defineStore('graph', {
       this.selectedDocId = null
       this.selectedLabels = []
       this.searchQuery = ''
+      this.searchResults = []
+      this.multiHopResult = null
+      this.multiHopRootId = null
+      this.filewatchStatus = null
+      this.fileStates = null
       this.error = null
     },
 
@@ -261,6 +288,89 @@ export const useGraphStore = defineStore('graph', {
         this.neighborNodeIds = neighborIds
       } catch (e: any) {
         console.warn('[GraphStore] Failed to load neighbors:', e)
+      }
+    },
+
+    // ── Semantic search ──
+
+    async semanticSearch(query: string) {
+      this.searchLoading = true
+      try {
+        this.searchResults = await api.semanticSearch(query, 5)
+      } catch (e: any) {
+        console.warn('[GraphStore] Semantic search failed:', e)
+        this.searchResults = []
+      } finally {
+        this.searchLoading = false
+      }
+    },
+
+    clearSearch() {
+      this.searchResults = []
+    },
+
+    // ── Multi-hop graph ──
+
+    async loadMultiHop(nodeId: string, depth = 3) {
+      this.multiHopLoading = true
+      this.multiHopRootId = nodeId
+      try {
+        this.multiHopResult = await api.loadMultiHop(nodeId, depth)
+      } catch (e: any) {
+        console.warn('[GraphStore] Multi-hop load failed:', e)
+        this.multiHopResult = null
+      } finally {
+        this.multiHopLoading = false
+      }
+    },
+
+    clearMultiHop() {
+      this.multiHopResult = null
+      this.multiHopRootId = null
+    },
+
+    // ── File index control ──
+
+    async refreshFilewatchStatus() {
+      try {
+        this.filewatchStatus = await api.filewatchStatus()
+      } catch (e: any) {
+        console.warn('[GraphStore] Failed to get filewatch status:', e)
+        this.filewatchStatus = null
+      }
+    },
+
+    async startFilewatch() {
+      try {
+        const res = await api.filewatchStart()
+        if (res.status === 'started' || res.status === 'already_running') {
+          await this.refreshFilewatchStatus()
+        }
+      } catch (e: any) {
+        console.warn('[GraphStore] Failed to start filewatch:', e)
+      }
+    },
+
+    async stopFilewatch() {
+      try {
+        const res = await api.filewatchStop()
+        if (res.status === 'stopped' || res.status === 'already_stopped') {
+          await this.refreshFilewatchStatus()
+        }
+      } catch (e: any) {
+        console.warn('[GraphStore] Failed to stop filewatch:', e)
+      }
+    },
+
+    async refreshFileStates(projectDir: string) {
+      this.fileStatesLoading = true
+      try {
+        this.fileStates = await api.scanFileStates(projectDir)
+      } catch (e: any) {
+        console.warn('[GraphStore] Failed to scan file states:', e)
+        this.fileStates = null
+      } finally {
+        this.fileStatesLoading = false
       }
     },
   },

@@ -16,6 +16,28 @@ function levelBadge(level: string): string {
 function levelColor(level: string): string {
   return LEVEL_COLORS[level] || '#64748b'
 }
+
+// ── Multi-hop path grouping ──
+
+/** Group multi-hop nodes by hopLevel for tree display */
+const multiHopGroups = computed(() => {
+  if (!store.multiHopResult) return []
+  const groups: { level: number; nodes: { id: string; name: string; labels: string[] }[] }[] = []
+  for (let i = 0; i <= 3; i++) {
+    const nodesAtLevel = store.multiHopResult.nodes.filter(hn => hn.hopLevel === i)
+    if (nodesAtLevel.length > 0) {
+      groups.push({
+        level: i,
+        nodes: nodesAtLevel.map(hn => ({
+          id: hn.node.id,
+          name: hn.node.properties?.name || hn.node.id,
+          labels: hn.node.labels || [],
+        })),
+      })
+    }
+  }
+  return groups
+})
 </script>
 
 <template>
@@ -92,6 +114,31 @@ function levelColor(level: string): string {
         <div class="detail-section">
           <span class="section-label">{{ t('kgViewer.nodeId') }}</span>
           <code class="raw-id">{{ node.id }}</code>
+        </div>
+      </div>
+
+      <!-- ── Multi-hop Path Tree ── -->
+      <div v-if="multiHopGroups.length > 1" class="multi-hop-section">
+        <span class="section-label">{{ t('kgViewer.relatedPaths') }} ({{ (store.multiHopResult?.nodes.length || 0) - 1 }})</span>
+        <div class="hop-tree">
+          <div v-for="group in multiHopGroups" :key="group.level" class="hop-group">
+            <div class="hop-level-line">
+              <span class="hop-level-tag" :class="'tag-hop-' + group.level">Hop {{ group.level }}</span>
+              <span class="hop-level-count">{{ group.nodes.length }} node{{ group.nodes.length > 1 ? 's' : '' }}</span>
+            </div>
+            <div class="hop-nodes">
+              <div
+                v-for="n in group.nodes.slice(0, 8)"
+                :key="n.id"
+                class="hop-node-chip"
+                @click="store.selectNode(n.id)"
+              >
+                <span class="hop-node-badge" :class="'badge-hop-' + group.level">{{ n.labels[0]?.[0] || '?' }}</span>
+                <span class="hop-node-name">{{ n.name }}</span>
+              </div>
+              <span v-if="group.nodes.length > 8" class="more-hint">+{{ group.nodes.length - 8 }} more</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -203,4 +250,59 @@ function levelColor(level: string): string {
 .slide-up-enter-active { transition: all .25s ease-out; }
 .slide-up-leave-active { transition: all .15s ease-in; }
 .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); opacity: 0; }
+
+/* ── Multi-hop tree ── */
+.multi-hop-section {
+  padding: 12px 20px 16px;
+  border-top: 1px solid rgba(255,255,255,.06);
+}
+.hop-tree { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.hop-group { display: flex; flex-direction: column; gap: 4px; }
+.hop-level-line {
+  display: flex; align-items: center; gap: 8px;
+}
+.hop-level-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; font-weight: 700;
+  padding: 1px 7px; border-radius: 4px;
+}
+.tag-hop-0 { background: rgba(6,182,212,.15); color: #06b6d4; }
+.tag-hop-1 { background: rgba(16,185,129,.12); color: #10b981; }
+.tag-hop-2 { background: rgba(245,158,11,.12); color: #f59e0b; }
+.tag-hop-3 { background: rgba(239,68,68,.1); color: #ef4444; }
+.hop-level-count {
+  font-size: 10.5px; color: var(--text-muted);
+}
+.hop-nodes {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin-left: 8px;
+}
+.hop-node-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 5px;
+  font-size: 11px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.06);
+  cursor: pointer;
+  transition: all .12s;
+}
+.hop-node-chip:hover { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.12); }
+.hop-node-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px; font-weight: 700;
+  width: 16px; height: 16px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 3px;
+}
+.badge-hop-0 { background: rgba(6,182,212,.2); color: #06b6d4; }
+.badge-hop-1 { background: rgba(16,185,129,.2); color: #10b981; }
+.badge-hop-2 { background: rgba(245,158,11,.2); color: #f59e0b; }
+.badge-hop-3 { background: rgba(239,68,68,.15); color: #ef4444; }
+.hop-node-name {
+  color: var(--text-secondary);
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 </style>

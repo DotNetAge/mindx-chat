@@ -11,17 +11,14 @@ import ProviderModelPicker from './chat/ProviderModelPicker.vue'
 import ScheduleView from './chat/ScheduleView.vue'
 import FileReviewBar from './FileReviewBar.vue'
 import LogDrawer from './LogDrawer.vue'
-import MemoryModal from './MemoryModal.vue'
 import GraphViewer from './GraphViewer.vue'
 import { useGraphStore } from '../stores/graphStore'
 
-// 日志/记忆/图谱组件 ref
+// 日志/图谱组件 ref
 const logDrawerRef = ref<InstanceType<typeof LogDrawer> | null>(null)
-const memoryModalRef = ref<InstanceType<typeof MemoryModal> | null>(null)
 const graphStore = useGraphStore()
 
 function openLogDrawer() { logDrawerRef.value?.open() }
-function openMemoryModal() { memoryModalRef.value?.open() }
 function openGraphViewer() { graphStore.open() }
 
 const props = defineProps({
@@ -241,7 +238,6 @@ async function handlePermissionDeny(reason?: string) {
         <a class="nav-pill nav-link" href="https://github.com/dotNetAge/mindx" target="_blank" title="GitHub" rel="noopener noreferrer">GitHub</a>
         <a class="nav-pill nav-link" href="https://gitee.com/ray_liang/mindx" target="_blank" title="Gitee" rel="noopener noreferrer">Gitee</a>
         <button class="nav-pill" @click="openLogDrawer" :title="t('chat.logTab')">{{ t('chat.logTab') }}</button>
-        <button class="nav-pill" @click="openMemoryModal" :title="t('chat.memoryTab')">{{ t('chat.memoryTab') }}</button>
         <button class="nav-pill kg-btn" @click="openGraphViewer" :title="t('kgViewer.title')">
           {{ t('kgViewer.title') }}
           <span class="beta-tag">beta</span>
@@ -404,9 +400,8 @@ async function handlePermissionDeny(reason?: string) {
       </div>
     </footer>
 
-    <!-- 全局组件：日志抽屉 + 记忆模态框 + 知识图谱 -->
+    <!-- 全局组件：日志抽屉 + 知识图谱 -->
     <LogDrawer ref="logDrawerRef" />
-    <MemoryModal ref="memoryModalRef" />
     <!-- GraphViewer 通过 Teleport 渲染到 body，由 graphStore.visible 控制显隐 -->
     <GraphViewer @close="graphStore.close()" />
   </main>
