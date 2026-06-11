@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:web": "rm -rf ../mindx/runtime/web && vite build --outDir ../mindx/runtime/web",
     "preview": "vite preview"
   },
   "dependencies": {

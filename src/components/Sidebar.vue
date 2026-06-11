@@ -10,6 +10,7 @@ import type { ServerSessionInfo } from '../types/websocket'
 import DirectoryBrowser from './DirectoryBrowser.vue'
 import TokenUsageFooter from './TokenUsageFooter.vue'
 import TokenUsageReport from './TokenUsageReport.vue'
+import RuleEditor from './RuleEditor.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
@@ -56,6 +57,7 @@ const serverUrl = ref(connectionStore.serverUrl || 'ws://localhost:1314/ws')
 const showConnectionDialog = ref(false)
 const setupSelectedPath = ref('')
 const showTokenReport = ref(false)
+const showRuleEditor = ref(false)
 
 // --- 用户偏好设定（来自服务端 user.config）---
 const userPreferences = ref<{ lastAgent: string; lastSessionId: string }>({
@@ -415,7 +417,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 
           <!-- Language Switcher -->
           <div class="setting-section">
-            <h5>语言</h5>
+            <h5>{{ t('sidebar.language') }}</h5>
             <div class="lang-switcher">
               <button
                 v-for="opt in langOptions"
@@ -425,6 +427,19 @@ watch(() => connectionStore.state, async (newState, oldState) => {
                 @click="switchLocale(opt.value)"
               >{{ opt.label }}</button>
             </div>
+          </div>
+
+          <!-- Rules Editor -->
+          <div class="setting-section" style="border-bottom: none; margin-bottom: 0;">
+            <el-button
+              size="small"
+              style="width: 100%"
+              @click="showRuleEditor = true"
+              :disabled="!connectionStore.isConnected"
+            >
+              <el-icon><Document /></el-icon>
+              {{ t('sidebar.rules') }}
+            </el-button>
           </div>
         </div>
       </el-popover>
@@ -462,7 +477,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       <div class="section-header" v-show="!isCollapsed">
         <span class="section-title">
           <el-icon><Monitor /></el-icon>
-          Agents
+          {{ t('sidebar.agents') }}
         </span>
         <span class="section-count" v-if="agentsList.length > 0">{{ agentsList.length }}</span>
       </div>
@@ -495,7 +510,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 
       <div v-else class="empty-agents">
         <el-icon :size="24" color="#64748b"><Monitor /></el-icon>
-        <p>{{ connectionStore.isConnected ? t('chat.noAgent') : t('sidebar.connect') + ' Agents' }}</p>
+        <p>{{ connectionStore.isConnected ? t('chat.noAgent') : t('sidebar.noAgents') }}</p>
       </div>
     </section>
 
@@ -614,7 +629,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
         
         <div class="user-info">
           <span class="user-name">
-            {{ connectionStore.currentAgent?.name || connectionStore.primaryAgent?.name || 'MindX User' }}
+            {{ connectionStore.currentAgent?.name || connectionStore.primaryAgent?.name || t('sidebar.defaultUserName') }}
           </span>
           <span class="user-status">
             <span class="status-dot" :class="{ online: connectionStore.isConnected }"></span>
@@ -633,7 +648,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     <!-- Connection Dialog -->
     <el-dialog
       v-model="showConnectionDialog"
-      :title="t('sidebar.connect') + ' MindX Daemon'"
+      :title="t('sidebar.connectDaemon')"
       width="420px"
       :close-on-click-modal="false"
       class="connection-dialog"
@@ -670,7 +685,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
           </el-form-item>
           
           <div class="quick-connects">
-            <span class="label">快速选择:</span>
+            <span class="label">{{ t('sidebar.quickSelect') }}</span>
             <el-tag 
               v-for="url in ['ws://localhost:1314/ws']" 
               :key="url"
@@ -705,7 +720,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       @update:model-value="(v) => { if (!v) emit('setupCancel') }"
     >
       <div class="setup-info" style="padding: 0 0 12px 0;">
-        <p>Agent: <strong>{{ props.setupAgentName }}</strong></p>
+        <p>{{ t('sidebar.agentLabel') }} <strong>{{ props.setupAgentName }}</strong></p>
         <p class="setup-hint">{{ t('chat.selectWorkspace') }}</p>
       </div>
       <DirectoryBrowser
@@ -729,6 +744,8 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     </el-dialog>
 
     <TokenUsageReport v-show="showTokenReport" v-model:visible="showTokenReport" />
+
+    <RuleEditor v-model:visible="showRuleEditor" />
   </aside>
 </template>
 
