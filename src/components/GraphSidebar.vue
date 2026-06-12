@@ -1,31 +1,22 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Document, Collection, DataAnalysis, Search,
-  RefreshLeft, Delete, Monitor, VideoPause,
+  RefreshLeft, Delete,
   Link, FolderOpened
 } from '@element-plus/icons-vue'
 import { useGraphStore, CATEGORY_COLORS } from '../stores/graphStore'
-import type { FileStateResult } from '../stores/graphStore'
 
 const { t } = useI18n()
 const store = useGraphStore()
 
 const searchInput = ref('')
-const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
-
 const tabs = [
   { key: 'documents' as const, icon: Document, label: t('kgViewer.documents') },
   { key: 'entities' as const, icon: Collection, label: t('kgViewer.entities') },
   { key: 'stats' as const, icon: DataAnalysis, label: t('kgViewer.stats') },
 ]
-
-// ── Lifecycle ──
-
-onMounted(() => {
-  store.refreshFilewatchStatus()
-})
 
 // ── Search ──
 
@@ -41,36 +32,6 @@ watch(searchInput, () => {
   if (!searchInput.value) store.clearSearch()
 })
 
-// ── File index ──
-
-async function toggleIndexing() {
-  if (store.filewatchStatus?.running) {
-    await store.stopFilewatch()
-    stopPolling()
-  } else {
-    await store.startFilewatch()
-    startPolling()
-  }
-}
-
-function startPolling() {
-  stopPolling()
-  pollingTimer.value = setInterval(() => {
-    store.refreshFilewatchStatus()
-    // Refresh file states if there's a watched directory
-    if (store.filewatchStatus?.watched?.length) {
-      store.refreshFileStates(store.filewatchStatus.watched[0])
-    }
-  }, 5000)
-}
-
-function stopPolling() {
-  if (pollingTimer.value) {
-    clearInterval(pollingTimer.value)
-    pollingTimer.value = null
-  }
-}
-
 // ── Helpers ──
 
 function shortenDocId(id: string): string {
@@ -85,65 +46,10 @@ function getLabelColor(label: string): string {
   return '#64748b'
 }
 
-function getStateLabel(state: string): string {
-  const map: Record<string, string> = {
-    indexed: t('kgViewer.indexedCount'),
-    changed: t('kgViewer.changedCount'),
-    new: t('kgViewer.newCount'),
-    removed: 'Removed',
-    skipped: 'Skipped',
-  }
-  return map[state] || state
-}
-
-function getStateColor(state: string): string {
-  const map: Record<string, string> = {
-    indexed: '#10b981',
-    changed: '#f59e0b',
-    new: '#06b6d4',
-    removed: '#ef4444',
-    skipped: '#64748b',
-  }
-  return map[state] || '#64748b'
-}
 </script>
 
 <template>
   <aside class="gv-sidebar">
-    <!-- ── Index Control Bar ── -->
-    <div class="index-bar" :class="{ running: store.filewatchStatus?.running }">
-      <div class="index-bar-header">
-        <span class="index-bar-title">
-          <span class="index-dot" :class="{ running: store.filewatchStatus?.running }"></span>
-          {{ t('kgViewer.indexControl') }}
-        </span>
-        <button
-          class="index-toggle-btn"
-          :class="{ running: store.filewatchStatus?.running }"
-          @click="toggleIndexing"
-          :disabled="store.filewatchStatus === null"
-        >
-          <el-icon :size="13">
-            <component :is="store.filewatchStatus?.running ? VideoPause : Monitor" />
-          </el-icon>
-          {{ store.filewatchStatus?.running ? t('kgViewer.indexStop') : t('kgViewer.indexStart') }}
-        </button>
-      </div>
-      <div v-if="store.fileStates" class="index-bar-stats">
-        <span
-          v-for="s in ['indexed', 'new', 'changed', 'removed']"
-          :key="s"
-          class="index-stat-item"
-          :style="{ color: getStateColor(s) }"
-        >
-          {{ getStateLabel(s) }} {{ (store.fileStates.counts as any)[s] ?? 0 }}
-        </span>
-      </div>
-      <div v-else class="index-bar-stats muted">
-        <span>{{ t('common.loading') }}</span>
-      </div>
-    </div>
-
     <!-- ── Tab bar ── -->
     <div class="sidebar-tabs">
       <button
@@ -357,93 +263,6 @@ function getStateColor(state: string): string {
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
   overflow: hidden;
-}
-
-/* ── Index Control Bar ── */
-
-.index-bar {
-  flex-shrink: 0;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
-  background: rgba(255,255,255,.02);
-  transition: background .2s;
-}
-.index-bar.running {
-  background: rgba(16,185,129,.04);
-}
-
-.index-bar-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.index-bar-title {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.index-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #64748b;
-  transition: background .3s;
-}
-.index-dot.running {
-  background: #10b981;
-  box-shadow: 0 0 6px rgba(16,185,129,.5);
-}
-
-.index-toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #e2e8f0;
-  background: rgba(16,185,129,.15);
-  border: 1px solid rgba(16,185,129,.3);
-  border-radius: 5px;
-  cursor: pointer;
-  transition: all .15s;
-}
-.index-toggle-btn:hover { background: rgba(16,185,129,.25); }
-.index-toggle-btn.running {
-  background: rgba(239,68,68,.12);
-  border-color: rgba(239,68,68,.25);
-}
-.index-toggle-btn.running:hover { background: rgba(239,68,68,.22); }
-.index-toggle-btn:disabled { opacity: .5; cursor: not-allowed; }
-
-.index-bar-stats {
-  display: flex;
-  gap: 10px;
-  font-size: 10.5px;
-  font-family: 'JetBrains Mono', monospace;
-}
-.index-bar-stats.muted {
-  color: var(--text-muted);
-}
-
-.index-stat-item {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.index-stat-item::before {
-  content: '';
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-  margin-right: 2px;
 }
 
 /* ── Tabs ── */

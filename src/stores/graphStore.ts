@@ -227,6 +227,7 @@ export const useGraphStore = defineStore('graph', {
             labels: row[1] || [],
             properties: row[2] || {},
           }))
+          console.log('[GraphStore] nodes loaded:', this.nodes.length, 'items', this.nodes.slice(0, 3))
         }
 
         // Parse edges
@@ -238,13 +239,29 @@ export const useGraphStore = defineStore('graph', {
             type: row[3],
             properties: row[4] || {},
           }))
+          console.log('[GraphStore] edges loaded:', this.edges.length, 'items', this.edges.slice(0, 3))
         }
 
-        if (stats.status === 'fulfilled') this.stats = stats.value
-        if (labelDist.status === 'fulfilled') this.labelDistribution = labelDist.value
-        if (relDist.status === 'fulfilled') this.relationDistribution = relDist.value
-        if (levelDist.status === 'fulfilled') this.levelDistribution = levelDist.value
-        if (docs.status === 'fulfilled') this.docs = docs.value
+        if (stats.status === 'fulfilled') {
+          this.stats = stats.value
+          console.log('[GraphStore] stats:', JSON.stringify(this.stats))
+        }
+        if (labelDist.status === 'fulfilled') {
+          this.labelDistribution = labelDist.value
+          console.log('[GraphStore] labelDistribution:', JSON.stringify(this.labelDistribution))
+        }
+        if (relDist.status === 'fulfilled') {
+          this.relationDistribution = relDist.value
+          console.log('[GraphStore] relationDistribution:', JSON.stringify(this.relationDistribution))
+        }
+        if (levelDist.status === 'fulfilled') {
+          this.levelDistribution = levelDist.value
+          console.log('[GraphStore] levelDistribution:', JSON.stringify(this.levelDistribution))
+        }
+        if (docs.status === 'fulfilled') {
+          this.docs = docs.value
+          console.log('[GraphStore] docs:', JSON.stringify(this.docs))
+        }
       } catch (e: any) {
         this.error = e.message || String(e)
       } finally {
@@ -297,6 +314,7 @@ export const useGraphStore = defineStore('graph', {
       this.searchLoading = true
       try {
         this.searchResults = await api.semanticSearch(query, 5)
+        console.log('[GraphStore] searchResults:', JSON.stringify(this.searchResults))
       } catch (e: any) {
         console.warn('[GraphStore] Semantic search failed:', e)
         this.searchResults = []
@@ -316,6 +334,7 @@ export const useGraphStore = defineStore('graph', {
       this.multiHopRootId = nodeId
       try {
         this.multiHopResult = await api.loadMultiHop(nodeId, depth)
+        console.log('[GraphStore] multiHopResult nodes:', this.multiHopResult.nodes.length, 'edges:', this.multiHopResult.edges.length)
       } catch (e: any) {
         console.warn('[GraphStore] Multi-hop load failed:', e)
         this.multiHopResult = null
@@ -334,6 +353,7 @@ export const useGraphStore = defineStore('graph', {
     async refreshFilewatchStatus() {
       try {
         this.filewatchStatus = await api.filewatchStatus()
+        console.log('[GraphStore] filewatchStatus:', JSON.stringify(this.filewatchStatus))
       } catch (e: any) {
         console.warn('[GraphStore] Failed to get filewatch status:', e)
         this.filewatchStatus = null
@@ -366,6 +386,7 @@ export const useGraphStore = defineStore('graph', {
       this.fileStatesLoading = true
       try {
         this.fileStates = await api.scanFileStates(projectDir)
+        console.log('[GraphStore] fileStates:', JSON.stringify(this.fileStates))
       } catch (e: any) {
         console.warn('[GraphStore] Failed to scan file states:', e)
         this.fileStates = null
