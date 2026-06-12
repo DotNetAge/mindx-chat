@@ -399,7 +399,7 @@ export const useConnectionStore = defineStore('connection', {
         })
       })
 
-      // GoReact ToolUseDelta: LLM 流式输出工具调用参数
+      // goharness ToolUseDelta: LLM 流式输出工具调用参数
       client.on('tool_use_delta', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.handleToolUseDelta(envelope.data, {
@@ -408,7 +408,7 @@ export const useConnectionStore = defineStore('connection', {
         })
       })
 
-      // GoReact ToolExecStart: 工具即将开始执行
+      // goharness ToolExecStart: 工具即将开始执行
       client.on('tool_exec_start', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.handleToolExecStart(envelope.data, {
@@ -417,7 +417,7 @@ export const useConnectionStore = defineStore('connection', {
         })
       })
 
-      // GoReact ToolExecEnd: 工具执行结束（成功或失败）
+      // goharness ToolExecEnd: 工具执行结束（成功或失败）
       client.on('tool_exec_end', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.handleToolExecEnd(envelope.data, {

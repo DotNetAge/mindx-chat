@@ -29,7 +29,7 @@ const componentType = computed(() => {
   if (et === 'thinking_delta' || et === 'thinking_done') return 'thinking'
   if (et === 'content_delta' || et === 'markdown') return 'output'
   if (et === 'tool_use_delta') return 'output'
-  // GoReact 工具执行事件（严格对齐）
+  // goharness 工具执行事件（严格对齐）
   if (et === 'tool_exec' || et === 'tool_exec_start' || et === 'tool_exec_end') return 'action'
   if (et === 'subtask_spawned' || et === 'subtask_completed') return 'subtask'
   if (et === 'final_answer' || et === 'task_summary') return 'output'
@@ -60,7 +60,7 @@ const actionData = computed(() => {
   const et = props.message.eventType
   const ed = props.message.eventData || {}
 
-  // GoReact tool_exec 事件 — 原样透传，不包装
+  // goharness tool_exec 事件 — 原样透传，不包装
   if (et === 'tool_exec' || et === 'tool_exec_start' || et === 'tool_exec_end') {
     return {
       start: ed.start || null,       // ToolExecStartData | null
@@ -153,7 +153,7 @@ function formatContent(content: string): string {
       v-bind="thinkingData"
     />
 
-    <!-- ToolExec Component (GoReact tool_exec event) -->
+    <!-- ToolExec Component (goharness tool_exec event) -->
     <ToolExecView 
       v-else-if="componentType === 'action'"
       v-bind="actionData"

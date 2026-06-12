@@ -13,7 +13,7 @@ export enum ResponseType {
   ThinkingDelta = 'thinking_delta',
   ThinkingDone = 'thinking_done',
 
-  // --- GoReact tool execution events (严格对齐 goreact/events/types.go) ---
+  // --- goharness tool execution events (严格对齐 goharness/events/types.go) ---
   // 这些类型与后端 gateway RespToolXxx 恒等映射，不再有中间层篡改
   ToolUseDelta = 'tool_use_delta',
   ToolExecStart = 'tool_exec_start',
@@ -110,15 +110,15 @@ export interface AgentConfig {
   meta?: Record<string, any>;
 }
 
-// SessionMessage — 与 goreact/session.Message 完全对齐
-// 来源: session.get RPC → handleSessionGet → []goreactsession.Message → JSON
+// SessionMessage — 与 goharness/session.Message 完全对齐
+// 来源: session.get RPC → handleSessionGet → []goharnesssession.Message → JSON
 export interface SessionMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   reasoning_content?: string; // thinking/reasoning stream (DeepSeek-R1 etc.)
   timestamp: number;
   tool_call_id?: string;     // for role="tool" messages
-  tool_calls?: Array<{       // for role="assistant" messages, GoReact 扁平格式
+  tool_calls?: Array<{       // for role="assistant" messages, goharness 扁平格式
     id: string;
     name: string;
     arguments: string;
@@ -286,12 +286,12 @@ export interface ModelUpdateParams {
 }
 
 // ============================================================================
-// GoReact 工具执行事件数据结构（严格对齐 goreact/events/*.go）
+// goharness 工具执行事件数据结构（严格对齐 goharness/events/*.go）
 // 这些是后端透传的原始数据，前端直接消费，不做任何中间层转换
 // ============================================================================
 
 /** ToolUseDelta — LLM 流式输出工具调用参数片段
- *  来源: goreact/events/tool_use_delta.go → ToolUseDeltaData
+ *  来源: goharness/events/tool_use_delta.go → ToolUseDeltaData
  *  触发时机: LLM 返回 tool_call 时逐 chunk 发送
  */
 export interface ToolUseDeltaData {
@@ -302,7 +302,7 @@ export interface ToolUseDeltaData {
 }
 
 /** ToolExecStart — 工具即将开始执行
- *  来源: goreact/events/tool_exec.go → ToolExecStartData
+ *  来源: goharness/events/tool_exec.go → ToolExecStartData
  *  触发时机: executeSingleTool() 在工具执行前 emit
  */
 export interface ToolExecStartData {
@@ -312,7 +312,7 @@ export interface ToolExecStartData {
 }
 
 /** ToolExecEnd — 工具执行结束（成功或失败）
- *  来源: goreact/events/tool_exec.go → ToolExecEndData
+ *  来源: goharness/events/tool_exec.go → ToolExecEndData
  *  触发时机: executeSingleTool() 在工具执行后 emit
  */
 export interface ToolExecEndData {

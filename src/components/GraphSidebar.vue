@@ -1,15 +1,22 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Document, Collection, DataAnalysis, Search,
   RefreshLeft, Delete,
-  Link, FolderOpened
+  Link, FolderOpened,
+  Monitor, VideoPause
 } from '@element-plus/icons-vue'
 import { useGraphStore, CATEGORY_COLORS } from '../stores/graphStore'
 
 const { t } = useI18n()
 const store = useGraphStore()
+
+const indexedCount = computed(() => store.fileStates?.counts?.indexed ?? 0)
+const unindexedCount = computed(() => store.fileStates?.counts
+  ? store.fileStates.counts.total - store.fileStates.counts.indexed
+  : 0
+)
 
 const searchInput = ref('')
 const tabs = [
@@ -44,6 +51,51 @@ function getLabelColor(label: string): string {
     if (label === cat || label.startsWith(cat)) return color
   }
   return '#64748b'
+}
+
+/** Extract folder name (basename) from an absolute path */
+function getDirName(fullPath: string): string {
+  const parts = fullPath.replace(/\/+$/, '').split('/')
+  return parts[parts.length - 1] || fullPath
+}
+
+// ── Index control ──
+
+const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
+
+onMounted(() => {
+  store.refreshFilewatchStatus()
+})
+
+onUnmounted(() => {
+  stopPolling()
+})
+
+async function toggleIndexing() {
+  if (store.filewatchStatus?.running) {
+    await store.stopFilewatch()
+    stopPolling()
+  } else {
+    await store.startFilewatch()
+    startPolling()
+  }
+}
+
+function startPolling() {
+  stopPolling()
+  pollingTimer.value = setInterval(() => {
+    store.refreshFilewatchStatus()
+    if (store.filewatchStatus?.watched?.length) {
+      store.refreshFileStates(store.filewatchStatus.watched[0])
+    }
+  }, 5000)
+}
+
+function stopPolling() {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
 }
 
 </script>
@@ -191,6 +243,31 @@ function getLabelColor(label: string): string {
 
       <!-- ── Tab: Stats ── -->
       <template v-else-if="store.activeTab === 'stats'">
+        <!-- Index control -->
+        <div class="stats-index-control">
+          <div class="stats-index-header">
+            <span class="stats-index-title">自动索引</span>
+            <div class="stats-index-actions">
+              <span class="index-dot" :class="{ running: store.filewatchStatus?.running }"></span>
+              <button
+                class="index-toggle-btn"
+                :class="{ running: store.filewatchStatus?.running }"
+                @click="toggleIndexing"
+                :disabled="store.filewatchStatus === null || !store.filewatchStatus.watched?.length"
+              >
+                <el-icon :size="13">
+                  <component :is="store.filewatchStatus?.running ? VideoPause : Monitor" />
+                </el-icon>
+                {{ store.filewatchStatus?.running ? '停止' : '启用' }}
+              </button>
+            </div>
+          </div>
+          <div v-if="store.fileStates" class="stats-index-stats">
+             <span class="index-stat-item" style="color: #10b981">{{ t('kgViewer.indexedCount') }}: {{ indexedCount }}</span>
+             <span class="index-stat-item" style="color: #f59e0b">{{ t('kgViewer.unindexedCount') }}: {{ unindexedCount }}</span>
+           </div>
+        </div>
+
         <div class="stats-grid">
           <div class="stat-card">
             <span class="stat-value">{{ store.stats.totalNodes.toLocaleString() }}</span>
@@ -208,6 +285,26 @@ function getLabelColor(label: string): string {
             <span class="stat-value">{{ store.edges.length }}</span>
             <span class="stat-label">{{ t('kgViewer.loadedEdges') }}</span>
           </div>
+          <div class="stat-card">
+            <span class="stat-value">{{ indexedCount.toLocaleString() }}</span>
+            <span class="stat-label">{{ t('kgViewer.indexedCount') }}</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">{{ unindexedCount.toLocaleString() }}</span>
+            <span class="stat-label">{{ t('kgViewer.unindexedCount') }}</span>
+          </div>
+        </div>
+
+        <!-- Watched directories -->
+        <div v-if="store.filewatchStatus" class="stat-section">
+          <h4>监控目录</h4>
+          <ul v-if="store.filewatchStatus.watched?.length" class="watch-dir-list">
+            <li v-for="dir in store.filewatchStatus.watched" :key="dir" class="watch-dir-item" :title="dir">
+              <el-icon :size="13"><FolderOpened /></el-icon>
+              <span class="watch-dir-name">{{ getDirName(dir) }}</span>
+            </li>
+          </ul>
+          <div v-else class="watch-dir-empty">暂无监控目录</div>
         </div>
 
         <div v-if="store.levelDistribution.length" class="stat-section">
@@ -622,6 +719,123 @@ function getLabelColor(label: string): string {
 .rel-count {
   font-family: 'JetBrains Mono', monospace;
   color: var(--text-muted); font-size: 11px;
+}
+
+/* ── Stats Tab: Index Control ── */
+
+.stats-index-control {
+  margin-bottom: 12px;
+  padding: 10px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 8px;
+}
+.stats-index-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.stats-index-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.stats-index-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stats-index-actions .index-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #64748b;
+  transition: background .3s;
+  flex-shrink: 0;
+}
+.stats-index-actions .index-dot.running {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16,185,129,.5);
+}
+
+.stats-index-actions .index-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #e2e8f0;
+  background: rgba(16,185,129,.15);
+  border: 1px solid rgba(16,185,129,.3);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.stats-index-actions .index-toggle-btn:hover { background: rgba(16,185,129,.25); }
+.stats-index-actions .index-toggle-btn.running {
+  background: rgba(239,68,68,.12);
+  border-color: rgba(239,68,68,.25);
+}
+.stats-index-actions .index-toggle-btn.running:hover { background: rgba(239,68,68,.22); }
+.stats-index-actions .index-toggle-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.stats-index-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.stats-index-stats.muted {
+  color: var(--text-muted);
+}
+
+.stats-index-stats .index-stat-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.stats-index-stats .index-stat-item::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ── Watched directories ── */
+
+.watch-dir-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.watch-dir-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-radius: 5px;
+  cursor: default;
+  transition: background .12s;
+}
+.watch-dir-item:hover {
+  background: rgba(255,255,255,.05);
+  color: var(--text-primary);
+}
+.watch-dir-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.watch-dir-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* ── Footer ── */

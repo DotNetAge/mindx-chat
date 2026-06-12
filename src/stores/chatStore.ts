@@ -61,7 +61,7 @@ export const useChatStore = defineStore('chat', {
 
     pendingCorrelationId: null as string | null,
     pendingContentBySession: {} as Record<string, string>,
-    // GoReact 发送顺序: tool_use_delta → tool_exec_start → tool_exec_end
+    // goharness 发送顺序: tool_use_delta → tool_exec_start → tool_exec_end
     // 此缓存用于在 start 到达前暂存 delta 数据，不做任何协议转换
     pendingToolUseDelta: null as { index: number; id: string; name: string; arguments: string } | null,
 
@@ -187,7 +187,7 @@ export const useChatStore = defineStore('chat', {
             })
           }
           for (const tc of toolCalls) {
-            // GoReact 扁平格式 { id, name, arguments }
+            // goharness 扁平格式 { id, name, arguments }
             pendingToolCalls.set(tc.id, {
               name: tc.name || t('message.toolUse'),
               args: tc.arguments ? (() => { try { return JSON.parse(tc.arguments) } catch { return tc.arguments } })() : null
@@ -408,7 +408,7 @@ export const useChatStore = defineStore('chat', {
         case 'markdown':
           this.handleContentDelta(data)
           break
-        // GoReact 工具执行事件（严格对齐）
+        // goharness 工具执行事件（严格对齐）
         case 'tool_use_delta':
           this.handleToolUseDelta(data, envelope?.title)
           break
@@ -538,9 +538,9 @@ export const useChatStore = defineStore('chat', {
       this.pendingContentBySession[targetSessionId] += data || ''
     },
 
-    // --- GoReact ToolUseDelta ---
-    // 来源: goreact/events/tool_use_delta.go → ToolUseDeltaData {index, id, name, arguments}
-    // 触发时机: 在 tool_exec_start 之前到达（GoReact 流式循环先于 executeTools）
+    // --- goharness ToolUseDelta ---
+    // 来源: goharness/events/tool_use_delta.go → ToolUseDeltaData {index, id, name, arguments}
+    // 触发时机: 在 tool_exec_start 之前到达（goharness 流式循环先于 executeTools）
     handleToolUseDelta(data: any, opts?: { session_id?: string; title?: string }) {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
@@ -556,7 +556,7 @@ export const useChatStore = defineStore('chat', {
         if (data?.name) toolMsg.eventData.start.params['name'] = data.name
         if (data?.id) toolMsg.eventData.start.params['id'] = data.id
       } else {
-        // 还没有 tool_exec_start → 暂存（GoReact 时序保证：delta 先于 start）
+        // 还没有 tool_exec_start → 暂存（goharness 时序保证：delta 先于 start）
         this.pendingToolUseDelta = {
           index: data?.index ?? 0,
           id: data?.id || '',
@@ -566,9 +566,9 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    // --- GoReact ToolExecStart ---
-    // 来源: goreact/events/tool_exec.go → ToolExecStartData {tool_name, params, predicted_tokens}
-    // 触发时机: goreact/agents/runtime.go executeSingleTool() L1370 emit
+    // --- goharness ToolExecStart ---
+    // 来源: goharness/events/tool_exec.go → ToolExecStartData {tool_name, params, predicted_tokens}
+    // 触发时机: goharness/agents/runtime.go executeSingleTool() L1370 emit
     handleToolExecStart(data: any, opts?: { session_id?: string; title?: string }) {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
@@ -578,9 +578,9 @@ export const useChatStore = defineStore('chat', {
       this.currentAction = toolName
       this.isProcessing = true
 
-      // 直接透传 GoReact 原始数据，如有缓存的 delta 则合并 arguments 到 params
+      // 直接透传 goharness 原始数据，如有缓存的 delta 则合并 arguments 到 params
       const startData = { ...data }
-      // 如果 GoReact 没传 tool_name（旧版兼容），用我们确定的名称回填
+      // 如果 goharness 没传 tool_name（旧版兼容），用我们确定的名称回填
       if (!startData.tool_name && toolName !== t('message.toolUse')) {
         startData.tool_name = toolName
       }
@@ -607,9 +607,9 @@ export const useChatStore = defineStore('chat', {
       })
     },
 
-    // --- GoReact ToolExecEnd ---
-    // 来源: goreact/events/tool_exec.go → ToolExecEndData {tool_name, tool_call_id, success, result, error, duration_ms}
-    // 触发时机: goreact/agents/runtime.go executeSingleTool() L1393 emit
+    // --- goharness ToolExecEnd ---
+    // 来源: goharness/events/tool_exec.go → ToolExecEndData {tool_name, tool_call_id, success, result, error, duration_ms}
+    // 触发时机: goharness/agents/runtime.go executeSingleTool() L1393 emit
     handleToolExecEnd(data: any, opts?: { session_id?: string; title?: string }) {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
@@ -637,12 +637,12 @@ export const useChatStore = defineStore('chat', {
         typeof f === 'string'
           ? { path: f, diff: '', additions: 0, deletions: 0, isNew: false }
           : {
-              path: f.path || '',
-              diff: f.diff || '',
-              additions: f.additions || 0,
-              deletions: f.deletions || 0,
-              isNew: f.isNew || false
-            }
+            path: f.path || '',
+            diff: f.diff || '',
+            additions: f.additions || 0,
+            deletions: f.deletions || 0,
+            isNew: f.isNew || false
+          }
       )
 
       this.pendingFileModifications = files

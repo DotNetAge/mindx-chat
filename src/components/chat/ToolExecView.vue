@@ -6,9 +6,9 @@ import { useMarkdown } from '../../composables/useMarkdown'
 const { t } = useI18n()
 
 /**
- * ToolExecView — 渲染 GoReact 原始工具执行事件
+ * ToolExecView — 渲染 goharness 原始工具执行事件
  *
- * props 直接透传 GoReact 数据，无中间结构：
+ * props 直接透传 goharness 数据，无中间结构：
  *   start: ToolExecStartData  {tool_name, params, predicted_tokens}
  *   end:   ToolExecEndData    {tool_name, tool_call_id, success, result, error, duration_ms}
  *   status: 'executing' | 'done' | 'failed'
@@ -48,7 +48,7 @@ function formatDuration(ms: number): string {
 
 // 最终显示的时长文字：完成时优先用服务端数据，否则用客户端计时
 const durationText = computed(() => {
-  // 历史还原或已完成：用 end.duration_ms（GoReact 服务端精确值）
+  // 历史还原或已完成：用 end.duration_ms（goharness 服务端精确值）
   if (props.end?.duration_ms) return formatDuration(props.end.duration_ms)
   // 执行中：客户端实时计时
   if (props.status === 'executing') return formatDuration(elapsedMs.value)
