@@ -14,10 +14,12 @@ import FileReviewBar from './FileReviewBar.vue'
 import LogDrawer from './LogDrawer.vue'
 import GraphViewer from './GraphViewer.vue'
 import { useGraphStore } from '../stores/graphStore'
+import { useScheduleStore } from '../stores/scheduleStore'
 
 // 日志/图谱组件 ref
 const logDrawerRef = ref<InstanceType<typeof LogDrawer> | null>(null)
 const graphStore = useGraphStore()
+const scheduleStore = useScheduleStore()
 
 function openLogDrawer() { logDrawerRef.value?.open() }
 function openGraphViewer() { graphStore.open() }
@@ -133,7 +135,6 @@ watch(
 
 const selectedModel = ref(connectionStore.currentModel?.name || '')
 const showProviderPicker = ref(false)
-const showScheduleView = ref(false)
 
 const currentActionLabel = computed(() => {
   if (chatStore.currentAction) return chatStore.currentAction
@@ -349,7 +350,7 @@ async function handlePermissionDeny(reason?: string) {
           <el-button text circle class="gear-btn" @click="showProviderPicker = true">
             <el-icon><Setting /></el-icon>
           </el-button>
-          <el-button text circle class="gear-btn" @click="showScheduleView = true">
+          <el-button text circle class="gear-btn" @click="scheduleStore.open()">
             <el-icon><Calendar /></el-icon>
           </el-button>
         </div>
@@ -386,11 +387,6 @@ async function handlePermissionDeny(reason?: string) {
       :visible="showProviderPicker || showModelPicker"
       @update:visible="(v) => { showProviderPicker = v; if (showModelPicker && !v) emit('update:showModel-picker', false) }"
       @model-changed="handleModelChanged"
-    />
-
-    <ScheduleView
-      :visible="showScheduleView"
-      @update:visible="showScheduleView = $event"
     />
 
     <!-- Offline Mode Banner -->
@@ -543,6 +539,9 @@ async function handlePermissionDeny(reason?: string) {
     <LogDrawer ref="logDrawerRef" />
     <!-- GraphViewer 通过 Teleport 渲染到 body，由 graphStore.visible 控制显隐 -->
     <GraphViewer @close="graphStore.close()" />
+
+    <!-- ScheduleView 通过 Teleport 渲染到 body -->
+    <ScheduleView />
   </main>
 </template>
 
