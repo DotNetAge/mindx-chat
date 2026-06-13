@@ -1533,14 +1533,14 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 }
 
 .stat-value {
-  font-size: 18px;
+  font-size: 9px;
   font-weight: 700;
   color: var(--accent-cyan);
   font-family: 'JetBrains Mono', monospace;
 }
 
 .stat-label {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-muted);
   text-transform: uppercase;
 }

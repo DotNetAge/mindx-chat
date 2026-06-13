@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { UserFilled, Monitor, Tools, CollectionTag, Warning } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
@@ -133,6 +133,71 @@ function localeMetaValue(
   else return fallback
   const v = meta[key]
   return v != null ? String(v) : fallback
+}
+
+// ── 内联编辑状态 ──
+const editingField = ref<'name' | 'description' | null>(null)
+const editValue = ref('')
+const nameInputRef = ref<any>(null)
+const descInputRef = ref<any>(null)
+
+function getLocaleMetaKey(fieldBase: string): string {
+  const loc = locale.value
+  if (loc === 'zh') return `${fieldBase}_zh`
+  if (loc === 'zh-TW') return `${fieldBase}_zh-tw`
+  return fieldBase
+}
+
+function startEdit(field: 'name' | 'description') {
+  const agent = selectedAgent.value
+  if (!agent) return
+  editingField.value = field
+  if (field === 'name') {
+    editValue.value = localeMetaValue(agent.meta, 'name', agent.name)
+  } else {
+    editValue.value = localeMetaValue(agent.meta, 'description', agent.description)
+  }
+  nextTick(() => {
+    const ref = field === 'name' ? nameInputRef.value : descInputRef.value
+    ref?.focus?.()
+  })
+}
+
+async function saveMetaField(field: 'name' | 'description') {
+  editingField.value = null
+  const agent = selectedAgent.value
+  if (!agent) return
+  const key = getLocaleMetaKey(field)
+  const current = localeMetaValue(agent.meta, field, field === 'name' ? agent.name : agent.description)
+  if (editValue.value === current) return
+
+  // Update local meta
+  if (!agent.meta) {
+    agent.meta = {}
+  }
+  // agent.meta might be an array — handle both cases
+  if (Array.isArray(agent.meta)) {
+    const entry = agent.meta.find((m: Record<string, any>) => key in m)
+    if (entry) {
+      entry[key] = editValue.value
+    } else {
+      agent.meta.push({ [key]: editValue.value })
+    }
+  } else {
+    agent.meta[key] = editValue.value
+  }
+
+  // Sync to server
+  const client = getMindXClient()
+  if (!client) return
+  try {
+    await client.call('agent.update', {
+      name: agent.name,
+      meta: agent.meta
+    })
+  } catch (err: any) {
+    console.warn('[AgentEditor] Failed to save meta:', err)
+  }
 }
 
 // ── 当前选中的 Agent 对象 ──
@@ -425,7 +490,20 @@ function switchActiveAgent(name: string) {
             <!-- 基本信息 -->
             <div class="detail-header">
               <div class="dh-top">
-                <h3>{{ localeMetaValue(selectedAgent.meta, 'name', selectedAgent.name) }}</h3>
+                <h3
+                  v-if="editingField !== 'name'"
+                  class="editable-field"
+                  @click="startEdit('name')"
+                >{{ localeMetaValue(selectedAgent.meta, 'name', selectedAgent.name) }}</h3>
+                <el-input
+                  v-else
+                  ref="nameInputRef"
+                  v-model="editValue"
+                  size="small"
+                  style="width: 300px;"
+                  @blur="saveMetaField('name')"
+                  @keydown.enter="saveMetaField('name')"
+                />
                 <el-button
                   size="small"
                   @click="handleSave"
@@ -437,7 +515,21 @@ function switchActiveAgent(name: string) {
                 <span class="meta-role">{{ localeMetaValue(selectedAgent.meta, 'role', selectedAgent.role) }}</span>
                 <span class="meta-model">{{ selectedAgent.model }}</span>
               </div>
-              <p class="detail-desc">{{ localeMetaValue(selectedAgent.meta, 'description', selectedAgent.description) }}</p>
+              <p
+                v-if="editingField !== 'description'"
+                class="detail-desc editable-field"
+                @click="startEdit('description')"
+              >{{ localeMetaValue(selectedAgent.meta, 'description', selectedAgent.description) }}</p>
+              <el-input
+                v-else
+                ref="descInputRef"
+                v-model="editValue"
+                type="textarea"
+                :rows="2"
+                size="small"
+                @blur="saveMetaField('description')"
+                @keydown.enter.ctrl="saveMetaField('description')"
+              />
             </div>
 
             <!-- Tab: 技能 / 基本能力 -->
@@ -789,6 +881,16 @@ function switchActiveAgent(name: string) {
   margin: 0;
   line-height: 1.5;
   word-break: break-word;
+}
+.editable-field {
+  cursor: pointer;
+  transition: background .12s;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+}
+.editable-field:hover {
+  background: rgba(6, 182, 212, 0.06);
 }
 
 /* ── Tab 栏 ── */

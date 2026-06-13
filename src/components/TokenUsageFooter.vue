@@ -108,7 +108,7 @@ const totalConversations = computed(() => chatStore.totalConversations)
 }
 
 .stat-value {
-  font-size: 13px;
+  font-size: 9px;
   font-weight: 700;
   font-family: 'JetBrains Mono', monospace;
   line-height: 1.2;

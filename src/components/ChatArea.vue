@@ -39,10 +39,69 @@ const props = defineProps({
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const connectionStore = useConnectionStore()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const messageInput = ref('')
 const messageInputRef = ref<InstanceType<typeof ElInput> | null>(null)
 const chatContainer = ref(null)
+
+// ── 翻译工具栏状态 ──
+const translateMode = ref(false)
+const translateTargetLang = ref('英文')
+const LANG_OPTIONS = ['英文', '中文', '日文', '韩文', '法文', '德文', '西班牙文', '俄文', '阿拉伯文']
+
+// ── 语音识别 ──
+const isRecording = ref(false)
+const recognitionTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const recognition = ref<any>(null)
+const HOLD_DURATION = 2000
+
+function startSpeechRecognition() {
+  const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+  if (!SpeechRecognitionAPI) {
+    console.warn('[ChatArea] SpeechRecognition not supported')
+    return
+  }
+
+  isRecording.value = true
+  messageInput.value = ''
+
+  const sr = new SpeechRecognitionAPI()
+  if (locale.value === 'zh') sr.lang = 'zh-CN'
+  else if (locale.value === 'zh-TW') sr.lang = 'zh-TW'
+  else sr.lang = 'en-US'
+  sr.continuous = true
+  sr.interimResults = true
+
+  let finalTranscript = ''
+  sr.onresult = (event: any) => {
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const r = event.results[i]
+      if (r.isFinal) {
+        finalTranscript += r[0].transcript
+      }
+    }
+    messageInput.value = finalTranscript
+  }
+
+  sr.onerror = () => {
+    isRecording.value = false
+  }
+
+  sr.onend = () => {
+    isRecording.value = false
+  }
+
+  sr.start()
+  recognition.value = sr
+}
+
+function stopSpeechRecognition() {
+  if (recognition.value) {
+    recognition.value.stop()
+    recognition.value = null
+  }
+  isRecording.value = false
+}
 
 const emit = defineEmits(['update:showModelPicker'])
 
@@ -87,8 +146,37 @@ const progressPercent = computed(() => {
   return Math.round((chatStore.actionProgress.completed / chatStore.actionProgress.total) * 100)
 })
 
+// ── 当前 Agent 的语言版本名称 ──
+function localeMetaValue(
+  meta: Record<string, any> | undefined,
+  fieldBase: string,
+  fallback: string
+): string {
+  if (!meta) return fallback
+  const loc = locale.value
+  let key: string
+  if (loc === 'zh') key = `${fieldBase}_zh`
+  else if (loc === 'zh-TW') key = `${fieldBase}_zh-tw`
+  else return fallback
+  const v = meta[key]
+  return v != null ? String(v) : fallback
+}
+
+const currentAgentDisplayName = computed(() => {
+  const agent = connectionStore.currentAgent
+  if (!agent) return 'Agent'
+  return localeMetaValue(agent.meta, 'name', agent.name)
+})
+
 async function sendMessage() {
   if (!messageInput.value.trim() || chatStore.isProcessing) return
+
+  // 翻译模式：包装用户输入为翻译指令
+  if (translateMode.value) {
+    const text = messageInput.value.trim()
+    messageInput.value = `请将以下的文本翻译为${translateTargetLang.value}：${text}`
+    translateMode.value = false
+  }
 
   if (!sessionStore.activeSessionId) {
     console.log('[MindX] No active session, attempting to create one...')
@@ -134,10 +222,39 @@ async function sendMessage() {
   nextTick(() => scrollToBottom())
 }
 
-function handleKeyPress(e: KeyboardEvent) {
+function handleInputKeydown(e: KeyboardEvent) {
+  // 录音期间锁定输入
+  if (isRecording.value) {
+    e.preventDefault()
+    return
+  }
+
+  // Enter 发送
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     sendMessage()
+    return
+  }
+
+  // 空格长按 3s 检测
+  if (e.key === ' ' && !e.repeat) {
+    recognitionTimer.value = setTimeout(() => {
+      startSpeechRecognition()
+    }, HOLD_DURATION)
+  }
+}
+
+function handleInputKeyup(e: KeyboardEvent) {
+  if (e.key === ' ') {
+    // 不足 3s 取消定时器
+    if (recognitionTimer.value) {
+      clearTimeout(recognitionTimer.value)
+      recognitionTimer.value = null
+    }
+    // 放空格键停止录音
+    if (isRecording.value) {
+      stopSpeechRecognition()
+    }
   }
 }
 
@@ -398,7 +515,7 @@ async function handlePermissionDeny(reason?: string) {
 
     <!-- Input Area -->
     <footer class="chat-input-area">
-      <div class="input-container">
+      <div class="input-container" :class="{ 'is-recording': isRecording }">
         <div class="input-row input-row-1">
           <el-input
             ref="messageInputRef"
@@ -406,11 +523,52 @@ async function handlePermissionDeny(reason?: string) {
             type="textarea"
             :rows="2"
             resize="none"
-            :placeholder="!connectionStore.isOfflineMode && connectionStore.isConnected ? `${t('chat.inputChatWith')} ${connectionStore.currentAgent?.name || 'Agent'}... (Enter ${t('common.send')})` : (connectionStore.isOfflineMode ? t('chat.offlineInputPlaceholder') : t('chat.notConnected'))"
-            @keypress="handleKeyPress"
+            :placeholder="isRecording ? t('chat.recordingPlaceholder') : (translateMode ? t('chat.translatePlaceholder') : (!connectionStore.isOfflineMode && connectionStore.isConnected ? t('chat.defaultPlaceholder') : (connectionStore.isOfflineMode ? t('chat.offlineInputPlaceholder') : t('chat.notConnected'))))"
+            @keydown="handleInputKeydown"
+            @keyup="handleInputKeyup"
             :disabled="false"
             class="message-input"
           />
+          <div v-if="isRecording" class="recording-indicator">
+            <span class="rec-dot"></span>
+            <span class="rec-label">{{ t('chat.recording') }}</span>
+          </div>
+        </div>
+        <div class="input-row-toolbar" v-if="!translateMode">
+          <el-button
+            size="small"
+            class="toolbar-btn translate-btn"
+            @click="translateMode = true"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M14 6l-1 2"/><path d="M18 12l5 5"/><path d="M21 12l5 5" transform="translate(-1,-3)"/><path d="M16 20l3 3 3-3"/></svg>
+            {{ t('chat.translate') }}
+          </el-button>
+        </div>
+        <div class="input-row-toolbar" v-else>
+          <el-tag closable size="small" type="info" class="translate-tag" @close="translateMode = false">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:middle;"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/></svg>
+            {{ t('chat.translate') }}
+          </el-tag>
+          <span class="translate-prefix">{{ t('chat.translateTo') }}</span>
+          <el-select
+            v-model="translateTargetLang"
+            size="small"
+            class="translate-lang-select"
+            popper-class="translate-popper"
+          >
+            <el-option
+              v-for="lang in LANG_OPTIONS"
+              :key="lang"
+              :label="lang"
+              :value="lang"
+            />
+          </el-select>
+          <el-button
+            size="small"
+            text
+            class="toolbar-cancel"
+            @click="translateMode = false"
+          >{{ t('common.cancel') }}</el-button>
         </div>
       </div>
     </footer>
@@ -916,6 +1074,63 @@ async function handlePermissionDeny(reason?: string) {
   padding: 0;
 }
 
+/* ── 工具栏行 ── */
+.input-row-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  min-height: 28px;
+}
+.toolbar-btn {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.toolbar-btn:hover {
+  color: var(--accent-cyan);
+}
+.translate-btn {
+  padding: 2px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(55, 65, 81, 0.4);
+  background: rgba(15, 23, 42, 0.6);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.translate-tag {
+  flex-shrink: 0;
+}
+.translate-prefix {
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.translate-lang-select {
+  width: 110px;
+}
+.translate-lang-select :deep(.el-select__wrapper) {
+  background: rgba(15, 23, 42, 0.8);
+  border-color: rgba(55, 65, 81, 0.5);
+  box-shadow: none;
+  min-height: 26px;
+  height: 26px;
+}
+.translate-lang-select :deep(.el-select__wrapper:hover) {
+  border-color: var(--accent-cyan);
+}
+.translate-lang-select :deep(.el-select__placeholder),
+.translate-lang-select :deep(.el-select__selected-item) {
+  font-size: 12px;
+  color: #e2e8f0;
+}
+.toolbar-cancel {
+  font-size: 11px;
+  color: #64748b;
+  margin-left: auto;
+}
+
 .input-container {
   max-width: 920px;
   margin: 0 auto 20px;
@@ -959,6 +1174,45 @@ async function handlePermissionDeny(reason?: string) {
   line-height: 1.6;
   padding: 0;
   resize: none;
+}
+
+/* ── 录音指示器 ── */
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 6px;
+  animation: rec-pulse-border 1.5s ease-in-out infinite;
+}
+.rec-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: rec-pulse-dot 1s ease-in-out infinite;
+}
+.rec-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fca5a5;
+  white-space: nowrap;
+}
+@keyframes rec-pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+@keyframes rec-pulse-border {
+  0%, 100% { border-color: rgba(239, 68, 68, 0.25); }
+  50% { border-color: rgba(239, 68, 68, 0.55); }
+}
+
+.input-container.is-recording {
+  border-color: rgba(239, 68, 68, 0.4) !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1), 0 4px 20px rgba(239, 68, 68, 0.08) !important;
 }
 
 /* Offline Mode Banner */
@@ -1021,5 +1275,24 @@ async function handlePermissionDeny(reason?: string) {
 .config-tooltip .popper__arrow,
 .config-tooltip .popper__arrow::after {
   border-bottom-color: #dc2626 !important;
+}
+
+/* ── Translate 语言选择下拉 ── */
+.translate-popper {
+  background: #1e293b !important;
+  border: 1px solid rgba(55, 65, 81, 0.6) !important;
+}
+.translate-popper .el-select-dropdown__item {
+  color: #cbd5e1 !important;
+  font-size: 12px !important;
+}
+.translate-popper .el-select-dropdown__item.hover,
+.translate-popper .el-select-dropdown__item:hover {
+  background: rgba(6, 182, 212, 0.08) !important;
+  color: #e2e8f0 !important;
+}
+.translate-popper .el-select-dropdown__item.selected {
+  color: #06b6d4 !important;
+  font-weight: 600 !important;
 }
 </style>
