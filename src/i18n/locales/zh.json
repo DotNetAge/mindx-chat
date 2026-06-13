@@ -83,12 +83,24 @@
     "notConnected": "请先连接到 MindX 服务",
     "noAgent": "请先选择一个 Agent",
     "offlineMode": "当前处于离线模式，消息将在恢复连接后发送",
-    "welcome": { "text": "选择一个 Agent 开始对话", "description": "MindX 是一个 AI 驱动的智能助手，支持代码执行、文件操作、工具调用等能力", "startChat": "开始与 Agent 对话", "selectOrCreate": "选择或创建会话开始对话", "default": "欢迎使用 MindX" },
+    "welcome": { "text": "选择一个 Agent 开始对话", "description": "我们是您最忠实的牛马，使劲地使唤我们，奴役我们吧！", "startChat": "您将不再独自前行", "selectOrCreate": "选择或创建会话开始对话", "default": "欢迎使用 MindX" },
     "prompt": {
       "analyzeProject": "帮我分析这个项目",
       "codeReview": "代码审查建议",
       "designApi": "设计 API 接口"
     },
+    "quickActions": [
+      "先自我介绍一下",
+      "你能为我干点啥？",
+      "今天有些什么劲爆的热点新闻？",
+      "介绍一下你的能力边界",
+      "帮我 Review 当前项目的代码",
+      "分析一下这个项目的技术架构",
+      "帮我 brainstorm 几个产品创意",
+      "用大白话解释什么是大语言模型",
+      "给我推荐几个学习 AI 的资源",
+      "给我讲个笑话，逗逗我开心"
+    ],
     "unconfiguredProvider": "未配置 AI 供应商",
     "configureProviderHint": "点击配置 AI 供应商和 API Key",
     "stopProcessing": "停止处理",

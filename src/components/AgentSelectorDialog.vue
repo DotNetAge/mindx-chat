@@ -213,6 +213,7 @@ interface AgentCard {
   descZh: string
   model: string
   isActive: boolean
+  ratings: number
 }
 const agentCards = computed<AgentCard[]>(() => {
   return connectionStore.agents.map((a: AgentInfo) => ({
@@ -221,7 +222,8 @@ const agentCards = computed<AgentCard[]>(() => {
     roleZh: localeMetaValue(a.meta, 'role', a.role),
     descZh: localeMetaValue(a.meta, 'description', a.description),
     model: a.model,
-    isActive: a.name === (connectionStore.currentAgent?.name || connectionStore.primaryAgent?.name)
+    isActive: a.name === (connectionStore.currentAgent?.name || connectionStore.primaryAgent?.name),
+    ratings: a.meta?.ratings ?? 0
   }))
 })
 
@@ -473,6 +475,9 @@ function switchActiveAgent(name: string) {
                 <div class="ali-info">
                   <div class="ali-name">{{ agent.nameZh }}</div>
                   <div class="ali-id">{{ agent.name }}</div>
+                  <div class="ali-rating">
+                    <span v-for="i in 5" :key="i" class="astar" :class="{ filled: i <= agent.ratings }">★</span>
+                  </div>
                 </div>
                 <div v-if="agent.isActive" class="ali-badge">{{ t('common.current') }}</div>
               </div>
@@ -514,6 +519,9 @@ function switchActiveAgent(name: string) {
               <div class="detail-meta">
                 <span class="meta-role">{{ localeMetaValue(selectedAgent.meta, 'role', selectedAgent.role) }}</span>
                 <span class="meta-model">{{ selectedAgent.model }}</span>
+              </div>
+              <div class="detail-rating">
+                <span v-for="i in 5" :key="i" class="dstar" :class="{ filled: i <= (selectedAgent.meta?.ratings || 0) }">★</span>
               </div>
               <p
                 v-if="editingField !== 'description'"
@@ -810,6 +818,32 @@ function switchActiveAgent(name: string) {
   padding: 1px 6px;
   border-radius: 6px;
   white-space: nowrap;
+}
+
+.ali-rating {
+  display: flex;
+  gap: 1px;
+  margin-top: 2px;
+}
+.ali-rating .astar {
+  font-size: 10px;
+  color: rgba(148, 163, 184, 0.2);
+}
+.ali-rating .astar.filled {
+  color: #f59e0b;
+}
+
+.detail-rating {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+}
+.detail-rating .dstar {
+  font-size: 14px;
+  color: rgba(148, 163, 184, 0.2);
+}
+.detail-rating .dstar.filled {
+  color: #f59e0b;
 }
 .empty-list {
   color: #64748b;

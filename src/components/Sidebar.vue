@@ -482,6 +482,9 @@ watch(() => connectionStore.state, async (newState, oldState) => {
            <span class="status-dot" :class="{ online: connectionStore.isConnected }"></span>
            {{ connectionStore.currentAgent?.meta?.role_zh || connectionStore.currentAgent?.role || connectionStore.primaryAgent?.meta?.role_zh || connectionStore.primaryAgent?.role || '' }}
          </span>
+         <span class="user-rating" v-if="connectionStore.currentAgent">
+           <span v-for="i in 5" :key="i" class="star" :class="{ filled: i <= (connectionStore.currentAgent.meta?.ratings || 0) }">★</span>
+         </span>
        </div>
 
        <el-button
@@ -1446,6 +1449,19 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 .status-dot.online {
   background: #10b981;
   box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+}
+
+.user-rating {
+  display: flex;
+  gap: 1px;
+  margin-top: 2px;
+}
+.user-rating .star {
+  font-size: 11px;
+  color: rgba(148, 163, 184, 0.25);
+}
+.user-rating .star.filled {
+  color: #f59e0b;
 }
 
 .settings-btn {

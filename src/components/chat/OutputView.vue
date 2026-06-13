@@ -36,9 +36,51 @@ const props = defineProps({
 const showRaw = ref(false)
 const copySuccess = ref(false)
 const downloadSuccess = ref(false)
+const isSpeaking = ref(false)
+const isPaused = ref(false)
 
 // 共享的 markdown-it + hljs + mermaid 实例（与 ToolExecView 共用同一份配置）
 const { md, renderMermaidInRoot } = useMarkdown()
+
+// 去除 markdown 标记，只保留纯文本用于朗读
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, '')          // 代码块
+    .replace(/`([^`]+)`/g, '$1')              // 行内代码
+    .replace(/!\[.*?\]\(.*?\)/g, '')          // 图片
+    .replace(/\[([^\]]*)\]\(.*?\)/g, '$1')    // 链接
+    .replace(/[*_~]{1,3}([^*_~]+)[*_~]{1,3}/g, '$1') // 加粗/斜体/删除线
+    .replace(/#{1,6}\s+/g, '')                // 标题标记
+    .replace(/>\s+/g, '')                     // 引用标记
+    .replace(/[-*+]\s+/g, '')                 // 列表标记
+    .replace(/\n{3,}/g, '\n\n')               // 多余空行
+    .trim()
+}
+
+function speakContent() {
+  if (!props.content) return
+  const synth = window.speechSynthesis
+  if (isSpeaking.value) {
+    if (isPaused.value) {
+      synth.resume()
+      isPaused.value = false
+    } else {
+      synth.cancel()
+      isSpeaking.value = false
+    }
+    return
+  }
+  const utterance = new SpeechSynthesisUtterance(stripMarkdown(props.content))
+  utterance.lang = 'zh-CN'
+  utterance.rate = 1.0
+  utterance.pitch = 1.0
+  utterance.onend = () => { isSpeaking.value = false; isPaused.value = false }
+  utterance.onpause = () => { isPaused.value = true }
+  utterance.onerror = () => { isSpeaking.value = false; isPaused.value = false }
+  synth.speak(utterance)
+  isSpeaking.value = true
+  isPaused.value = false
+}
 
 const formattedContent = computed(() => {
   if (!props.content) return ''
@@ -117,6 +159,19 @@ watch(
 
     <!-- 尾部工具栏（图标 only，default 样式） -->
     <div class="actions actions-footer">
+      <button class="action-btn" :class="{ 'is-active': isSpeaking }" @click.stop="speakContent" title="朗读 / 停止" aria-label="朗读">
+        <svg v-if="!isSpeaking" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+        </svg>
+        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <rect x="17" y="9" width="3" height="6" rx="1"/>
+          <rect x="21" y="11" width="3" height="2" rx="1"/>
+        </svg>
+        <span v-if="isSpeaking" class="action-badge">■</span>
+      </button>
       <button class="action-btn" @click.stop="copyToClipboard" title="复制 Markdown 原文" aria-label="复制">
         <el-icon><CopyDocument /></el-icon>
         <span v-if="copySuccess" class="action-success">✓</span>
@@ -153,6 +208,7 @@ watch(
 }
 
 .action-btn {
+  position: relative;
   width: 24px;
   height: 24px;
   border-radius: 4px;
@@ -164,11 +220,31 @@ watch(
   align-items: center;
   justify-content: center;
   transition: all 0.2s ease;
+  position: relative;
 }
 
 .action-btn:hover {
   background: rgba(6, 182, 212, 0.2);
   color: #22d3ee;
+}
+
+.action-btn.is-active {
+  background: rgba(6, 182, 212, 0.25);
+  color: #22d3ee;
+  animation: pulse-speak 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-speak {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.3); }
+  50% { box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.1); }
+}
+
+.action-badge {
+  font-size: 8px;
+  color: #ef4444;
+  position: absolute;
+  top: -2px;
+  right: -2px;
 }
 
 .copy-success {

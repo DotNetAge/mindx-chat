@@ -9,6 +9,7 @@ import { useConnectionStore } from '../stores/connectionStore'
 import MessageComponentRouter from './chat/MessageComponentRouter.vue'
 import ProviderModelPicker from './chat/ProviderModelPicker.vue'
 import ScheduleView from './chat/ScheduleView.vue'
+import ChatEmptyState from './ChatEmptyState.vue'
 import FileReviewBar from './FileReviewBar.vue'
 import LogDrawer from './LogDrawer.vue'
 import GraphViewer from './GraphViewer.vue'
@@ -167,6 +168,11 @@ const currentAgentDisplayName = computed(() => {
   if (!agent) return 'Agent'
   return localeMetaValue(agent.meta, 'name', agent.name)
 })
+
+function onQuickPrompt(text: string) {
+  messageInput.value = text
+  sendMessage()
+}
 
 async function sendMessage() {
   if (!messageInput.value.trim() || chatStore.isProcessing) return
@@ -461,53 +467,13 @@ async function handlePermissionDeny(reason?: string) {
         </transition-group>
       </div>
 
-      <!-- Empty State -->
-      <div v-else class="empty-state">
-        <div class="empty-visual">
-          <svg width="120" height="120" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <linearGradient id="emptyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#06b6d4"/>
-                <stop offset="50%" stop-color="#8b5cf6"/>
-                <stop offset="100%" stop-color="#10b981"/>
-              </linearGradient>
-            </defs>
-            <circle cx="12" cy="12" r="10" stroke="url(#emptyGrad)" stroke-width="0.5" opacity="0.3"/>
-            <path d="M12 6v6l4 2" stroke="url(#emptyGrad)" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
-            <circle cx="12" cy="12" r="2" fill="url(#emptyGrad)" opacity="0.8"/>
-          </svg>
-        </div>
-        
-        <h3 class="empty-title">{{ !connectionStore.isOfflineMode && connectionStore.isConnected ? t('chat.welcome.startChat') : (sessionStore.sessions.length > 0 ? t('chat.welcome.selectOrCreate') : t('chat.welcome.default')) }}</h3>
-        
-        <p class="empty-desc">
-          <template v-if="!connectionStore.isOfflineMode && connectionStore.isConnected">
-            {{ t('chat.welcome.description') }}
-          </template>
-          <template v-else-if="connectionStore.isOfflineMode">
-            {{ t('chat.welcome.offlineHint') }}
-          </template>
-          <template v-else>
-            {{ t('chat.welcome.connecting') }}
-          </template>
-        </p>
-
-        <div class="quick-prompts" v-if="!connectionStore.isOfflineMode || sessionStore.sessions.length > 0">
-          <p class="prompts-label">💡 {{ t('chat.quickStart') }}</p>
-          <div class="prompt-buttons">
-            <el-button
-              v-for="prompt in [t('chat.prompt.analyzeProject'), t('chat.prompt.codeReview'), t('chat.prompt.designApi')]"
-              :key="prompt"
-              size="small"
-              round
-              @click="messageInput = prompt; sendMessage()"
-              class="quick-prompt"
-            >
-              {{ prompt }}
-            </el-button>
-          </div>
-        </div>
-      </div>
+      <ChatEmptyState
+        v-else
+        :is-connected="connectionStore.isConnected"
+        :is-offline-mode="connectionStore.isOfflineMode"
+        :sessions-length="sessionStore.sessions.length"
+        @send-prompt="onQuickPrompt"
+      />
     </div>
 
     <!-- File Review Bar -->
@@ -1006,67 +972,6 @@ async function handlePermissionDeny(reason?: string) {
 .message-list-leave-to {
   opacity: 0;
   transform: translateX(16px);
-}
-
-/* Empty State */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  padding: 48px;
-  text-align: center;
-  gap: 18px;
-}
-
-.empty-visual {
-  opacity: 0.4;
-  margin-bottom: 8px;
-}
-
-.empty-title {
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: -0.5px;
-  color: var(--text-primary);
-}
-
-.empty-desc {
-  font-size: 14px;
-  color: var(--text-muted);
-  max-width: 420px;
-  line-height: 1.65;
-}
-
-.quick-prompts {
-  margin-top: 12px;
-}
-
-.prompts-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 12px;
-}
-
-.prompt-buttons {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-
-.quick-prompt {
-  border-color: var(--border-color);
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.quick-prompt:hover {
-  border-color: var(--accent-cyan);
-  color: var(--accent-cyan);
-  background: rgba(6, 182, 212, 0.08);
 }
 
 /* Input Area */

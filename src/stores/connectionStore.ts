@@ -149,7 +149,10 @@ export const useConnectionStore = defineStore('connection', {
     },
 
     setAgents(agents: AgentInfo[]) {
-      this.agents = agents
+      this.agents = agents.map(a => ({
+        ...a,
+        meta: { ratings: 0, ...(a.meta || {}) }
+      }))
     },
 
     setModels(models: ModelInfo[]) {
