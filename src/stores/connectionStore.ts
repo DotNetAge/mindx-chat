@@ -15,8 +15,10 @@ export interface AgentInfo {
   description: string
   model: string
   skills?: string[]
+  exclude_tools?: string[]
   introduction?: string
   active?: boolean
+  meta?: Record<string, any>
 }
 
 export interface ModelInfo {

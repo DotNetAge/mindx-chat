@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import { Search, UserFilled, Monitor, ChatDotRound, FolderOpened, Folder } from '@element-plus/icons-vue'
+import { Search, UserFilled, Monitor, ChatDotRound, FolderOpened, Folder, CollectionTag, Setting, Link, SwitchButton, Plus, Close, Document, FolderAdd } from '@element-plus/icons-vue'
 import { useSessionStore } from '../stores/sessionStore'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useChatStore } from '../stores/chatStore'
@@ -11,6 +11,8 @@ import DirectoryBrowser from './DirectoryBrowser.vue'
 import TokenUsageFooter from './TokenUsageFooter.vue'
 import TokenUsageReport from './TokenUsageReport.vue'
 import RuleEditor from './RuleEditor.vue'
+import EntityTagsDialog from './EntityTagsDialog.vue'
+import AgentSelectorDialog from './AgentSelectorDialog.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
@@ -58,6 +60,8 @@ const showConnectionDialog = ref(false)
 const setupSelectedPath = ref('')
 const showTokenReport = ref(false)
 const showRuleEditor = ref(false)
+const showEntityTags = ref(false)
+const showAgentSelector = ref(false)
 
 // --- 用户偏好设定（来自服务端 user.config）---
 const userPreferences = ref<{ lastAgent: string; lastSessionId: string }>({
@@ -323,7 +327,8 @@ watch(() => connectionStore.state, async (newState, oldState) => {
         description: a.description,
         model: a.model,
         skills: a.skills,
-        introduction: a.introduction
+        introduction: a.introduction,
+        meta: a.meta
       })))
 
       connectionStore.setModels(models.map(m => ({
@@ -429,6 +434,19 @@ watch(() => connectionStore.state, async (newState, oldState) => {
             </div>
           </div>
 
+          <!-- Entity Tags -->
+          <div class="setting-section">
+            <el-button
+              size="small"
+              style="width: 100%"
+              @click="showEntityTags = true"
+              :disabled="!connectionStore.isConnected"
+            >
+              <el-icon><CollectionTag /></el-icon>
+              {{ t('entityTags.button') }}
+            </el-button>
+          </div>
+
           <!-- Rules Editor -->
           <div class="setting-section" style="border-bottom: none; margin-bottom: 0;">
             <el-button
@@ -445,74 +463,34 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       </el-popover>
     </div>
 
-    <!-- Connection Status -->
-    <div class="connection-status" :class="connectionStore.state">
-      <div class="status-indicator" :style="{ background: connectionStatus.color }"></div>
-      <transition name="fade">
-        <span v-if="!isCollapsed" class="status-label">{{ connectionStatus.label }}</span>
-      </transition>
-      
-      <template v-if="!isCollapsed">
-        <button 
-          v-if="!connectionStore.isConnected"
-          class="connect-btn"
-          @click="showConnectionDialog = true"
-        >
-          <el-icon><Link /></el-icon>
-          {{ t('sidebar.connect') }}
-        </button>
-        
-        <button 
-          v-else
-          class="disconnect-btn"
-          @click="handleDisconnect"
-        >
-          <el-icon><SwitchButton /></el-icon>
-        </button>
-      </template>
-    </div>
+    <!-- User Profile -->
+     <div class="user-profile">
+       <div class="avatar" :class="{ connected: connectionStore.isConnected, offline: !connectionStore.isConnected }">
+         <span v-if="connectionStore.isConnected">✓</span>
+         <span v-else>📴</span>
+       </div>
+       
+       <div class="user-info">
+         <span class="user-name">
+           {{ connectionStore.currentAgent?.meta?.name_zh || connectionStore.currentAgent?.name || connectionStore.primaryAgent?.meta?.name_zh || connectionStore.primaryAgent?.name || t('sidebar.defaultUserName') }}
+         </span>
+         <span class="user-status">
+           <span class="status-dot" :class="{ online: connectionStore.isConnected }"></span>
+           {{ connectionStore.currentAgent?.meta?.role_zh || connectionStore.currentAgent?.role || connectionStore.primaryAgent?.meta?.role_zh || connectionStore.primaryAgent?.role || '' }}
+         </span>
+       </div>
 
-    <!-- ===== 上段：Agent 列表 ===== -->
-    <section class="agents-section">
-      <div class="section-header" v-show="!isCollapsed">
-        <span class="section-title">
-          <el-icon><Monitor /></el-icon>
-          {{ t('sidebar.agents') }}
-        </span>
-        <span class="section-count" v-if="agentsList.length > 0">{{ agentsList.length }}</span>
-      </div>
-
-      <ul class="agent-list" v-if="agentsList.length > 0">
-        <li
-          v-for="agent in agentsList"
-          :key="agent.name"
-          class="agent-item"
-          :class="{ active: agent.isActive }"
-          @click="selectAgent(agent.name)"
-        >
-          <div class="agent-avatar" :class="{ active: agent.isActive }">
-            <el-icon v-if="agent.isActive"><UserFilled /></el-icon>
-            <el-icon v-else><Monitor /></el-icon>
-          </div>
-          
-          <transition name="fade">
-            <div v-if="!isCollapsed" class="agent-info">
-              <h4 class="agent-name">{{ agent.name }}</h4>
-              <p class="agent-role">{{ agent.role }} · {{ agent.model }}</p>
-            </div>
-          </transition>
-
-          <transition name="fade">
-            <span v-if="!isCollapsed && agent.isActive" class="active-badge">{{ t('common.current') }}</span>
-          </transition>
-        </li>
-      </ul>
-
-      <div v-else class="empty-agents">
-        <el-icon :size="24" color="#64748b"><Monitor /></el-icon>
-        <p>{{ connectionStore.isConnected ? t('chat.noAgent') : t('sidebar.noAgents') }}</p>
-      </div>
-    </section>
+       <el-button
+         text
+         circle
+         class="agent-select-btn"
+         @click="showAgentSelector = true"
+         :disabled="!connectionStore.isConnected"
+         :title="t('agentSelector.title')"
+       >
+         <el-icon><UserFilled /></el-icon>
+       </el-button>
+     </div>
 
     <!-- 分隔线 -->
     <div class="divider" v-show="!isCollapsed"></div>
@@ -621,24 +599,31 @@ watch(() => connectionStore.state, async (newState, oldState) => {
         </button>
       </div>
 
-      <div class="user-profile">
-        <div class="avatar" :class="{ connected: connectionStore.isConnected, offline: !connectionStore.isConnected }">
-          <span v-if="connectionStore.isConnected">✓</span>
-          <span v-else>📴</span>
-        </div>
+      <!-- Connection Status -->
+      <div class="connection-status" :class="connectionStore.state">
+        <div class="status-indicator" :style="{ background: connectionStatus.color }"></div>
+        <transition name="fade">
+          <span v-if="!isCollapsed" class="status-label">{{ connectionStatus.label }}</span>
+        </transition>
         
-        <div class="user-info">
-          <span class="user-name">
-            {{ connectionStore.currentAgent?.name || connectionStore.primaryAgent?.name || t('sidebar.defaultUserName') }}
-          </span>
-          <span class="user-status">
-            <span class="status-dot" :class="{ online: connectionStore.isConnected }"></span>
-            {{ connectionStore.statusLabel }}
-            <template v-if="connectionStore.currentModel">
-              · {{ connectionStore.currentModel.name }}
-            </template>
-          </span>
-        </div>
+        <template v-if="!isCollapsed">
+          <button 
+            v-if="!connectionStore.isConnected"
+            class="connect-btn"
+            @click="showConnectionDialog = true"
+          >
+            <el-icon><Link /></el-icon>
+            {{ t('sidebar.connect') }}
+          </button>
+          
+          <button 
+            v-else
+            class="disconnect-btn"
+            @click="handleDisconnect"
+          >
+            <el-icon><SwitchButton /></el-icon>
+          </button>
+        </template>
       </div>
 
     <!-- Token Usage Footer (inside sidebar-footer, always visible when expanded) -->
@@ -746,6 +731,10 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     <TokenUsageReport v-show="showTokenReport" v-model:visible="showTokenReport" />
 
     <RuleEditor v-model:visible="showRuleEditor" />
+
+    <EntityTagsDialog v-model:visible="showEntityTags" />
+
+    <AgentSelectorDialog v-model:visible="showAgentSelector" />
   </aside>
 </template>
 
@@ -832,10 +821,9 @@ watch(() => connectionStore.state, async (newState, oldState) => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 20px;
-  margin: 0 16px;
-  margin-top: 12px;
-  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   transition: all 0.3s ease;
@@ -1373,6 +1361,12 @@ watch(() => connectionStore.state, async (newState, oldState) => {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding: 12px 20px;
+  margin: 0 16px;
+  margin-top: 12px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
 }
 
 .avatar {
@@ -1438,6 +1432,17 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 
 .settings-btn:hover {
   color: var(--accent-cyan);
+}
+
+.agent-select-btn {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+}
+.agent-select-btn:hover {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
 }
 
 .settings-panel h4 {
