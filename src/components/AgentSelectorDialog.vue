@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { UserFilled, Monitor, Tools, CollectionTag } from '@element-plus/icons-vue'
+import { UserFilled, Monitor, Tools, CollectionTag, Warning } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import { useConnectionStore } from '../stores/connectionStore'
+import { useChatStore } from '../stores/chatStore'
 import { getMindXClient } from '../services/websocket'
 import type { AgentInfo } from '../stores/connectionStore'
 import type { SkillInfo } from '../types/websocket'
@@ -14,8 +15,9 @@ const props = defineProps<{
 
 const emit = defineEmits(['update:visible'])
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const connectionStore = useConnectionStore()
+const chatStore = useChatStore()
 
 // ── 硬编码工具定义 name + description(英文来自 Go 源码) ──
 // label 通过 i18n 翻译，description 来自 Go 代码保持英文
@@ -28,12 +30,10 @@ const TOOLS: ToolDef[] = [
   { name: 'Glob', desc: 'Find files by glob patterns' },
   { name: 'Read', desc: 'Reads a file from the local filesystem' },
   { name: 'Write', desc: 'Write content to a file. Creates parent directories automatically' },
-  { name: 'FileEdit', desc: 'Edit files by replacing exact strings' },
+  { name: 'Edit', desc: 'Edit files by replacing exact strings' },
   { name: 'Bash', desc: 'Execute a POSIX shell command in the workspace environment' },
-  { name: 'RunScript', desc: 'Execute a script file from a skill\'s scripts/ directory' },
   { name: 'WebSearch', desc: 'Search the web for real-time information' },
   { name: 'WebFetch', desc: 'Fetch and extract content from a web page' },
-  { name: 'AskUser', desc: 'Ask the user a question to gather information or make decisions' },
   { name: 'Ls', desc: 'List directory contents with file metadata' },
   { name: 'CollectResults', desc: 'Wait for async tasks to complete and return results' },
   { name: 'TaskCreate', desc: 'Create a task in the task list for tracking work' },
@@ -45,12 +45,25 @@ const TOOLS: ToolDef[] = [
   { name: 'TeamDelete', desc: 'Delete a team and clean up its associated data' },
   { name: 'TeamList', desc: 'List all teams with their members and status' },
   { name: 'TeamGetTasks', desc: 'Get all tasks assigned to a team' },
-  { name: 'AgentTalk', desc: 'Send a message to another agent and get a reply' },
 ]
+
+// ── 工具组定义（用户看到的抽象能力） ──
+interface ToolGroup {
+  key: string
+  members: string[]
+}
+const TOOL_GROUPS: ToolGroup[] = [
+  { key: 'task', members: ['TaskCreate', 'TaskList', 'TaskGet', 'TaskUpdate', 'CollectResults'] },
+  { key: 'team', members: ['TeamCreate', 'TeamDelete', 'TeamList', 'TeamGetTasks'] },
+]
+// 被分组的工具名集合，用于判断某个工具是否属于组
+const GROUPED_TOOL_NAMES = new Set(TOOL_GROUPS.reduce((acc: string[], g) => acc.concat(g.members), []))
+// 独立工具列表（不在任何组中的）
+const STANDALONE_TOOLS = TOOLS.filter(t => !GROUPED_TOOL_NAMES.has(t.name))
 
 // ── 当前选中的 Agent ──
 const selectedAgentName = ref('')
-const editorTab = ref<'tools' | 'skills'>('tools')
+const editorTab = ref<'tools' | 'skills'>('skills')
 
 // ── 编辑中的本地状态 ──
 const localSkills = ref<string[]>([])
@@ -59,6 +72,37 @@ const localEnabledTools = ref<Set<string>>(new Set())
 // ── 所有可用技能（从 RPC 加载） ──
 const allSkills = ref<SkillInfo[]>([])
 const skillsLoading = ref(false)
+
+// ── License 阅读器 ──
+const licenseDialogVisible = ref(false)
+const licenseDialogTitle = ref('')
+const licenseDialogContent = ref('')
+function openLicense(title: string, content: string) {
+  licenseDialogTitle.value = title
+  licenseDialogContent.value = content
+  licenseDialogVisible.value = true
+}
+
+// ── "选择困难？" → 关闭对话框、填入输入框 ──
+function selectDifficulty() {
+  const prompt = t('agentEditor.skillTipPrompt')
+  chatStore.pendingInputText = prompt
+  emit('update:visible', false)
+}
+
+// ── "员工不足？" → 关闭对话框、填入输入框 ──
+function hirePrompt() {
+  const prompt = t('agentEditor.hirePrompt')
+  chatStore.pendingInputText = prompt
+  emit('update:visible', false)
+}
+
+// ── "技能不足？" → 关闭对话框、填入输入框 ──
+function skillShortage() {
+  const prompt = t('agentEditor.skillShortagePrompt')
+  chatStore.pendingInputText = prompt
+  emit('update:visible', false)
+}
 
 // ── 从 meta 提取中文字段 ──
 function getMetaVal(meta: Record<string, any> | undefined, key: string): string {
@@ -72,6 +116,23 @@ function getMetaVal(meta: Record<string, any> | undefined, key: string): string 
     return entry?.[key] != null ? String(entry[key]) : ''
   }
   return ''
+}
+
+// ── 根据当前语言选择 meta 中的对应字段 ──
+// fieldBase e.g. 'name' → 查找 name_zh / name_zh-tw
+function localeMetaValue(
+  meta: Record<string, any> | undefined,
+  fieldBase: string,
+  fallback: string
+): string {
+  if (!meta) return fallback
+  const loc = locale.value
+  let key: string
+  if (loc === 'zh') key = `${fieldBase}_zh`
+  else if (loc === 'zh-TW') key = `${fieldBase}_zh-tw`
+  else return fallback
+  const v = meta[key]
+  return v != null ? String(v) : fallback
 }
 
 // ── 当前选中的 Agent 对象 ──
@@ -91,28 +152,51 @@ interface AgentCard {
 const agentCards = computed<AgentCard[]>(() => {
   return connectionStore.agents.map((a: AgentInfo) => ({
     name: a.name,
-    nameZh: getMetaVal(a.meta, 'name_zh') || a.name,
-    roleZh: getMetaVal(a.meta, 'role_zh') || a.role,
-    descZh: getMetaVal(a.meta, 'description_zh') || a.description,
+    nameZh: localeMetaValue(a.meta, 'name', a.name),
+    roleZh: localeMetaValue(a.meta, 'role', a.role),
+    descZh: localeMetaValue(a.meta, 'description', a.description),
     model: a.model,
     isActive: a.name === (connectionStore.currentAgent?.name || connectionStore.primaryAgent?.name)
   }))
 })
 
-// ── 工具列表（含 i18n label） ──
+// ── 工具列表（含 i18n label，混合独立工具与工具组） ──
 interface ToolItem {
+  type: 'tool' | 'group'
+  key: string
   name: string
   label: string
   desc: string
   enabled: boolean
+  indeterminate?: boolean
+  members?: string[]
 }
 const toolsList = computed<ToolItem[]>(() => {
-  return TOOLS.map(tool => ({
+  // 独立工具
+  const standalone: ToolItem[] = STANDALONE_TOOLS.map(tool => ({
+    type: 'tool' as const,
+    key: tool.name,
     name: tool.name,
     label: t(`agentEditor.tools.${tool.name}`),
     desc: t(`agentEditor.toolDescs.${tool.name}`),
     enabled: localEnabledTools.value.has(tool.name)
   }))
+  // 工具组
+  const groups: ToolItem[] = TOOL_GROUPS.map(g => {
+    const enabledCount = g.members.filter(m => localEnabledTools.value.has(m)).length
+    const all = enabledCount === g.members.length
+    return {
+      type: 'group' as const,
+      key: g.key,
+      name: g.key,
+      label: t(`agentEditor.groupNames.${g.key}`),
+      desc: t(`agentEditor.groupDescs.${g.key}`),
+      enabled: all,
+      indeterminate: enabledCount > 0 && !all,
+      members: g.members
+    }
+  })
+  return [...standalone, ...groups]
 })
 
 // ── 技能列表（含 i18n label，从 SKILL.md 的 description 字段显示） ──
@@ -120,23 +204,37 @@ interface SkillItem {
   name: string
   desc: string
   assigned: boolean
+  author: string
+  version: string
+  license: string
 }
 const skillsList = computed<SkillItem[]>(() => {
   return allSkills.value.map(s => ({
-    name: s.name,
-    desc: s.description || '',
-    assigned: localSkills.value.includes(s.name)
+    name: localeMetaValue(s.metadata, 'name', s.name),
+    desc: localeMetaValue(s.metadata, 'description', s.description || ''),
+    assigned: localSkills.value.includes(s.name),
+    author: s.metadata?.author || '',
+    version: s.metadata?.version || '',
+    license: s.license || ''
   }))
 })
 
-// ── 切换工具启用/禁用 ──
+// ── 切换独立工具启用/禁用 ──
 function toggleTool(name: string, enable: boolean) {
   if (enable) {
     localEnabledTools.value.add(name)
   } else {
     localEnabledTools.value.delete(name)
   }
-  // 触发响应式更新
+  localEnabledTools.value = new Set(localEnabledTools.value)
+}
+
+// ── 切换工具组启用/禁用 ──
+function toggleGroup(members: string[], enable: boolean) {
+  for (const m of members) {
+    if (enable) localEnabledTools.value.add(m)
+    else localEnabledTools.value.delete(m)
+  }
   localEnabledTools.value = new Set(localEnabledTools.value)
 }
 
@@ -254,7 +352,7 @@ watch(() => props.visible, (val) => {
     if (first) {
       selectAgent(first.name)
     }
-    editorTab.value = 'tools'
+    editorTab.value = 'skills'
     loadSkills()
   }
 })
@@ -317,6 +415,9 @@ function switchActiveAgent(name: string) {
             <div v-else class="empty-list">
               {{ t('agentSelector.empty') }}
             </div>
+            <div class="left-footer">
+              <span class="lf-link" @click="hirePrompt">{{ t('agentEditor.hireTip') }}</span>
+            </div>
           </div>
 
           <!-- ── 右侧详情面板 ── -->
@@ -324,7 +425,7 @@ function switchActiveAgent(name: string) {
             <!-- 基本信息 -->
             <div class="detail-header">
               <div class="dh-top">
-                <h3>{{ getMetaVal(selectedAgent.meta, 'name_zh') || selectedAgent.name }}</h3>
+                <h3>{{ localeMetaValue(selectedAgent.meta, 'name', selectedAgent.name) }}</h3>
                 <el-button
                   size="small"
                   @click="handleSave"
@@ -333,22 +434,14 @@ function switchActiveAgent(name: string) {
                 </el-button>
               </div>
               <div class="detail-meta">
-                <span class="meta-role">{{ getMetaVal(selectedAgent.meta, 'role_zh') || selectedAgent.role }}</span>
+                <span class="meta-role">{{ localeMetaValue(selectedAgent.meta, 'role', selectedAgent.role) }}</span>
                 <span class="meta-model">{{ selectedAgent.model }}</span>
               </div>
-              <p class="detail-desc">{{ getMetaVal(selectedAgent.meta, 'description_zh') || selectedAgent.description }}</p>
+              <p class="detail-desc">{{ localeMetaValue(selectedAgent.meta, 'description', selectedAgent.description) }}</p>
             </div>
 
-            <!-- Tab: 工具 / 技能 -->
+            <!-- Tab: 技能 / 基本能力 -->
             <div class="detail-tabs">
-              <div
-                class="dt-tab"
-                :class="{ active: editorTab === 'tools' }"
-                @click="editorTab = 'tools'"
-              >
-                <el-icon><Tools /></el-icon>
-                {{ t('agentEditor.tabTools') }} ({{ localEnabledTools.size }}/{{ TOOLS.length }})
-              </div>
               <div
                 class="dt-tab"
                 :class="{ active: editorTab === 'skills' }"
@@ -357,37 +450,13 @@ function switchActiveAgent(name: string) {
                 <el-icon><CollectionTag /></el-icon>
                 {{ t('agentEditor.tabSkills') }} ({{ localSkills.length }}/{{ allSkills.length }})
               </div>
-            </div>
-
-            <!-- 工具列表 -->
-            <div v-show="editorTab === 'tools'" class="tab-panel">
-              <div class="tab-actions">
-                <el-checkbox
-                  :model-value="allToolsEnabled()"
-                  :indeterminate="someToolsEnabled()"
-                  @change="toggleAllTools"
-                >
-                  {{ t('agentEditor.selectAll') }}
-                </el-checkbox>
-                <span class="tab-summary">{{ t('agentEditor.toolsEnabled', { n: localEnabledTools.size, total: TOOLS.length }) }}</span>
-              </div>
-              <div class="checkbox-list">
-                <div
-                  v-for="tool in toolsList"
-                  :key="tool.name"
-                  class="checkbox-item"
-                >
-                  <el-checkbox
-                    :model-value="tool.enabled"
-                    @change="toggleTool(tool.name, $event)"
-                  >
-                    <div class="ci-content">
-                      <span class="ci-label">{{ tool.label }}</span>
-                      <span class="ci-id">{{ tool.name }}</span>
-                      <span class="ci-desc">{{ tool.desc }}</span>
-                    </div>
-                  </el-checkbox>
-                </div>
+              <div
+                class="dt-tab"
+                :class="{ active: editorTab === 'tools' }"
+                @click="editorTab = 'tools'"
+              >
+                <el-icon><Tools /></el-icon>
+                {{ t('agentEditor.tabTools') }} ({{ localEnabledTools.size }}/{{ TOOLS.length }})
               </div>
             </div>
 
@@ -403,7 +472,29 @@ function switchActiveAgent(name: string) {
                   >
                     {{ t('agentEditor.selectAll') }}
                   </el-checkbox>
-                  <span class="tab-summary">{{ t('agentEditor.skillsAssigned', { n: localSkills.length, total: allSkills.length }) }}</span>
+                  <div class="tab-actions-right">
+                      <span class="tab-summary">{{ t('agentEditor.skillsAssigned', { n: localSkills.length, total: allSkills.length }) }}</span>
+                      <el-popover
+                        placement="bottom-end"
+                        :width="320"
+                        trigger="click"
+                        :show-arrow="false"
+                        popper-class="skill-tip-popper"
+                      >
+                        <template #reference>
+                          <span class="tip-link">{{ t('agentEditor.skillTip') }}</span>
+                        </template>
+                        <div class="tip-popover-body">
+                          <p>{{ t('agentEditor.skillTipContent') }}</p>
+                          <el-button size="small" @click="selectDifficulty">
+                            <el-icon :size="14"><Warning /></el-icon>
+                            {{ t('agentEditor.skillTipAction') }}
+                          </el-button>
+                        </div>
+                      </el-popover>
+                      <span class="sep">|</span>
+                      <span class="tip-link" @click="skillShortage">{{ t('agentEditor.skillShortage') }}</span>
+                    </div>
                 </div>
                 <div class="checkbox-list">
                   <div
@@ -416,14 +507,59 @@ function switchActiveAgent(name: string) {
                       @change="toggleSkill(sk.name, $event)"
                     >
                       <div class="skill-content">
-                        <span class="sk-label">{{ sk.name }}</span>
+                        <span class="sk-label">
+                          {{ sk.name }}
+                          <span v-if="sk.author || sk.license" class="sk-third-badge">{{ t('agentEditor.thirdParty') }}</span>
+                        </span>
                         <span class="sk-desc">{{ sk.desc }}</span>
+                        <div class="sk-meta">
+                          <span v-if="sk.author" class="sk-tag">{{ sk.author }}</span>
+                          <span v-if="sk.version" class="sk-tag sk-version">v{{ sk.version }}</span>
+                          <span
+                            v-if="sk.license"
+                            class="sk-tag sk-license"
+                            @click.stop="openLicense(sk.name, sk.license)"
+                          >{{ t('agentEditor.licenseLink') }}</span>
+                        </div>
                       </div>
                     </el-checkbox>
                   </div>
                   <div v-if="allSkills.length === 0 && !skillsLoading" class="empty-hint">
                     {{ t('agentEditor.noSkills') }}
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 基本能力列表 -->
+            <div v-show="editorTab === 'tools'" class="tab-panel">
+              <div class="tab-actions">
+                <el-checkbox
+                  :model-value="allToolsEnabled()"
+                  :indeterminate="someToolsEnabled()"
+                  @change="toggleAllTools"
+                >
+                  {{ t('agentEditor.selectAll') }}
+                </el-checkbox>
+                <span class="tab-summary">{{ t('agentEditor.toolsEnabled', { n: localEnabledTools.size, total: TOOLS.length }) }}</span>
+              </div>
+              <div class="checkbox-list">
+                <div
+                  v-for="item in toolsList"
+                  :key="item.key"
+                  class="checkbox-item"
+                >
+                  <el-checkbox
+                    :model-value="item.enabled"
+                    :indeterminate="item.type === 'group' ? item.indeterminate : undefined"
+                    @change="item.type === 'group' ? toggleGroup(item.members || [], $event) : toggleTool(item.name, $event)"
+                  >
+                    <div class="ci-content">
+                      <span class="ci-label">{{ item.label }}</span>
+                      <span class="ci-id">{{ item.type === 'group' ? (item.key === 'task' ? 'Tasks' : 'Teams') : item.name }}</span>
+                      <span class="ci-desc">{{ item.desc }}</span>
+                    </div>
+                  </el-checkbox>
                 </div>
               </div>
             </div>
@@ -454,6 +590,19 @@ function switchActiveAgent(name: string) {
           {{ t('agentEditor.select') }}
         </el-button>
       </template>
+    </el-dialog>
+
+    <!-- ── License 阅读器 ── -->
+    <el-dialog
+      :model-value="licenseDialogVisible"
+      @update:model-value="licenseDialogVisible = false"
+      :title="t('agentEditor.licenseTitle', { name: licenseDialogTitle })"
+      width="640px"
+      class="license-dialog"
+      append-to-body
+      destroy-on-close
+    >
+      <pre class="license-body">{{ licenseDialogContent }}</pre>
     </el-dialog>
   </div>
 </template>
@@ -576,6 +725,21 @@ function switchActiveAgent(name: string) {
   padding: 20px 8px;
   text-align: center;
 }
+.left-footer {
+  border-top: 1px solid rgba(55, 65, 81, 0.3);
+  padding: 8px 4px 0;
+  margin-top: 8px;
+}
+.lf-link {
+  font-size: 11px;
+  color: #06b6d4;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.lf-link:hover {
+  color: #22d3ee;
+}
 
 /* ── 右侧面板 ── */
 .right-panel {
@@ -686,6 +850,26 @@ function switchActiveAgent(name: string) {
   font-size: 11px;
   color: #64748b;
 }
+.tab-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.tip-link {
+  font-size: 11px;
+  color: #06b6d4;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+.tip-link:hover {
+  color: #22d3ee;
+}
+.sep {
+  font-size: 11px;
+  color: rgba(55, 65, 81, 0.6);
+}
 
 /* ── Checkbox 列表 ── */
 .checkbox-list {
@@ -743,6 +927,7 @@ function switchActiveAgent(name: string) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .empty-hint {
   color: #64748b;
   font-size: 12px;
@@ -762,6 +947,19 @@ function switchActiveAgent(name: string) {
   font-size: 13px;
   font-weight: 600;
   color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sk-third-badge {
+  font-size: 9px;
+  font-weight: 700;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 1.5;
+  letter-spacing: .3px;
 }
 .sk-desc {
   font-size: 11px;
@@ -769,6 +967,36 @@ function switchActiveAgent(name: string) {
   line-height: 1.5;
   white-space: pre-line;
   word-break: break-word;
+}
+.sk-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+.sk-tag {
+  font-size: 10px;
+  color: #64748b;
+  background: rgba(55, 65, 81, 0.25);
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 1.5;
+}
+.sk-version {
+  color: #818cf8;
+  background: rgba(99, 102, 241, 0.1);
+}
+.sk-license {
+  color: #06b6d4;
+  background: rgba(6, 182, 212, 0.1);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: background .15s;
+}
+.sk-license:hover {
+  background: rgba(6, 182, 212, 0.2);
 }
 
 /* ── 底部 ── */
@@ -864,5 +1092,42 @@ function switchActiveAgent(name: string) {
 .agent-editor-dialog .el-checkbox__inner {
   background: rgba(15, 23, 42, 0.8);
   border-color: rgba(55, 65, 81, 0.6);
+}
+
+/* ── License Dialog ── */
+.license-dialog .el-dialog__body {
+  padding: 16px 24px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.license-body {
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #94a3b8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(55, 65, 81, 0.3);
+}
+
+/* ── 技能提示 Popover ── */
+.skill-tip-popper {
+  background: #1e293b !important;
+  border: 1px solid rgba(55, 65, 81, 0.6) !important;
+  border-radius: 10px !important;
+  padding: 16px !important;
+}
+.skill-tip-popper .tip-popover-body p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #94a3b8;
+  margin: 0 0 14px;
+}
+.skill-tip-popper .tip-popover-body .el-button {
+  width: 100%;
 }
 </style>

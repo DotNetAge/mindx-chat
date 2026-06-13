@@ -49,6 +49,7 @@
     "settings": "Settings",
     "connectionConfig": "Connection Config",
     "localCache": "Local Cache",
+    "browseSessionDir": "Browse session working directory",
     "dataReport": "Data & Reports",
     "sessionList": "Session List",
     "deleteConfirmTitle": "Delete Session",
@@ -353,6 +354,19 @@
     "selectDir": "Select This Directory",
     "dirEmpty": "This directory is empty"
   },
+  "fileExplorer": {
+    "title": "File Explorer",
+    "selectFile": "Select a file from the directory tree",
+    "openFile": "Open with native app",
+    "saved": "File saved",
+    "saveError": "Failed to save file",
+    "settings": "Editor Settings",
+    "theme": "Theme",
+    "font": "Font",
+    "fontSize": "Font Size",
+    "newFile": "New File",
+    "newFolder": "New Folder"
+  },
   "fileReview": {
     "filesModified": "{count} file(s) modified",
     "confirming": "Confirming...",
@@ -591,10 +605,10 @@
     "agentList": "Employees",
     "setAsCurrent": "Set as Current Agent",
     "select": "Select",
-    "tabTools": "Tools",
+    "tabTools": "Abilities",
     "tabSkills": "Skills",
     "selectAll": "Select All / Clear",
-    "toolsEnabled": "{n} / {total} tools enabled",
+    "toolsEnabled": "{n} / {total} abilities enabled",
     "skillsAssigned": "{n} / {total} skills assigned",
     "noSelection": "Select an agent from the left panel",
     "dblClickHint": "Double-click an agent on the left to switch the active agent",
@@ -606,12 +620,10 @@
       "Glob": "Glob",
       "Read": "Read",
       "Write": "Write",
-      "FileEdit": "FileEdit",
+      "Edit": "Edit",
       "Bash": "Bash",
-      "RunScript": "RunScript",
       "WebSearch": "WebSearch",
       "WebFetch": "WebFetch",
-      "AskUser": "AskUser",
       "Ls": "Ls",
       "CollectResults": "CollectResults",
       "TaskCreate": "TaskCreate",
@@ -630,7 +642,7 @@
       "Glob": "Find files by glob patterns",
       "Read": "Reads a file from the local filesystem",
       "Write": "Write content to a file. Creates parent directories automatically",
-      "FileEdit": "Edit files by replacing exact strings",
+      "Edit": "Edit files by replacing exact strings",
       "Bash": "Execute a POSIX shell command in the workspace environment",
       "RunScript": "Execute a script file from a skill's scripts/ directory",
       "WebSearch": "Search the web for real-time information",
@@ -646,8 +658,26 @@
       "TeamCreate": "Create a team of agents that work together on a task",
       "TeamDelete": "Delete a team and clean up its associated data",
       "TeamList": "List all teams with their members and status",
-      "TeamGetTasks": "Get all tasks assigned to a team",
-      "AgentTalk": "Send a message to another agent and get a reply"
-    }
+      "TeamGetTasks": "Get all tasks assigned to a team"
+    },
+    "groupNames": {
+      "task": "Task Tools",
+      "team": "Team Tools"
+    },
+    "groupDescs": {
+      "task": "Break down complex tasks into actionable work items and track them individually",
+      "team": "Temporarily assemble expert teams to collaboratively complete complex tasks"
+    },
+    "licenseTitle": "License — {name}",
+    "licenseLink": "License",
+    "thirdParty": "3rd Party",
+    "skillTip": "Skill Tips",
+    "skillTipContent": "More abilities are not always better. Just like in real life, matching the role's function is what matters most — the more (or the more advanced) abilities a person has, the higher their salary. The more abilities a digital employee has, the higher the fixed token consumption, and the more you pay.",
+    "skillTipAction": "Overwhelmed?",
+    "skillTipPrompt": "Enable self-review: check if your abilities match the role and position",
+    "hireTip": "Need more staff?",
+    "hirePrompt": "I need to add a new expert who will be responsible for handling the following tasks:",
+    "skillShortage": "Need more skills?",
+    "skillShortagePrompt": "I need to add a new skill to handle"
   }
 }

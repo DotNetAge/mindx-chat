@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft } from '@element-plus/icons-vue'
+import { Close } from '@element-plus/icons-vue'
 import GraphSidebar from './GraphSidebar.vue'
 import GraphCanvas from './GraphCanvas.vue'
 import GraphDetailPanel from './GraphDetailPanel.vue'
@@ -32,14 +32,14 @@ async function handleNodeDoubleClick(nodeId: string) {
         <!-- Header bar -->
         <header class="gv-header">
           <div class="gv-header-left">
-            <button class="back-btn" @click="handleBack">
-              <el-icon><ArrowLeft /></el-icon>
-              {{ t('common.back') }}
-            </button>
             <h1 class="gv-title">{{ t('kgViewer.title') }}</h1>
             <span class="beta-badge">Beta</span>
           </div>
-          <div class="gv-header-right"></div>
+          <div class="gv-header-right">
+            <button class="close-btn" @click="handleBack" :title="t('common.close')">
+              <el-icon><Close /></el-icon>
+            </button>
+          </div>
         </header>
 
         <!-- Main body: sidebar + canvas + detail panel -->
@@ -77,19 +77,18 @@ async function handleNodeDoubleClick(nodeId: string) {
 .gv-header-left {
   display: flex; align-items: center; gap: 12px;
 }
-.back-btn {
-  display: flex; align-items: center; gap: 5px;
-  padding: 6px 12px; font-size: 13px; font-weight: 500;
+.close-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
   color: var(--text-secondary);
-  background: rgba(255,255,255,.05);
-  border: 1px solid rgba(255,255,255,.1);
-  border-radius: 7px; cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 8px; cursor: pointer;
   transition: all .15s;
 }
-.back-btn:hover {
-  color: var(--text-primary);
-  background: rgba(255,255,255,.08);
-  border-color: rgba(255,255,255,.18);
+.close-btn:hover {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.12);
 }
 .gv-title {
   font-size: 16px; font-weight: 700; color: var(--text-primary);

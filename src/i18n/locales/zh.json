@@ -49,6 +49,7 @@
     "settings": "设置面板",
     "connectionConfig": "连接配置",
     "localCache": "本地缓存",
+    "browseSessionDir": "浏览此会话的工作目录",
     "dataReport": "数据与报表",
     "sessionList": "会话列表",
     "deleteConfirmTitle": "删除会话确认",
@@ -355,6 +356,19 @@
     "selectDir": "选择此目录",
     "dirEmpty": "此目录为空"
   },
+  "fileExplorer": {
+    "title": "文件浏览器",
+    "selectFile": "从左侧目录树选择文件",
+    "openFile": "用本机程序打开",
+    "saved": "文件已保存",
+    "saveError": "保存失败",
+    "settings": "编辑器设置",
+    "theme": "主题",
+    "font": "字体",
+    "fontSize": "字号",
+    "newFile": "新建文件",
+    "newFolder": "新建文件夹"
+  },
   "fileReview": {
     "filesModified": "{count} 个文件被修改",
     "confirming": "确认中...",
@@ -591,10 +605,10 @@
     "agentList": "员工列表",
     "setAsCurrent": "设为当前 Agent",
     "select": "选择",
-    "tabTools": "工具",
+    "tabTools": "基本能力",
     "tabSkills": "技能",
     "selectAll": "全选/取消",
-    "toolsEnabled": "已启用 {n}/{total} 个工具",
+    "toolsEnabled": "已具有 {n}/{total} 种基本能力",
     "skillsAssigned": "已分配 {n}/{total} 个技能",
     "noSelection": "从左侧选择一个 Agent",
     "dblClickHint": "双击左侧 Agent 可切换当前使用的 Agent",
@@ -606,7 +620,7 @@
       "Glob": "文件搜索",
       "Read": "文件读取",
       "Write": "文件写入",
-      "FileEdit": "文件编辑",
+      "Edit": "文件编辑",
       "Bash": "Shell 命令",
       "RunScript": "脚本执行",
       "WebSearch": "网页搜索",
@@ -618,7 +632,7 @@
       "TaskList": "任务列表",
       "TaskGet": "获取任务",
       "TaskUpdate": "更新任务",
-      "SubAgent": "子代理",
+      "SubAgent": "工作分发",
       "TeamCreate": "创建团队",
       "TeamDelete": "删除团队",
       "TeamList": "团队列表",
@@ -626,28 +640,44 @@
       "AgentTalk": "Agent 对话"
     },
     "toolDescs": {
-      "Grep": "基于 ripgrep 构建的强大全文搜索工具",
-      "Glob": "根据 glob 模式查找文件",
+      "Grep": "具有强大而且高速的全文搜索能力",
+      "Glob": "文件搜索能力",
       "Read": "从本地文件系统读取文件内容",
       "Write": "写入内容到文件，自动创建父目录",
-      "FileEdit": "通过替换精确字符串来编辑文件",
+      "Edit": "通过替换精确字符串来编辑文件",
       "Bash": "在工作区环境中执行 POSIX Shell 命令",
-      "RunScript": "执行技能 scripts/ 目录中的脚本文件",
       "WebSearch": "搜索互联网获取实时信息",
       "WebFetch": "从网页获取并提取内容",
-      "AskUser": "向用户提问以收集信息或做出决策",
       "Ls": "列出目录内容及文件元数据",
       "CollectResults": "等待异步任务完成并返回结果",
       "TaskCreate": "在任务列表中创建任务以跟踪工作",
       "TaskList": "列出所有任务及其状态和依赖信息",
       "TaskGet": "获取特定任务的详细信息",
       "TaskUpdate": "推进任务生命周期或更新其元数据",
-      "SubAgent": "生成子代理执行任务并稍后收集结果",
+      "SubAgent": "将工作分发给其他员工或者创建一个分身共同完成，复杂的工作会完成得更好",
       "TeamCreate": "创建一组 Agent 协作处理任务",
       "TeamDelete": "删除团队并清理相关数据",
       "TeamList": "列出所有团队及其成员和状态",
-      "TeamGetTasks": "获取分配给团队的所有任务",
-      "AgentTalk": "向另一个 Agent 发送消息并获取回复"
-    }
+      "TeamGetTasks": "获取分配给团队的所有任务"
+    },
+    "groupNames": {
+      "task": "任务工具",
+      "team": "团队工具"
+    },
+    "groupDescs": {
+      "task": "可将复杂任务分解为多个具体工作项逐项完成",
+      "team": "临时建立专家团协作完成的复杂任务"
+    },
+    "licenseTitle": "许可证 — {name}",
+    "licenseLink": "查看授权",
+    "thirdParty": "第三方",
+    "skillTip": "使用秘籍",
+    "skillTipContent": "能力不是越多越好，就像人一样匹配角色职能才是最好，能力越高（多）的人薪酬就越高，数字员工的能力越多固定词元的消耗就越高，你付出的成本也越多。",
+    "skillTipAction": "选择困难？",
+    "skillTipPrompt": "启用自我审视，检查你的能力是否与角色职位匹配",
+    "hireTip": "员工不足？",
+    "hirePrompt": "我需要增加一名新的专家，专门负责帮我处理以下的工作：",
+    "skillShortage": "技能不足？",
+    "skillShortagePrompt": "我要添加一项新的技能，用来处理"
   }
 }

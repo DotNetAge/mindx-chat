@@ -622,6 +622,30 @@ export const useConnectionStore = defineStore('connection', {
       return result.content || ''
     },
 
+    async writeFile(path: string, content: string): Promise<void> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      await client.call('fs.write', { path, content })
+    },
+
+    async fetchFSMkdir(path: string): Promise<void> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      await client.call('fs.mkdir', { path })
+    },
+
+    async fetchFSRemove(path: string): Promise<void> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      await client.call('fs.rm', { path })
+    },
+
+    async fetchFSMove(source: string, target: string): Promise<void> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      await client.call('fs.mv', { source, target })
+    },
+
     async confirmFiles(sessionId: string, files?: string[]): Promise<string[]> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')

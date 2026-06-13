@@ -13,10 +13,13 @@ import TokenUsageReport from './TokenUsageReport.vue'
 import RuleEditor from './RuleEditor.vue'
 import EntityTagsDialog from './EntityTagsDialog.vue'
 import AgentSelectorDialog from './AgentSelectorDialog.vue'
+import FileExplorer from './FileExplorer.vue'
+import { useFileExplorerStore } from '../stores/fileExplorerStore'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
 const currentLocale = ref(locale.value)
+const fileExplorerStore = useFileExplorerStore()
 
 const langOptions = [
   { value: 'zh', label: '简体中文' },
@@ -121,6 +124,7 @@ const sessions = computed(() => {
       title: s.title || t('common.noData'),
       subtitle: shortenPath(s.project_dir || ''),
       subtitleFull: s.project_dir || '',
+      projectDir: s.project_dir || '',
       time: formatTime(s.updated_at),
       isActive: s.session_id === sessionStore.activeSessionId
     }))
@@ -557,14 +561,24 @@ watch(() => connectionStore.state, async (newState, oldState) => {
             <span v-if="!isCollapsed && session.isActive" class="active-indicator"></span>
           </transition>
 
-          <button 
-            v-if="!isCollapsed" 
-            class="delete-session-btn"
-            @click="handleDeleteSession(session.id, $event)"
-            :title="t('sidebar.deleteConfirmTitle')"
-          >
-            <el-icon><Close /></el-icon>
-          </button>
+          <div class="session-actions">
+            <button 
+              v-if="!isCollapsed" 
+              class="browse-session-btn"
+              @click="fileExplorerStore.open(session.projectDir)"
+              :title="t('sidebar.browseSessionDir')"
+            >
+              <el-icon><FolderOpened /></el-icon>
+            </button>
+            <button 
+              v-if="!isCollapsed" 
+              class="delete-session-btn"
+              @click="handleDeleteSession(session.id, $event)"
+              :title="t('sidebar.deleteConfirmTitle')"
+            >
+              <el-icon><Close /></el-icon>
+            </button>
+          </div>
         </li>
       </ul>
 
@@ -735,6 +749,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     <EntityTagsDialog v-model:visible="showEntityTags" />
 
     <AgentSelectorDialog v-model:visible="showAgentSelector" />
+    <FileExplorer />
   </aside>
 </template>
 
@@ -1233,30 +1248,37 @@ watch(() => connectionStore.state, async (newState, oldState) => {
   animation: pulse-glow 2s infinite;
 }
 
-.delete-session-btn {
+.session-actions {
   position: absolute;
   right: 4px;
   top: 50%;
   transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.session-item:hover .session-actions {
+  opacity: 1;
+}
+.session-actions button {
   width: 22px;
   height: 22px;
   border-radius: 6px;
   border: none;
   background: transparent;
-  color: transparent;
+  color: var(--text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.2s ease;
-  opacity: 0;
 }
-
-.session-item:hover .delete-session-btn {
-  opacity: 1;
-  color: var(--text-muted);
+.browse-session-btn:hover {
+  background: rgba(6, 182, 212, 0.12);
+  color: #06b6d4;
 }
-
 .delete-session-btn:hover {
   background: rgba(239, 68, 68, 0.15);
   color: #ef4444;

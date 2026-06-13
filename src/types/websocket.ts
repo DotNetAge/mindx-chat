@@ -155,6 +155,8 @@ export interface ModelConfig {
 export interface SkillInfo {
   name: string;
   description?: string;
+  metadata?: Record<string, string>;
+  license?: string;
 }
 
 export interface FSEntry {

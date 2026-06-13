@@ -65,6 +65,9 @@ export const useChatStore = defineStore('chat', {
     // 此缓存用于在 start 到达前暂存 delta 数据，不做任何协议转换
     pendingToolUseDelta: null as { index: number; id: string; name: string; arguments: string } | null,
 
+    // 从其他组件（如 AgentSelectorDialog）填入主输入框的文本
+    pendingInputText: '' as string,
+
     // File modification tracking
     pendingFileModifications: [] as Array<{
       path: string

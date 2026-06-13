@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElInput } from 'element-plus'
 import { Setting, Calendar } from '@element-plus/icons-vue'
 import { useChatStore } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
@@ -41,6 +41,7 @@ const sessionStore = useSessionStore()
 const connectionStore = useConnectionStore()
 const { t } = useI18n()
 const messageInput = ref('')
+const messageInputRef = ref<InstanceType<typeof ElInput> | null>(null)
 const chatContainer = ref(null)
 
 const emit = defineEmits(['update:showModelPicker'])
@@ -48,7 +49,20 @@ const emit = defineEmits(['update:showModelPicker'])
 watch(
   () => chatStore.currentMessages.length,
   () => nextTick(() => scrollToBottom()),
-  { flush: 'post' }
+)
+
+// ── 从外部（如 Agent 编辑器）填入输入框 ──
+watch(
+  () => chatStore.pendingInputText,
+  (val) => {
+    if (val) {
+      messageInput.value = val
+      chatStore.pendingInputText = ''
+      nextTick(() => {
+        messageInputRef.value?.focus()
+      })
+    }
+  }
 )
 
 watch(
@@ -387,6 +401,7 @@ async function handlePermissionDeny(reason?: string) {
       <div class="input-container">
         <div class="input-row input-row-1">
           <el-input
+            ref="messageInputRef"
             v-model="messageInput"
             type="textarea"
             :rows="2"
