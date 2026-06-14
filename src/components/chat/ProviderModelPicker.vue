@@ -469,6 +469,13 @@ watch(() => props.visible, async (val) => {
   display: flex;
   gap: 16px;
   min-height: 380px;
+  max-height: 65vh;
+  overflow: hidden;
+}
+
+:deep(.el-dialog__body) {
+  max-height: 72vh;
+  overflow-y: auto;
 }
 
 .panel-left {
