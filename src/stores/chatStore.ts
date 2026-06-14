@@ -936,60 +936,56 @@ export const useChatStore = defineStore('chat', {
     },
 
     loadTokenStats() {
+      // 已废弃：改用 syncTotalTokenStats() 从服务端同步
+      // 保留此方法作为离线回退
+    },
+
+    /**
+     * 从服务端同步全量累计统计（total_tokens, total_cost, total_conversations）
+     * 替代旧的 localStorage 方案，确保与后端一致
+     */
+    async syncTotalTokenStats() {
+      const connStore = useConnectionStore()
+      if (!connStore.isConnected) return
       try {
-        const stats = localStorage.getItem('mindx_token_stats')
-        if (stats) {
-          const data = JSON.parse(stats)
-          this.totalTokensUsed = data.totalTokensUsed || 0
-          this.totalCost = data.totalCost || 0
-          this.totalConversations = data.totalConversations || 0
-          this.tokenPricePerMillion = data.tokenPricePerMillion || 1
-        }
+        const data = await connStore.fetchTokenUsageTotal()
+        this.totalTokensUsed = data.total_tokens
+        this.totalCost = data.total_cost
+        this.totalConversations = data.total_conversations
       } catch (e) {
-        console.error('[MindX] Failed to load token stats:', e)
+        console.warn('[MindX] Failed to sync total token stats from server:', e)
+      }
+    },
+
+    /**
+     * 从服务端同步指定会话的消耗统计
+     * 替代旧的 loadSessionTokenStats localStorage 方案
+     */
+    async syncSessionTokenStats(sessionId: string) {
+      const connStore = useConnectionStore()
+      if (!connStore.isConnected) {
+        this.sessionTokensUsed = 0
+        this.sessionCost = 0
+        return
+      }
+      try {
+        const data = await connStore.fetchSessionTokenUsage(sessionId)
+        this.sessionTokensUsed = data.tokens_used
+        this.sessionCost = data.cost
+      } catch (e) {
+        console.warn('[MindX] Failed to sync session token stats from server:', e)
+        this.sessionTokensUsed = 0
+        this.sessionCost = 0
       }
     },
 
     saveTokenStats() {
-      const sessionStore = useSessionStore()
-      try {
-        localStorage.setItem('mindx_token_stats', JSON.stringify({
-          totalTokensUsed: this.totalTokensUsed,
-          totalCost: this.totalCost,
-          totalConversations: this.totalConversations,
-          tokenPricePerMillion: this.tokenPricePerMillion
-        }))
-
-        // 同时持久化当前 session 的用量
-        if (sessionStore.activeSessionId) {
-          this.sessionTokenStats[sessionStore.activeSessionId] = {
-            tokensUsed: this.sessionTokensUsed,
-            cost: this.sessionCost
-          }
-          localStorage.setItem('mindx_session_token_stats', JSON.stringify(this.sessionTokenStats))
-        }
-      } catch (e) {
-        console.error('[MindX] Failed to save token stats:', e)
-      }
+      // 已废弃：服务端负责持久化，前端不再写入 localStorage
+      // 保留空方法避免调用处报错
     },
 
-    loadSessionTokenStats(sessionId: string) {
-      try {
-        const raw = localStorage.getItem('mindx_session_token_stats')
-        if (raw) {
-          const allStats = JSON.parse(raw)
-          const stats = allStats[sessionId]
-          if (stats && typeof stats.tokensUsed === 'number') {
-            this.sessionTokensUsed = stats.tokensUsed
-            this.sessionCost = stats.cost
-            this.sessionTokenStats = allStats
-            console.log(`[MindX] Restored session token stats for ${sessionId}:`, stats)
-            return
-          }
-        }
-      } catch (e) {
-        console.error('[MindX] Failed to load session token stats:', e)
-      }
+    loadSessionTokenStats(_sessionId: string) {
+      // 已废弃：改用 syncSessionTokenStats(sessionId) 从服务端同步
       this.sessionTokensUsed = 0
       this.sessionCost = 0
     },

@@ -50,6 +50,20 @@ const presetCategories: EntityCategory[] = [
     ]
   },
   {
+    name: 'enterprise',
+    label: '企业',
+    types: [
+      { label: '客户', value: 'Customer', desc: 'customer, client, account, partner' },
+      { label: '订单', value: 'Order', desc: 'order, purchase order, sales order, transaction' },
+      { label: '供应商', value: 'Supplier', desc: 'supplier, vendor, distributor, subcontractor' },
+      { label: '合同', value: 'Contract', desc: 'contract, agreement, SLA, terms, policy' },
+      { label: '项目', value: 'Project', desc: 'project, initiative, program, milestone' },
+      { label: '部门', value: 'Department', desc: 'department, team, division, business unit' },
+      { label: '员工', value: 'Employee', desc: 'employee, staff, colleague, stakeholder' },
+      { label: '发票', value: 'Invoice', desc: 'invoice, bill, receipt, payment record' },
+    ]
+  },
+  {
     name: 'tech',
     label: '技术',
     types: [
@@ -327,7 +341,7 @@ watch(() => props.visible, (val) => {
                     <div class="tag-item-content">
                       <span class="tag-label">{{ t('entityTags.types.' + et.value) }}</span>
                       <span class="tag-value">{{ et.value }}</span>
-                      <span class="tag-desc">{{ et.desc }}</span>
+                      <span class="tag-desc">{{ t('entityTags.descs.' + et.value) }}</span>
                     </div>
                   </el-checkbox>
                 </div>

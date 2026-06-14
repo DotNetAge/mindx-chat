@@ -414,9 +414,6 @@ function handleClose() {
           <!-- ─── 左：目录树 ─── -->
           <aside class="fv-sidebar">
             <div class="sidebar-toolbar">
-              <el-button text class="tool-btn" @click="refreshTree" title="Home">
-                <el-icon><Folder /></el-icon>
-              </el-button>
               <el-button text class="tool-btn" @click="refreshTree" title="Refresh">
                 <el-icon><RefreshRight /></el-icon>
               </el-button>

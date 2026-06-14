@@ -207,6 +207,19 @@ export interface TokenUsageOverview {
   available_models: string[];
 }
 
+/** Response from token.usage.total — 全量累计统计 */
+export interface TotalTokenUsage {
+  total_tokens: number;
+  total_cost: number;
+  total_conversations: number;
+}
+
+/** Response from token.usage.session — 单会话统计 */
+export interface SessionTokenUsage {
+  tokens_used: number;
+  cost: number;
+}
+
 export interface ProviderInfo {
   name: string;
   title: string;

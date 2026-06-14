@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Document, Collection, DataAnalysis, Search,
   RefreshLeft, Delete,
-  Link, FolderOpened,
-  Monitor, VideoPause
+  Link, FolderOpened
 } from '@element-plus/icons-vue'
 import { useGraphStore, CATEGORY_COLORS } from '../stores/graphStore'
 
@@ -59,44 +58,9 @@ function getDirName(fullPath: string): string {
   return parts[parts.length - 1] || fullPath
 }
 
-// ── Index control ──
-
-const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
-
 onMounted(() => {
   store.refreshFilewatchStatus()
 })
-
-onUnmounted(() => {
-  stopPolling()
-})
-
-async function toggleIndexing() {
-  if (store.filewatchStatus?.running) {
-    await store.stopFilewatch()
-    stopPolling()
-  } else {
-    await store.startFilewatch()
-    startPolling()
-  }
-}
-
-function startPolling() {
-  stopPolling()
-  pollingTimer.value = setInterval(() => {
-    store.refreshFilewatchStatus()
-    if (store.filewatchStatus?.watched?.length) {
-      store.refreshFileStates(store.filewatchStatus.watched[0])
-    }
-  }, 5000)
-}
-
-function stopPolling() {
-  if (pollingTimer.value) {
-    clearInterval(pollingTimer.value)
-    pollingTimer.value = null
-  }
-}
 
 </script>
 
@@ -243,31 +207,6 @@ function stopPolling() {
 
       <!-- ── Tab: Stats ── -->
       <template v-else-if="store.activeTab === 'stats'">
-        <!-- Index control -->
-        <div class="stats-index-control">
-          <div class="stats-index-header">
-            <span class="stats-index-title">自动索引</span>
-            <div class="stats-index-actions">
-              <span class="index-dot" :class="{ running: store.filewatchStatus?.running }"></span>
-              <button
-                class="index-toggle-btn"
-                :class="{ running: store.filewatchStatus?.running }"
-                @click="toggleIndexing"
-                :disabled="store.filewatchStatus === null || !store.filewatchStatus.watched?.length"
-              >
-                <el-icon :size="13">
-                  <component :is="store.filewatchStatus?.running ? VideoPause : Monitor" />
-                </el-icon>
-                {{ store.filewatchStatus?.running ? '停止' : '启用' }}
-              </button>
-            </div>
-          </div>
-          <div v-if="store.fileStates" class="stats-index-stats">
-             <span class="index-stat-item" style="color: #10b981">{{ t('kgViewer.indexedCount') }}: {{ indexedCount }}</span>
-             <span class="index-stat-item" style="color: #f59e0b">{{ t('kgViewer.unindexedCount') }}: {{ unindexedCount }}</span>
-           </div>
-        </div>
-
         <div class="stats-grid">
           <div class="stat-card">
             <span class="stat-value">{{ store.stats.totalNodes.toLocaleString() }}</span>
@@ -719,90 +658,6 @@ function stopPolling() {
 .rel-count {
   font-family: 'JetBrains Mono', monospace;
   color: var(--text-muted); font-size: 11px;
-}
-
-/* ── Stats Tab: Index Control ── */
-
-.stats-index-control {
-  margin-bottom: 12px;
-  padding: 10px;
-  background: rgba(255,255,255,.03);
-  border: 1px solid rgba(255,255,255,.06);
-  border-radius: 8px;
-}
-.stats-index-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-.stats-index-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-.stats-index-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.stats-index-actions .index-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #64748b;
-  transition: background .3s;
-  flex-shrink: 0;
-}
-.stats-index-actions .index-dot.running {
-  background: #10b981;
-  box-shadow: 0 0 6px rgba(16,185,129,.5);
-}
-
-.stats-index-actions .index-toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #e2e8f0;
-  background: rgba(16,185,129,.15);
-  border: 1px solid rgba(16,185,129,.3);
-  border-radius: 5px;
-  cursor: pointer;
-  transition: all .15s;
-}
-.stats-index-actions .index-toggle-btn:hover { background: rgba(16,185,129,.25); }
-.stats-index-actions .index-toggle-btn.running {
-  background: rgba(239,68,68,.12);
-  border-color: rgba(239,68,68,.25);
-}
-.stats-index-actions .index-toggle-btn.running:hover { background: rgba(239,68,68,.22); }
-.stats-index-actions .index-toggle-btn:disabled { opacity: .5; cursor: not-allowed; }
-
-.stats-index-stats {
-  display: flex;
-  gap: 12px;
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-}
-.stats-index-stats.muted {
-  color: var(--text-muted);
-}
-
-.stats-index-stats .index-stat-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.stats-index-stats .index-stat-item::before {
-  content: '';
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
 }
 
 /* ── Watched directories ── */

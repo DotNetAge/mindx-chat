@@ -3,13 +3,8 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import {
-  Folder,
-  Document,
-  ArrowUp,
   Loading,
-  RefreshRight,
-  House,
-  Position
+  House
 } from '@element-plus/icons-vue'
 import { useConnectionStore } from '../stores/connectionStore'
 import type { FSEntry } from '../types/websocket'
@@ -39,7 +34,7 @@ const connectionStore = useConnectionStore()
 const { t } = useI18n()
 
 const currentPath = ref('')
-const pathInput = ref('')
+const newDirName = ref('')
 const entries = ref<FSEntry[]>([])
 const loading = ref(false)
 const homePrefix = ref('')
@@ -64,22 +59,12 @@ function expandPath(displayPath: string): string {
 }
 
 const displayPath = computed(() => shortenPath(currentPath.value))
-const displayPathInput = computed({
-  get: () => shortenPath(pathInput.value),
-  set: (val: string) => { pathInput.value = expandPath(val) }
-})
 
 const sortedEntries = computed(() => {
   if (!Array.isArray(entries.value)) return []
   return entries.value
     .filter(e => e.is_dir && !e.name.startsWith('.'))
     .sort((a, b) => a.name.localeCompare(b.name))
-})
-
-const showRootLink = computed(() => {
-  if (!currentPath.value) return false
-  const disp = shortenPath(currentPath.value)
-  return disp.startsWith('~/') && disp.length > 2
 })
 
 const breadcrumbSegments = computed(() => {
@@ -95,11 +80,7 @@ const breadcrumbSegments = computed(() => {
       return { label: part, path: fullPath }
     })
   }
-  const parts = disp.split('/').filter(Boolean)
-  return parts.map((part, idx) => {
-    const fullPath = '/' + parts.slice(0, idx + 1).join('/')
-    return { label: part, path: fullPath }
-  })
+  return []
 })
 
 function formatSize(bytes: number): string {
@@ -134,16 +115,11 @@ async function fetchFSList(path: string) {
     if (!connectionStore.isConnected) {
       throw new Error(t('directoryBrowser.notConnected'))
     }
+    console.log('[DBG] fetchFSList calling connectionStore.fetchFSList with:', JSON.stringify(path))
     entries.value = await connectionStore.fetchFSList(path)
+    console.log('[DBG] fetchFSList got entries count:', entries.value?.length)
     currentPath.value = path
-    pathInput.value = path
-    if (!homePrefix.value && path) {
-      const parts = path.split('/').filter(Boolean)
-      if (parts.length > 1) {
-        parts.pop()
-        homePrefix.value = '/' + parts.join('/')
-      }
-    }
+    console.log('[DBG] fetchFSList currentPath set to:', JSON.stringify(currentPath.value), 'homePrefix:', JSON.stringify(homePrefix.value), 'displayPath:', JSON.stringify(displayPath.value))
     emit('update:currentSelection', path)
   } catch (err: any) {
     ElMessage.error({ message: err?.message || t('directoryBrowser.cannotAccessPath'), duration: 3000 })
@@ -155,20 +131,21 @@ async function fetchFSList(path: string) {
 async function handleOpen() {
   loading.value = true
   try {
-    let targetPath = props.initialPath
-    if (!targetPath) {
-      if (!connectionStore.isConnected) {
-        throw new Error(t('directoryBrowser.notConnected'))
-      }
-      targetPath = await connectionStore.fetchFSHome()
+    if (!connectionStore.isConnected) {
+      throw new Error(t('directoryBrowser.notConnected'))
     }
-    if (targetPath) {
-      const parts = targetPath.split('/').filter(Boolean)
-      if (parts.length > 1) {
-        parts.pop()
-        homePrefix.value = '/' + parts.join('/')
-      }
-      await fetchFSList(targetPath)
+    let homeDir = props.initialPath
+    console.log('[DBG] handleOpen initialPath:', JSON.stringify(homeDir))
+    if (!homeDir) {
+      homeDir = await connectionStore.fetchFSHome()
+      console.log('[DBG] handleOpen fetchFSHome result:', JSON.stringify(homeDir))
+    }
+    if (homeDir) {
+      // 确保 homeDir 没有尾部斜杠
+      homeDir = homeDir.replace(/\/+$/, '')
+      homePrefix.value = homeDir
+      console.log('[DBG] handleOpen about to fetchFSList with:', JSON.stringify(homeDir))
+      await fetchFSList(homeDir)
     } else {
       ElMessage.error({ message: t('directoryBrowser.cannotGetHomeDir'), duration: 3000 })
     }
@@ -183,12 +160,15 @@ function handleClose() {
 }
 
 function handleSelect() {
-  emit('select', currentPath.value)
+  emit('select', currentPath.value, newDirName.value)
+  emit('update:currentSelection', currentPath.value)
   emit('update:visible', false)
 }
 
 function navigateTo(path: string) {
-  fetchFSList(expandPath(path))
+  const expandedPath = expandPath(path)
+  if (!expandedPath.startsWith(homePrefix.value)) return
+  fetchFSList(expandedPath)
 }
 
 function goUp() {
@@ -197,24 +177,12 @@ function goUp() {
   const parts = disp.replace(/\/+$/, '').split('/').filter(Boolean)
   parts.pop()
   const parentDisp = parts.length > 0 ? '~/' + parts.join('/') : '~'
-  fetchFSList(expandPath(parentDisp))
-}
-
-function goToInputPath() {
-  const target = pathInput.value.trim()
-  if (!target) return
-  fetchFSList(expandPath(target))
+  navigateTo(parentDisp)
 }
 
 function handleEntryClick(entry: FSEntry) {
   if (entry.is_dir) {
-    fetchFSList(entry.path)
-  }
-}
-
-function refresh() {
-  if (currentPath.value) {
-    fetchFSList(currentPath.value)
+    navigateTo(entry.path)
   }
 }
 
@@ -245,28 +213,22 @@ watch(() => props.visible, (val) => {
     </template>
 
     <div class="browser-body">
-      <div class="path-input-row">
-        <el-icon class="home-icon" @click="handleOpen"><House /></el-icon>
+      <div class="browser-description">{{ t('directoryBrowser.description') }}</div>
+      <div class="new-dir-row">
         <el-input
-          v-model="displayPathInput"
-          :placeholder="t('directoryBrowser.pathLabel')"
+          v-model="newDirName"
+          :placeholder="t('directoryBrowser.newDirPlaceholder')"
           size="default"
-          class="path-input"
-          @keyup.enter="goToInputPath"
+          class="new-dir-input"
         />
-        <el-button size="default" class="go-btn" @click="goToInputPath">
-          <el-icon><Position /></el-icon>
-          Go
-        </el-button>
-        <el-button size="default" class="refresh-btn" :loading="loading" @click="refresh">
-          <el-icon><RefreshRight /></el-icon>
-        </el-button>
       </div>
 
       <div class="breadcrumb-row">
         <el-breadcrumb separator="/">
-          <el-breadcrumb-item v-if="showRootLink">
-            <a class="breadcrumb-link" @click.prevent="navigateTo('~')">~</a>
+          <el-breadcrumb-item>
+            <a class="breadcrumb-link home-link" @click.prevent="navigateTo('~')">
+              <el-icon><House /></el-icon>
+            </a>
           </el-breadcrumb-item>
           <el-breadcrumb-item
             v-for="seg in breadcrumbSegments"
@@ -285,16 +247,6 @@ watch(() => props.visible, (val) => {
 
         <table v-else class="entry-table">
           <tbody>
-            <tr class="entry-row dir-entry" @click="goUp" @dblclick="goUp">
-              <td class="entry-name-cell">
-                <span class="entry-icon">📁</span>
-                <span class="entry-name">..</span>
-                <span class="entry-hint">({{ t('directoryBrowser.parentDir') }})</span>
-              </td>
-              <td class="entry-size-cell"></td>
-              <td class="entry-date-cell"></td>
-            </tr>
-
             <tr
               v-for="entry in sortedEntries"
               :key="entry.path"
@@ -343,28 +295,22 @@ watch(() => props.visible, (val) => {
   </el-dialog>
 
   <div v-else class="embedded-browser">
-    <div class="path-input-row">
-      <el-icon class="home-icon" @click="handleOpen"><House /></el-icon>
+    <div class="browser-description">{{ t('directoryBrowser.description') }}</div>
+    <div class="new-dir-row">
       <el-input
-        v-model="displayPathInput"
-        :placeholder="t('directoryBrowser.pathLabel')"
-          size="default"
-          class="path-input"
-          @keyup.enter="goToInputPath"
-        />
-        <el-button size="default" class="go-btn" @click="goToInputPath">
-          <el-icon><Position /></el-icon>
-          Go
-        </el-button>
-        <el-button size="default" class="refresh-btn" :loading="loading" @click="refresh">
-          <el-icon><RefreshRight /></el-icon>
-        </el-button>
-      </div>
+        v-model="newDirName"
+        :placeholder="t('directoryBrowser.newDirPlaceholder')"
+        size="default"
+        class="new-dir-input"
+      />
+    </div>
 
-      <div class="breadcrumb-row">
+    <div class="breadcrumb-row">
       <el-breadcrumb separator="/">
-        <el-breadcrumb-item v-if="showRootLink">
-          <a class="breadcrumb-link" @click.prevent="navigateTo('~')">~</a>
+        <el-breadcrumb-item>
+          <a class="breadcrumb-link home-link" @click.prevent="navigateTo('~')">
+            <el-icon><House /></el-icon>
+          </a>
         </el-breadcrumb-item>
         <el-breadcrumb-item
           v-for="seg in breadcrumbSegments"
@@ -383,42 +329,32 @@ watch(() => props.visible, (val) => {
 
       <table v-else class="entry-table">
         <tbody>
-          <tr class="entry-row dir-entry" @click="goUp" @dblclick="goUp">
-            <td class="entry-name-cell">
-              <span class="entry-icon">📁</span>
-              <span class="entry-name">..</span>
-              <span class="entry-hint">({{ t('directoryBrowser.parentDir') }})</span>
-            </td>
-            <td class="entry-size-cell"></td>
-            <td class="entry-date-cell"></td>
-          </tr>
+            <tr
+              v-for="entry in sortedEntries"
+              :key="entry.path"
+              class="entry-row"
+              :class="{ 'dir-entry': entry.is_dir, 'file-entry': !entry.is_dir }"
+              @click="handleEntryClick(entry)"
+              @dblclick="handleEntryClick(entry)"
+            >
+              <td class="entry-name-cell">
+                <span class="entry-icon">{{ entry.is_dir ? '📁' : '📄' }}</span>
+                <span class="entry-name" :title="entry.name">{{ entry.name }}</span>
+              </td>
+              <td class="entry-size-cell">
+                <span v-if="entry.is_dir" class="dir-tag">&lt;dir&gt;</span>
+                <span v-else class="file-size">{{ formatSize(entry.size) }}</span>
+              </td>
+              <td class="entry-date-cell">
+                <span class="mod-date">{{ formatDate(entry.mod_time) }}</span>
+              </td>
+            </tr>
 
-          <tr
-            v-for="entry in sortedEntries"
-            :key="entry.path"
-            class="entry-row"
-            :class="{ 'dir-entry': entry.is_dir, 'file-entry': !entry.is_dir }"
-            @click="handleEntryClick(entry)"
-            @dblclick="handleEntryClick(entry)"
-          >
-            <td class="entry-name-cell">
-              <span class="entry-icon">{{ entry.is_dir ? '📁' : '📄' }}</span>
-              <span class="entry-name" :title="entry.name">{{ entry.name }}</span>
-            </td>
-            <td class="entry-size-cell">
-              <span v-if="entry.is_dir" class="dir-tag">&lt;dir&gt;</span>
-              <span v-else class="file-size">{{ formatSize(entry.size) }}</span>
-            </td>
-            <td class="entry-date-cell">
-              <span class="mod-date">{{ formatDate(entry.mod_time) }}</span>
-            </td>
-          </tr>
-
-          <tr v-if="!loading && sortedEntries.length === 0">
-            <td colspan="3" class="empty-cell">
-              <span>{{ t('directoryBrowser.dirEmpty') }}</span>
-            </td>
-          </tr>
+            <tr v-if="!loading && sortedEntries.length === 0">
+              <td colspan="3" class="empty-cell">
+                <span>{{ t('directoryBrowser.dirEmpty') }}</span>
+              </td>
+            </tr>
         </tbody>
       </table>
     </div>
@@ -488,6 +424,15 @@ watch(() => props.visible, (val) => {
   letter-spacing: 0.3px;
 }
 
+.browser-description {
+  padding: 12px 20px 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
 .browser-body,
 .embedded-browser {
   display: flex;
@@ -497,7 +442,7 @@ watch(() => props.visible, (val) => {
   overflow: hidden;
 }
 
-.path-input-row {
+.new-dir-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -506,23 +451,11 @@ watch(() => props.visible, (val) => {
   background: var(--bg-secondary);
 }
 
-.home-icon {
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 18px;
-  transition: color 0.2s ease;
-  flex-shrink: 0;
-}
-
-.home-icon:hover {
-  color: var(--accent-cyan);
-}
-
-.path-input {
+.new-dir-input {
   flex: 1;
 }
 
-.path-input :deep(.el-input__wrapper) {
+.new-dir-input :deep(.el-input__wrapper) {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -530,50 +463,19 @@ watch(() => props.visible, (val) => {
   transition: all 0.2s ease;
 }
 
-.path-input :deep(.el-input__wrapper:hover),
-.path-input :deep(.el-input__wrapper.is-focus) {
+.new-dir-input :deep(.el-input__wrapper:hover),
+.new-dir-input :deep(.el-input__wrapper.is-focus) {
   border-color: var(--accent-cyan);
   box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.1);
 }
 
-.path-input :deep(.el-input__inner) {
+.new-dir-input :deep(.el-input__inner) {
   color: var(--text-primary);
-  font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
 }
 
-.path-input :deep(.el-input__inner::placeholder) {
+.new-dir-input :deep(.el-input__inner::placeholder) {
   color: var(--text-muted);
-}
-
-.go-btn {
-  background: var(--bg-hover);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  border-radius: 8px;
-  padding: 8px 14px;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-}
-
-.go-btn:hover {
-  color: var(--accent-cyan);
-  border-color: var(--accent-cyan);
-}
-
-.refresh-btn {
-  background: var(--bg-hover);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  border-radius: 8px;
-  padding: 8px 10px;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-}
-
-.refresh-btn:hover {
-  color: var(--accent-cyan);
-  border-color: var(--accent-cyan);
 }
 
 .breadcrumb-row {
@@ -589,10 +491,14 @@ watch(() => props.visible, (val) => {
 .breadcrumb-row :deep(.el-breadcrumb) {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
 }
 
 .breadcrumb-row :deep(.el-breadcrumb__item) {
   font-size: 13px;
+  display: flex;
+  align-items: center;
 }
 
 .breadcrumb-row :deep(.el-breadcrumb__separator) {
@@ -614,6 +520,15 @@ watch(() => props.visible, (val) => {
 .breadcrumb-link:hover {
   opacity: 0.75;
   text-decoration: underline;
+}
+
+.home-link {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.home-link:hover {
+  text-decoration: none;
 }
 
 .entry-list-wrapper {

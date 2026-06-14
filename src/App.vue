@@ -123,13 +123,13 @@ watch(() => connectionStore.state, (newState) => {
 })
 
 onMounted(async () => {
-  chatStore.loadTokenStats()
-
   const connected = await connectionStore.autoConnect(5000)
   if (!connected) {
     console.log('[MindX] Auto-connect timed out, running in offline mode')
   } else {
-    initializeAfterConnect()
+    await initializeAfterConnect()
+    // 连接成功后从服务端同步 token 统计（替代旧的 localStorage 方案）
+    await chatStore.syncTotalTokenStats()
   }
 })
 </script>

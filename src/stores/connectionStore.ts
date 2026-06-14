@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { getMindXClient, createMindXClient } from '../services/websocket'
 import { useChatStore } from './chatStore'
 import { useSessionStore } from './sessionStore'
-import type { AgentConfig, ModelConfig, SkillInfo, ServerSessionInfo, FSEntry, TokenUsageOverview, MonthlyUsageStats, ModelUsageSummary, ProviderInfo, ProviderCreateParams, ProviderUpdateParams, ModelCreateParams, ModelUpdateParams } from '../types/websocket'
+import type { AgentConfig, ModelConfig, SkillInfo, ServerSessionInfo, FSEntry, TokenUsageOverview, MonthlyUsageStats, ModelUsageSummary, TotalTokenUsage, SessionTokenUsage, ProviderInfo, ProviderCreateParams, ProviderUpdateParams, ModelCreateParams, ModelUpdateParams } from '../types/websocket'
 import i18n from '../i18n'
 
 const t = (key: string) => i18n.global.t(key)
@@ -209,14 +209,6 @@ export const useConnectionStore = defineStore('connection', {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
       const result = await client.call<SkillInfo[]>('skill.list', {})
-      return Array.isArray(result) ? result : []
-    },
-
-    async fetchFSList(dirPath?: string): Promise<FSEntry[]> {
-      const client = getMindXClient()
-      if (!client) throw new Error('WebSocket client not initialized')
-      const params = dirPath ? { path: dirPath } : {}
-      const result = await client.call<FSEntry[]>('fs.list', params)
       return Array.isArray(result) ? result : []
     },
 
@@ -612,7 +604,9 @@ export const useConnectionStore = defineStore('connection', {
     async fetchFSList(path: string): Promise<FSEntry[]> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
+      console.log('[DBG] connectionStore.fetchFSList SENDING path:', JSON.stringify(path))
       const result = await client.call<any>('fs.list', { path })
+      console.log('[DBG] connectionStore.fetchFSList response:', JSON.stringify(result).slice(0, 500))
       if (Array.isArray(result)) return result
       if (result && Array.isArray(result.entries)) return result.entries
       return []
@@ -772,6 +766,20 @@ export const useConnectionStore = defineStore('connection', {
       if (month) params.month = month
       const result = await client.call<ModelUsageSummary[]>('token.usage.by_model', params)
       return Array.isArray(result) ? result : []
+    },
+
+    async fetchTokenUsageTotal(): Promise<TotalTokenUsage> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<TotalTokenUsage>('token.usage.total', {})
+      return result || { total_tokens: 0, total_cost: 0, total_conversations: 0 }
+    },
+
+    async fetchSessionTokenUsage(sessionId: string): Promise<SessionTokenUsage> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<SessionTokenUsage>('token.usage.session', { session_id: sessionId })
+      return result || { tokens_used: 0, cost: 0 }
     },
 
     emptyMonthlyStats(year?: number, month?: number): MonthlyUsageStats {

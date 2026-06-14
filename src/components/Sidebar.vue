@@ -190,7 +190,7 @@ async function loadSessionsForAgent(agentName?: string) {
     }
 
     if (serverSessions.length > 0 && !sessionStore.activeSessionId) {
-      sessionStore.setActiveSession(serverSessions[0].session_id)
+      await selectSession(serverSessions[0].session_id)
     }
   } catch (err) {
     console.error('Failed to load sessions:', err)
@@ -201,16 +201,21 @@ async function selectSession(sessionId: string) {
   sessionStore.setActiveSession(sessionId)
   connectionStore.setLastSession(sessionId)
 
-  // 恢复当前 session 的 token 用量统计
-  chatStore.loadSessionTokenStats(sessionId)
+  // 从服务端同步当前 session 的 token 用量统计
+  await chatStore.syncSessionTokenStats(sessionId)
 
   try {
     const detail = await connectionStore.fetchSessionDetail(sessionId)
     if (detail?.messages && detail.messages.length > 0) {
       chatStore.restoreSessionMessages(sessionId, detail.messages)
+    } else {
+      // 服务端无消息时清空该 session 的消息
+      chatStore.clearSessionMessages(sessionId)
     }
   } catch (err) {
     console.error('Failed to load session messages:', err)
+    // 加载失败时清空该 session 的消息，避免显示旧数据
+    chatStore.clearSessionMessages(sessionId)
   }
 }
 
@@ -469,11 +474,6 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 
     <!-- User Profile -->
      <div class="user-profile">
-       <div class="avatar" :class="{ connected: connectionStore.isConnected, offline: !connectionStore.isConnected }">
-         <span v-if="connectionStore.isConnected">✓</span>
-         <span v-else>📴</span>
-       </div>
-       
        <div class="user-info">
          <span class="user-name">
            {{ connectionStore.currentAgent?.meta?.name_zh || connectionStore.currentAgent?.name || connectionStore.primaryAgent?.meta?.name_zh || connectionStore.primaryAgent?.name || t('sidebar.defaultUserName') }}
@@ -713,7 +713,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 
     <el-dialog
       :model-value="props.showSetupDialog"
-      :title="t('chat.selectWorkspace')"
+      :title="t('directoryBrowser.title')"
       width="640px"
       :close-on-click-modal="false"
       class="setup-dialog"
@@ -721,26 +721,17 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       destroy-on-close
       @update:model-value="(v) => { if (!v) emit('setupCancel') }"
     >
-      <div class="setup-info" style="padding: 0 0 12px 0;">
-        <p>{{ t('sidebar.agentLabel') }} <strong>{{ props.setupAgentName }}</strong></p>
-        <p class="setup-hint">{{ t('chat.selectWorkspace') }}</p>
-      </div>
       <DirectoryBrowser
         :visible="true"
         :embedded="true"
         v-model:currentSelection="setupSelectedPath"
       />
       <template #footer>
-        <div style="display: flex; align-items: center; gap: 12px; justify-content: space-between;">
-          <div style="font-size: 12px; color: var(--text-secondary);">
-            {{ t('common.current') }}: <code style="color: var(--accent-cyan); font-family: 'JetBrains Mono', monospace;">{{ displaySelectedPath || '(' + t('common.none') + ')' }}</code>
-          </div>
-          <div style="display: flex; gap: 8px;">
-            <el-button @click="emit('setupCancel')">{{ t('common.cancel') }}</el-button>
-            <el-button type="primary" @click="confirmSetup" :disabled="!setupSelectedPath">
-              {{ t('common.create') }} {{ t('sidebar.sessionList') }}
-            </el-button>
-          </div>
+        <div style="display: flex; align-items: center; gap: 12px; justify-content: flex-end;">
+          <el-button @click="emit('setupCancel')">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="confirmSetup" :disabled="!setupSelectedPath">
+            {{ t('directoryBrowser.title') }}
+          </el-button>
         </div>
       </template>
     </el-dialog>
