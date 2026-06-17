@@ -269,6 +269,7 @@ const toolsList = computed<ToolItem[]>(() => {
 // ── 技能列表（含 i18n label，从 SKILL.md 的 description 字段显示） ──
 interface SkillItem {
   name: string
+  origName: string
   desc: string
   assigned: boolean
   author: string
@@ -278,6 +279,7 @@ interface SkillItem {
 const skillsList = computed<SkillItem[]>(() => {
   return allSkills.value.map(s => ({
     name: localeMetaValue(s.metadata, 'name', s.name),
+    origName: s.name,
     desc: localeMetaValue(s.metadata, 'description', s.description || ''),
     assigned: localSkills.value.includes(s.name),
     author: s.metadata?.author || '',
@@ -604,7 +606,7 @@ function switchActiveAgent(name: string) {
                   >
                     <el-checkbox
                       :model-value="sk.assigned"
-                      @change="toggleSkill(sk.name, $event)"
+                      @change="toggleSkill(sk.origName, $event)"
                     >
                       <div class="skill-content">
                         <span class="sk-label">
