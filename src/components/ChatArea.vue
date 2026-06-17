@@ -336,6 +336,21 @@ async function handlePermissionDeny(reason?: string) {
     console.error('[MindX] Failed to deny permission:', err)
   }
 }
+
+function handleRetry(messageId: string) {
+  chatStore.retryFromError(messageId)
+}
+
+function handleDismiss(messageId: string) {
+  const msgs = chatStore.currentMessages
+  const errIdx = msgs.findIndex(m => m.id === messageId)
+  if (errIdx < 0) return
+  const targetSessionId = sessionStore.activeSessionId
+  chatStore.messagesBySession[targetSessionId] = [
+    ...msgs.slice(0, errIdx),
+    ...msgs.slice(errIdx + 1)
+  ]
+}
 </script>
 
 <template>
@@ -456,8 +471,8 @@ async function handlePermissionDeny(reason?: string) {
               @permission-grant="(data) => handlePermissionGrant(data)"
               @permission-deny="(reason) => handlePermissionDeny(reason)"
               @form-submit="(data) => handleFormSubmit(data)"
-              @retry="handleRetry()"
-              @dismiss="handleDismiss()"
+              @retry="handleRetry(message.id)"
+              @dismiss="handleDismiss(message.id)"
             />
           </div>
         </transition-group>

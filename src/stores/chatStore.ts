@@ -154,6 +154,46 @@ export const useChatStore = defineStore('chat', {
       this.resetProcessingState()
     },
 
+    async retryFromError(errorMessageId: string) {
+      const targetSessionId = useSessionStore().activeSessionId
+      const msgs = this.messagesBySession[targetSessionId]
+      if (!msgs || msgs.length === 0) return
+
+      const errIdx = msgs.findIndex(m => m.id === errorMessageId)
+      if (errIdx < 0) return
+
+      // walk backwards from the error to find the last user message before it
+      let userIdx = -1
+      for (let i = errIdx - 1; i >= 0; i--) {
+        if (msgs[i].role === 'user') {
+          userIdx = i
+          break
+        }
+      }
+      if (userIdx < 0) return
+
+      const lastUserContent = msgs[userIdx].content
+
+      // step 1: truncate server-side session so the daemon does not see
+      // the failed exchange when we resend
+      try {
+        const client = getMindXClient()
+        if (client) {
+          await client.call('session.truncate', { session_id: targetSessionId })
+        }
+      } catch (e) {
+        console.warn('[ChatStore] session.truncate failed, retrying anyway:', e)
+      }
+
+      // step 2: remove everything from the last user message onwards locally
+      // (old user message + assistant responses + error)
+      this.messagesBySession[targetSessionId] = msgs.slice(0, userIdx)
+      this.resetProcessingState()
+
+      // step 3: resend via sendMessage which will addUserMessage + send via WebSocket
+      this.sendMessage(lastUserContent)
+    },
+
     restoreSessionMessages(sessionId: string, serverMessages: SessionMessage[]) {
       if (!serverMessages || serverMessages.length === 0) {
         console.log('[MindX Chat] restoreSessionMessages: 服务器无消息数据', { sessionId })
@@ -733,6 +773,16 @@ export const useChatStore = defineStore('chat', {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
       const errorContent = data || opts?.title || t('message.error')
+
+      // deduplicate: skip if the last message is already an identical error
+      const msgs = this.messagesBySession[targetSessionId]
+      const lastMsg = msgs?.[msgs.length - 1]
+      if (lastMsg?.eventType === 'error' && lastMsg?.content === errorContent) {
+        console.log('[ChatStore] Skipped duplicate error message:', errorContent)
+        this.isProcessing = false
+        return
+      }
+
       this.addMessage(targetSessionId, {
         role: 'system',
         content: errorContent,
