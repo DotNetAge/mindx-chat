@@ -9,6 +9,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useGraphStore, CATEGORY_COLORS } from '../stores/graphStore'
 import { filewatchRemove } from '../services/graphApi'
+import type { DirIndexState } from '../services/graphApi'
 
 const { t } = useI18n()
 const store = useGraphStore()
@@ -18,6 +19,33 @@ const unindexedCount = computed(() => store.fileStates?.counts
   ? store.fileStates.counts.total - store.fileStates.counts.indexed
   : 0
 )
+
+function formatIndexState(st: DirIndexState): string {
+  switch (st.state) {
+    case 'pending': return t('kgViewer.indexStatePending')
+    case 'indexing': return `${t('kgViewer.indexStateIndexing')} ${st.indexed_files}/${st.total_files}`
+    case 'completed': return t('kgViewer.indexStateCompleted')
+    case 'failed': return `${t('kgViewer.indexStateFailed')}: ${st.error || ''}`
+    default: return st.state
+  }
+}
+
+function indexStateTitle(st: DirIndexState): string {
+  const lines: string[] = ['']
+  if (st.started_at) {
+    lines.push(t('kgViewer.indexStateStartedAt') + ' ' + formatUnixTs(st.started_at))
+  }
+  if (st.completed_at) {
+    lines.push(t('kgViewer.indexStateCompletedAt') + ' ' + formatUnixTs(st.completed_at))
+  }
+  return lines.join('\n')
+}
+
+function formatUnixTs(ts: number): string {
+  const d = new Date(ts * 1000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 const searchInput = ref('')
 const removingDir = ref('')
@@ -276,6 +304,14 @@ onMounted(() => {
             <li v-for="dir in store.filewatchStatus.watched" :key="dir" class="watch-dir-item" :title="dir">
               <el-icon :size="13"><FolderOpened /></el-icon>
               <span class="watch-dir-name">{{ getDirName(dir) }}</span>
+              <span
+                v-if="store.filewatchStatus.index_state?.[dir]"
+                class="watch-dir-state"
+                :class="'state-' + store.filewatchStatus.index_state[dir].state"
+                :title="indexStateTitle(store.filewatchStatus.index_state[dir])"
+              >
+                {{ formatIndexState(store.filewatchStatus.index_state[dir]) }}
+              </span>
               <button
                 class="watch-dir-remove-btn"
                 :class="{ 'is-loading': removingDir === dir }"
@@ -739,6 +775,29 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+.watch-dir-state {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.watch-dir-state.state-pending {
+  color: #f59e0b;
+  background: rgba(245,158,11,.12);
+}
+.watch-dir-state.state-indexing {
+  color: #3b82f6;
+  background: rgba(59,130,246,.12);
+}
+.watch-dir-state.state-completed {
+  color: #10b981;
+  background: rgba(16,185,129,.12);
+}
+.watch-dir-state.state-failed {
+  color: #ef4444;
+  background: rgba(239,68,68,.12);
 }
 .watch-dir-remove-btn {
   flex-shrink: 0;

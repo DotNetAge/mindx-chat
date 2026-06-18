@@ -626,7 +626,13 @@
     "removeWatchTitle": "移除監控目錄",
     "removeWatchConfirm": "確定要移除監控目錄 {dir} 嗎？移除後該目錄將不再被自動索引。",
     "removeWatchSuccess": "監控目錄已移除",
-    "removeWatchFailed": "移除監控目錄失敗"
+    "removeWatchFailed": "移除監控目錄失敗",
+    "indexStatePending": "等待掃描",
+    "indexStateIndexing": "掃描中",
+    "indexStateCompleted": "已掃描",
+    "indexStateFailed": "掃描失敗",
+    "indexStateStartedAt": "開始於",
+    "indexStateCompletedAt": "完成於"
   },
   "entityTags": {
     "button": "知识标签",

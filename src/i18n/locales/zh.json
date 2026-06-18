@@ -582,7 +582,13 @@
     "removeWatchTitle": "移除监控目录",
     "removeWatchConfirm": "确定要移除监控目录 {dir} 吗？移除后该目录将不再被自动索引。",
     "removeWatchSuccess": "监控目录已移除",
-    "removeWatchFailed": "移除监控目录失败"
+    "removeWatchFailed": "移除监控目录失败",
+    "indexStatePending": "等待扫描",
+    "indexStateIndexing": "扫描中",
+    "indexStateCompleted": "已扫描",
+    "indexStateFailed": "扫描失败",
+    "indexStateStartedAt": "开始于",
+    "indexStateCompletedAt": "完成于"
   },
   "ruleEditor": {
     "title": "规则编辑器",

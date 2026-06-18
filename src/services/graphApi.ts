@@ -102,11 +102,22 @@ export interface FileStateResult {
 
 // ── Filewatch types ──
 
+export interface DirIndexState {
+  dir: string
+  state: string       // pending | indexing | completed | failed
+  total_files: number
+  indexed_files: number
+  error?: string
+  started_at: number
+  completed_at?: number
+}
+
 export interface FilewatchStatus {
   available: boolean
   running: boolean
   watched: string[]
   cache_dir?: string
+  index_state?: Record<string, DirIndexState>
 }
 
 // ── Multi-hop graph types ──

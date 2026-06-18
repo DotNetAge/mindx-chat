@@ -582,7 +582,13 @@
     "removeWatchTitle": "Remove Monitored Directory",
     "removeWatchConfirm": "Remove \"{dir}\" from the watchlist? It will no longer be auto-indexed.",
     "removeWatchSuccess": "Directory removed from watchlist",
-    "removeWatchFailed": "Failed to remove directory"
+    "removeWatchFailed": "Failed to remove directory",
+    "indexStatePending": "Pending",
+    "indexStateIndexing": "Indexing",
+    "indexStateCompleted": "Indexed",
+    "indexStateFailed": "Failed",
+    "indexStateStartedAt": "Started at",
+    "indexStateCompletedAt": "Completed at"
   },
   "ruleEditor": {
     "title": "Rules Editor",
