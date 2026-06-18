@@ -4,6 +4,8 @@ import { useChatStore } from './chatStore'
 import { useSessionStore } from './sessionStore'
 import type { AgentConfig, ModelConfig, SkillInfo, ServerSessionInfo, FSEntry, TokenUsageOverview, MonthlyUsageStats, ModelUsageSummary, TotalTokenUsage, SessionTokenUsage, ProviderInfo, ProviderCreateParams, ProviderUpdateParams, ModelCreateParams, ModelUpdateParams } from '../types/websocket'
 import i18n from '../i18n'
+import { ElNotification, ElButton } from 'element-plus'
+import { h } from 'vue'
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -47,7 +49,17 @@ export const useConnectionStore = defineStore('connection', {
     lastSessionId: '' as string,
     providerTitleMap: {} as Record<string, string>,
     rawProviders: [] as ProviderInfo[],
-    serverVersion: '' as string
+    serverVersion: '' as string,
+    pendingShowAbout: false as boolean,
+    showConnectionDialog: false as boolean,
+    showTokenReport: false as boolean,
+    showFileBrowser: false as boolean,
+    updateState: '' as '' | 'downloading' | 'restart_needed',
+    indexingState: { active: false, fileName: '', message: '' } as {
+      active: boolean
+      fileName: string
+      message: string
+    }
   }),
 
   getters: {
@@ -548,6 +560,46 @@ export const useConnectionStore = defineStore('connection', {
           session_id: targetSessionId,
           title: envelope.title
         })
+      })
+
+      client.on('update_started', () => {
+        this.updateState = 'downloading'
+      })
+
+      client.on('update_installed', () => {
+        this.updateState = 'restart_needed'
+        const notif = ElNotification({
+          title: t('sidebar.update.title'),
+          message: h('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [
+            h('span', null, t('sidebar.update.message')),
+            h(ElButton, {
+              size: 'small',
+              type: 'primary',
+              onClick: () => {
+                this.pendingShowAbout = true
+                notif.close()
+              }
+            }, { default: () => t('sidebar.update.viewDetails') })
+          ]),
+          duration: 0,
+          showClose: true
+        })
+      })
+
+      client.on('file_indexing', (envelope: any) => {
+        const data = envelope?.data || envelope
+        const state = data?.state || ''
+        const fileName = data?.file || ''
+        if (state === 'indexing') {
+          this.indexingState = { active: true, fileName, message: t('sidebar.indexing.inProgress', { file: fileName }) }
+        } else if (state === 'indexed') {
+          this.indexingState = { active: true, fileName, message: t('sidebar.indexing.completed', { file: fileName }) }
+          setTimeout(() => {
+            if (this.indexingState.fileName === fileName) {
+              this.indexingState = { active: false, fileName: '', message: '' }
+            }
+          }, 4000)
+        }
       })
 
       console.log('[MindX] Event handlers registered')

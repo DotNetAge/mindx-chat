@@ -13,6 +13,7 @@ import ChatEmptyState from './ChatEmptyState.vue'
 import FileReviewBar from './FileReviewBar.vue'
 import LogDrawer from './LogDrawer.vue'
 import GraphViewer from './GraphViewer.vue'
+import StatusBar from './StatusBar.vue'
 import { useGraphStore } from '../stores/graphStore'
 import { useScheduleStore } from '../stores/scheduleStore'
 
@@ -36,6 +37,10 @@ const props = defineProps({
   showModelPicker: {
     type: Boolean,
     default: false
+  },
+  fileRefs: {
+    type: Array as () => { path: string; name: string }[],
+    default: () => []
   }
 })
 
@@ -106,7 +111,7 @@ function stopSpeechRecognition() {
   isRecording.value = false
 }
 
-const emit = defineEmits(['update:showModelPicker'])
+const emit = defineEmits(['update:showModelPicker', 'remove-ref', 'clear-refs'])
 
 watch(
   () => chatStore.currentMessages.length,
@@ -178,10 +183,16 @@ function onQuickPrompt(text: string) {
 async function sendMessage() {
   if (!messageInput.value.trim() || chatStore.isProcessing) return
 
+  // 前置文件引用路径
+  let finalMessage = messageInput.value.trim()
+  if (props.fileRefs && props.fileRefs.length > 0) {
+    const refs = props.fileRefs.map(r => r.path).join('\n')
+    finalMessage = refs + '\n' + finalMessage
+  }
+
   // 翻译模式：包装用户输入为翻译指令
   if (translateMode.value) {
-    const text = messageInput.value.trim()
-    messageInput.value = `请将以下的文本翻译为${translateTargetLang.value}：${text}`
+    finalMessage = `请将以下的文本翻译为${translateTargetLang.value}：${finalMessage}`
     translateMode.value = false
   }
 
@@ -218,13 +229,14 @@ async function sendMessage() {
     }
   }
 
-  const result = chatStore.sendMessage(messageInput.value)
+  const result = chatStore.sendMessage(finalMessage)
 
   if (result.queued) {
     console.log('消息已加入离线队列，等待连接后发送')
   }
 
   messageInput.value = ''
+  emit('clear-refs')
 
   nextTick(() => scrollToBottom())
 }
@@ -493,6 +505,19 @@ function handleDismiss(messageId: string) {
     <!-- Input Area -->
     <footer class="chat-input-area">
       <div class="input-container" :class="{ 'is-recording': isRecording }">
+        <div class="ref-tag-bar" v-if="fileRefs && fileRefs.length > 0">
+          <el-tag
+            v-for="ref in fileRefs"
+            :key="ref.path"
+            closable
+            size="small"
+            type="info"
+            class="ref-tag"
+            @close="emit('remove-ref', ref.path)"
+          >
+            {{ ref.name }}
+          </el-tag>
+        </div>
         <div class="input-row input-row-1">
           <el-input
             ref="messageInputRef"
@@ -549,6 +574,8 @@ function handleDismiss(messageId: string) {
         </div>
       </div>
     </footer>
+
+    <StatusBar />
 
     <!-- 全局组件：日志抽屉 + 知识图谱 -->
     <LogDrawer ref="logDrawerRef" />
@@ -991,6 +1018,27 @@ function handleDismiss(messageId: string) {
 /* Input Area */
 .chat-input-area {
   padding: 0;
+}
+
+/* ── 引用标签栏 ── */
+.ref-tag-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 10px 4px;
+  min-height: 0;
+}
+
+.ref-tag.ref-tag {
+  max-width: 200px;
+  font-size: 11px;
+  border-radius: 4px;
+}
+
+.ref-tag :deep(.el-tag__content) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── 工具栏行 ── */

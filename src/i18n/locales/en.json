@@ -49,6 +49,9 @@
     "settings": "Settings",
     "connectionConfig": "Connection Config",
     "localCache": "Local Cache",
+    "workingDirectory": "Working Directory",
+    "browseFiles": "Browse file system",
+    "addToChat": "Add files or directories to chat",
     "browseSessionDir": "Browse session working directory",
     "dataReport": "Data & Reports",
     "sessionList": "Session List",
@@ -74,6 +77,28 @@
       "connected": "Connected",
       "reconnecting": "Reconnecting...",
       "error": "Connection Error"
+    },
+    "about": {
+      "title": "About MindX",
+      "copyright": "© 2024 Raya Information Technology Co., Ltd.",
+      "releaseNotes": "Release Notes",
+      "loadingRelease": "Loading...",
+      "noReleaseNotes": "No release notes available.",
+      "publishedAt": "Published: {date}",
+      "checkUpdate": "Check for Updates",
+      "close": "Close",
+      "latestVersion": "Already the latest version"
+    },
+    "update": {
+      "title": "Update Installed",
+      "message": "System update has been installed.",
+      "viewDetails": "View Details",
+      "downloading": "Auto-updating...",
+      "restartNeeded": "Restart to complete update"
+    },
+    "indexing": {
+      "inProgress": "Indexing: {file}",
+      "completed": "Added to Knowledge Graph: {file}"
     }
   },
   "chat": {
@@ -368,7 +393,8 @@
     "backToBrowse": "Back to browse"
   },
   "fileBrowser": {
-    "title": "File Browser",
+    "quickReference": "Quick Reference",
+    "addToChat": "Add to chat",
     "refresh": "Refresh",
     "close": "Close",
     "loadingDir": "Loading directory...",

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { ElMessageBox } from 'element-plus'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import { Search, UserFilled, Monitor, ChatDotRound, FolderOpened, Folder, CollectionTag, Setting, Link, SwitchButton, Plus, Close, Document, FolderAdd } from '@element-plus/icons-vue'
 import { useSessionStore } from '../stores/sessionStore'
 import { useConnectionStore } from '../stores/connectionStore'
@@ -8,7 +8,6 @@ import { useChatStore } from '../stores/chatStore'
 import { createMindXClient, getMindXClient } from '../services/websocket'
 import type { ServerSessionInfo } from '../types/websocket'
 import DirectoryBrowser from './DirectoryBrowser.vue'
-import TokenUsageFooter from './TokenUsageFooter.vue'
 import TokenUsageReport from './TokenUsageReport.vue'
 import RuleEditor from './RuleEditor.vue'
 import EntityTagsDialog from './EntityTagsDialog.vue'
@@ -16,6 +15,7 @@ import AgentSelectorDialog from './AgentSelectorDialog.vue'
 import FileExplorer from './FileExplorer.vue'
 import { useFileExplorerStore } from '../stores/fileExplorerStore'
 import { useI18n } from 'vue-i18n'
+import { useMarkdown } from '../composables/useMarkdown'
 
 const { t, locale } = useI18n()
 const currentLocale = ref(locale.value)
@@ -65,6 +65,75 @@ const showTokenReport = ref(false)
 const showRuleEditor = ref(false)
 const showEntityTags = ref(false)
 const showAgentSelector = ref(false)
+const showAbout = ref(false)
+const latestRelease = ref<any>(null)
+const loadingRelease = ref(false)
+const checkingUpdate = ref(false)
+const isLatestVersion = ref(false)
+
+async function fetchLatestRelease() {
+  if (latestRelease.value) return
+  loadingRelease.value = true
+  try {
+    const resp = await fetch('https://api.github.com/repos/DotNetAge/mindx/releases/latest')
+    if (resp.ok) {
+      latestRelease.value = await resp.json()
+    }
+  } catch (e) {
+    console.warn('[MindX] Failed to fetch release notes:', e)
+  } finally {
+    loadingRelease.value = false
+  }
+}
+
+async function checkForUpdates() {
+  checkingUpdate.value = true
+  try {
+    const client = getMindXClient()
+    if (client) {
+      const result = await client.call('server.check_update', {})
+      console.log('[MindX] Update check result:', result)
+      if (result && !result.update_available) {
+        isLatestVersion.value = true
+      }
+      // Re-fetch release notes to get the latest version info
+      latestRelease.value = null
+      await fetchLatestRelease()
+    }
+  } catch (e) {
+    console.warn('[MindX] Failed to check for updates:', e)
+  } finally {
+    checkingUpdate.value = false
+  }
+}
+
+function showAboutDialog() {
+  showAbout.value = true
+  isLatestVersion.value = false
+  fetchLatestRelease()
+}
+
+watch(() => connectionStore.pendingShowAbout, (val) => {
+  if (val) {
+    connectionStore.pendingShowAbout = false
+    showAboutDialog()
+  }
+})
+
+function formatDate(dateStr: string): string {
+  if (!dateStr) return ''
+  return new Date(dateStr).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  })
+}
+
+const { md } = useMarkdown()
+const releaseBodyHtml = computed(() => {
+  if (!latestRelease.value?.body) return ''
+  return md.render(latestRelease.value.body)
+})
 
 // --- 用户偏好设定（来自服务端 user.config）---
 const userPreferences = ref<{ lastAgent: string; lastSessionId: string }>({
@@ -92,18 +161,6 @@ function shortenPath(absPath: string): string {
 
 const displaySelectedPath = computed(() => shortenPath(setupSelectedPath.value))
 
-const connectionStatus = computed(() => {
-  const state = connectionStore.state
-  const statusMap: Record<string, { label: string; color: string }> = {
-    disconnected: { label: t('sidebar.status.disconnected'), color: '#94a3b8' },
-    connecting: { label: t('sidebar.status.connecting'), color: '#f59e0b' },
-    connected: { label: t('sidebar.status.connected'), color: '#10b981' },
-    reconnecting: { label: t('sidebar.status.reconnecting'), color: '#f59e0b' },
-    error: { label: t('sidebar.status.error'), color: '#ef4444' }
-  }
-  return statusMap[state] || statusMap.disconnected
-})
-
 const agentsList = computed(() => {
   return connectionStore.agents.map(agent => ({
     ...agent,
@@ -122,8 +179,7 @@ const sessions = computed(() => {
     .map(s => ({
       id: s.session_id,
       title: s.title || t('common.noData'),
-      subtitle: shortenPath(s.project_dir || ''),
-      subtitleFull: s.project_dir || '',
+      subtitle: formatTime(s.updated_at),
       projectDir: s.project_dir || '',
       time: formatTime(s.updated_at),
       isActive: s.session_id === sessionStore.activeSessionId
@@ -146,11 +202,18 @@ function formatTime(timeStr?: string): string {
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffMins = Math.floor(diffMs / 60000)
+  const diffDays = Math.floor(diffMins / 1440)
   
   if (diffMins < 1) return t('sidebar.timeAgo.justNow')
   if (diffMins < 60) return t('sidebar.timeAgo.minutesAgo', { n: diffMins })
   if (diffMins < 1440) return t('sidebar.timeAgo.hoursAgo', { n: Math.floor(diffMins / 60) })
-  return t('sidebar.timeAgo.daysAgo', { n: Math.floor(diffMins / 1440) })
+  if (diffDays < 30) return t('sidebar.timeAgo.daysAgo', { n: diffDays })
+  
+  // 30 天以上显示具体日期
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
 }
 
 function selectAgent(agentName: string) {
@@ -254,7 +317,24 @@ function handleNewSession() {
   }
 }
 
-function confirmSetup() {
+const dirBrowserRef = ref<InstanceType<typeof DirectoryBrowser> | null>(null)
+
+async function confirmSetup() {
+  const browser = dirBrowserRef.value
+  if (browser) {
+    const targetPath = browser.resolvedPath
+    // 如果输入框有内容且路径与当前选中不同，先创建目录
+    if (targetPath !== setupSelectedPath.value) {
+      try {
+        await connectionStore.fetchFSMkdir(targetPath)
+        setupSelectedPath.value = targetPath
+      } catch (e: any) {
+        console.error('[MindX] Failed to create directory:', e)
+        ElMessage.error({ message: e?.message || '创建目录失败', duration: 3000 })
+        return
+      }
+    }
+  }
   emit('update:selectedDirectory', setupSelectedPath.value)
   emit('setupConfirm')
 }
@@ -369,13 +449,29 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     }
   }
 })
+
+watch(() => connectionStore.showConnectionDialog, (val) => {
+  if (val) showConnectionDialog.value = true
+})
+
+watch(showConnectionDialog, (val) => {
+  if (!val) connectionStore.showConnectionDialog = false
+})
+
+watch(() => connectionStore.showTokenReport, (val) => {
+  if (val) showTokenReport.value = true
+})
+
+watch(showTokenReport, (val) => {
+  if (!val) connectionStore.showTokenReport = false
+})
 </script>
 
 <template>
   <aside class="sidebar" :class="{ collapsed: isCollapsed }">
     <!-- Header -->
     <div class="sidebar-header">
-      <div class="logo-section">
+      <div class="logo-section" @click="showAboutDialog" style="cursor: pointer;">
         <div class="logo-icon">
           <img src="/icon.svg" alt="MindX" width="48" height="48" />
         </div>
@@ -556,7 +652,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
           <transition name="fade">
             <div v-if="!isCollapsed" class="session-content">
               <h3 class="session-title">{{ session.title }}</h3>
-              <p class="session-subtitle" :title="session.subtitleFull || session.subtitle">{{ session.subtitle }}</p>
+              <p class="session-subtitle">{{ session.subtitle }}</p>
             </div>
           </transition>
           
@@ -603,48 +699,6 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 
     <!-- Footer -->
     <div class="sidebar-footer" v-show="!isCollapsed">
-      <div class="project-dir-info" v-if="connectionStore.currentProjectDir">
-        <el-icon><FolderOpened /></el-icon>
-        <span class="project-dir-label">{{ t('sidebar.localCache') }}</span>
-        <code class="project-dir-path">{{ connectionStore.currentProjectDir }}</code>
-        <button
-          class="open-browser-btn"
-          @click="emit('toggle-file-browser')"
-          :title="t('common.search')"
-        >
-          <el-icon><FolderOpened /></el-icon>
-        </button>
-      </div>
-
-      <!-- Connection Status -->
-      <div class="connection-status" :class="connectionStore.state">
-        <div class="status-indicator" :style="{ background: connectionStatus.color }"></div>
-        <transition name="fade">
-          <span v-if="!isCollapsed" class="status-label">{{ connectionStatus.label }}</span>
-        </transition>
-        
-        <template v-if="!isCollapsed">
-          <button 
-            v-if="!connectionStore.isConnected"
-            class="connect-btn"
-            @click="showConnectionDialog = true"
-          >
-            <el-icon><Link /></el-icon>
-            {{ t('sidebar.connect') }}
-          </button>
-          
-          <button 
-            v-else
-            class="disconnect-btn"
-            @click="handleDisconnect"
-          >
-            <el-icon><SwitchButton /></el-icon>
-          </button>
-        </template>
-      </div>
-
-    <!-- Token Usage Footer (inside sidebar-footer, always visible when expanded) -->
-    <TokenUsageFooter v-show="!isCollapsed" @click="showTokenReport = true" style="cursor: pointer;" />
     </div>
 
     <!-- Connection Dialog -->
@@ -722,6 +776,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       @update:model-value="(v) => { if (!v) emit('setupCancel') }"
     >
       <DirectoryBrowser
+        ref="dirBrowserRef"
         :visible="true"
         :embedded="true"
         v-model:currentSelection="setupSelectedPath"
@@ -741,6 +796,66 @@ watch(() => connectionStore.state, async (newState, oldState) => {
     <RuleEditor v-model:visible="showRuleEditor" />
 
     <EntityTagsDialog v-model:visible="showEntityTags" />
+
+    <!-- About Dialog -->
+    <el-dialog
+      v-model="showAbout"
+      :title="t('sidebar.about.title')"
+      width="540px"
+      :close-on-click-modal="true"
+      class="about-dialog"
+      append-to-body
+      destroy-on-close
+    >
+      <div class="about-content">
+        <div class="about-logo">
+          <img src="/icon.svg" alt="MindX" width="72" height="72" />
+        </div>
+        <h2 class="about-title">MindX</h2>
+        <p class="about-version">v{{ connectionStore.serverVersion || '?.?' }}</p>
+        <p class="about-copyright">{{ t('sidebar.about.copyright') }}</p>
+
+        <div class="about-divider"></div>
+
+        <div class="about-release-notes">
+          <h3>{{ t('sidebar.about.releaseNotes') }}</h3>
+          <div v-if="loadingRelease" class="about-loading">{{ t('sidebar.about.loadingRelease') }}</div>
+          <div v-else-if="!latestRelease" class="about-loading">{{ t('sidebar.about.noReleaseNotes') }}</div>
+          <div v-else class="release-item">
+            <div class="release-header">
+              <a
+                :href="latestRelease.html_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="release-tag"
+              >{{ latestRelease.tag_name }}</a>
+              <span class="release-date">{{ t('sidebar.about.publishedAt', { date: formatDate(latestRelease.published_at) }) }}</span>
+            </div>
+            <div
+              v-if="latestRelease.body"
+              class="release-body"
+              v-html="releaseBodyHtml"></div>
+          </div>
+        </div>
+      </div>
+      <div class="about-footer">
+        <template v-if="isLatestVersion">
+          <span class="about-latest-text">{{ t('sidebar.about.latestVersion') }}</span>
+        </template>
+        <template v-else>
+          <el-button
+            size="small"
+            :loading="checkingUpdate"
+            @click="checkForUpdates"
+          >{{ t('sidebar.about.checkUpdate') }}</el-button>
+        </template>
+        <el-button
+          size="small"
+          class="about-close-btn"
+          @click="showAbout = false"
+        >{{ t('sidebar.about.close') }}</el-button>
+      </div>
+    </el-dialog>
 
     <AgentSelectorDialog v-model:visible="showAgentSelector" />
     <FileExplorer />
@@ -823,88 +938,6 @@ watch(() => connectionStore.state, async (newState, oldState) => {
   padding: 2px 6px;
   background: rgba(6, 182, 212, 0.15);
   border-radius: 4px;
-}
-
-/* Connection Status */
-.connection-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  margin-bottom: 8px;
-  border-radius: 8px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  transition: all 0.3s ease;
-}
-
-.connection-status.connected {
-  border-color: rgba(16, 185, 129, 0.3);
-  background: rgba(16, 185, 129, 0.05);
-}
-
-.connection-status.disconnected {
-  border-color: rgba(148, 163, 184, 0.25);
-  background: rgba(148, 163, 184, 0.05);
-}
-
-.status-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  transition: all 0.3s ease;
-}
-
-.connection-status.connected .status-indicator {
-  animation: pulse-green 2s infinite;
-}
-
-@keyframes pulse-green {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-  50% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
-}
-
-.status-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  flex: 1;
-}
-
-.connect-btn,
-.disconnect-btn {
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: none;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.connect-btn {
-  background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
-  color: white;
-}
-
-.connect-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 2px 10px rgba(6, 182, 212, 0.3);
-}
-
-.disconnect-btn {
-  background: var(--bg-hover);
-  color: var(--text-muted);
-}
-
-.disconnect-btn:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
 }
 
 /* ===== Agents Section ===== */
@@ -1307,31 +1340,15 @@ watch(() => connectionStore.state, async (newState, oldState) => {
   background: var(--bg-card);
 }
 
-.project-dir-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  margin-bottom: 12px;
-  background: rgba(6, 182, 212, 0.06);
-  border: 1px solid rgba(6, 182, 212, 0.15);
-  border-radius: 8px;
-  font-size: 12px;
-}
-
-.project-dir-info .el-icon {
+/* ===== Agents Section ===== */
+.dir-action-btn:hover {
+  background: rgba(6, 182, 212, 0.1);
+  border-color: rgba(6, 182, 212, 0.4);
   color: var(--accent-cyan);
-  font-size: 14px;
-  flex-shrink: 0;
 }
 
-.project-dir-label {
-  color: var(--text-muted);
-  font-weight: 600;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  flex-shrink: 0;
+.dir-action-btn .el-icon {
+  font-size: 14px;
 }
 
 .project-dir-path {
@@ -1346,31 +1363,6 @@ watch(() => connectionStore.state, async (newState, oldState) => {
   text-overflow: ellipsis;
   max-width: 180px;
   flex: 1;
-}
-
-.open-browser-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: 1px solid rgba(6, 182, 212, 0.2);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-}
-
-.open-browser-btn:hover {
-  background: rgba(6, 182, 212, 0.1);
-  border-color: rgba(6, 182, 212, 0.4);
-  color: var(--accent-cyan);
-}
-
-.open-browser-btn .el-icon {
-  font-size: 14px;
 }
 
 .user-profile {
@@ -1640,6 +1632,226 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 .url-tag:hover {
   border-color: var(--accent-cyan);
   color: var(--accent-cyan);
+}
+
+/* About Dialog */
+.about-dialog :deep(.el-dialog) {
+  background: #111827;
+  border: 1px solid rgba(55, 65, 81, 0.8);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.about-dialog :deep(.el-dialog__header) {
+  padding: 20px 24px 12px;
+  margin: 0;
+  border-bottom: 1px solid rgba(55, 65, 81, 0.5);
+}
+
+.about-dialog :deep(.el-dialog__title) {
+  color: #e2e8f0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.about-dialog :deep(.el-dialog__headerbtn .el-dialog__close) {
+  color: #94a3b8;
+  font-size: 18px;
+}
+
+.about-dialog :deep(.el-dialog__headerbtn:hover .el-dialog__close) {
+  color: #f87171;
+}
+
+.about-dialog :deep(.el-dialog__body) {
+  padding: 24px;
+  color: #cbd5e1;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.about-content {
+  text-align: center;
+}
+
+.about-logo {
+  margin-bottom: 12px;
+}
+
+.about-logo img {
+  border-radius: 16px;
+}
+
+.about-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: #e2e8f0;
+  margin: 0 0 4px;
+  background: linear-gradient(135deg, #e2e8f0, #06b6d4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.about-version {
+  font-size: 13px;
+  color: #94a3b8;
+  margin: 0 0 8px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.about-copyright {
+  font-size: 12px;
+  color: #64748b;
+  margin: 0;
+}
+
+.about-divider {
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(55, 65, 81, 0.8), transparent);
+  margin: 20px 0;
+}
+
+.about-release-notes {
+  text-align: left;
+}
+
+.about-release-notes h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin: 0 0 12px;
+}
+
+.about-loading {
+  text-align: center;
+  color: #64748b;
+  font-size: 13px;
+  padding: 20px 0;
+}
+
+.about-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(55, 65, 81, 0.5);
+}
+
+.about-close-btn {
+  color: #fff !important;
+}
+
+.about-latest-text {
+  font-size: 12px;
+  color: #10b981;
+  font-weight: 600;
+}
+
+.release-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.release-item {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(55, 65, 81, 0.5);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.release-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.release-tag {
+  font-size: 13px;
+  font-weight: 700;
+  color: #06b6d4;
+  text-decoration: none;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.release-tag:hover {
+  color: #22d3ee;
+  text-decoration: underline;
+}
+
+.release-date {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.release-body {
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.7;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.release-body :deep(h1),
+.release-body :deep(h2),
+.release-body :deep(h3),
+.release-body :deep(h4) {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin: 12px 0 6px;
+}
+
+.release-body :deep(p) {
+  margin: 6px 0;
+}
+
+.release-body :deep(ul),
+.release-body :deep(ol) {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+
+.release-body :deep(li) {
+  margin: 2px 0;
+}
+
+.release-body :deep(a) {
+  color: #06b6d4;
+  text-decoration: none;
+}
+
+.release-body :deep(a:hover) {
+  color: #22d3ee;
+  text-decoration: underline;
+}
+
+.release-body :deep(code) {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  background: rgba(15, 23, 42, 0.8);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #e2e8f0;
+}
+
+.release-body :deep(pre) {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(55, 65, 81, 0.5);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.release-body :deep(pre code) {
+  background: none;
+  padding: 0;
 }
 
 .fade-enter-active,

@@ -49,6 +49,9 @@
     "settings": "设置面板",
     "connectionConfig": "连接配置",
     "localCache": "本地缓存",
+    "workingDirectory": "工作目录",
+    "browseFiles": "浏览文件系统",
+    "addToChat": "添加目录或文件到对话",
     "browseSessionDir": "浏览此会话的工作目录",
     "dataReport": "数据与报表",
     "sessionList": "会话列表",
@@ -74,6 +77,28 @@
       "connected": "已连接",
       "reconnecting": "重连中...",
       "error": "连接错误"
+    },
+    "about": {
+      "title": "关于 MindX",
+      "copyright": "© 2024 广州睿雅信息科技有限公司",
+      "releaseNotes": "发布说明",
+      "loadingRelease": "加载中...",
+      "noReleaseNotes": "暂无发布说明",
+      "publishedAt": "发布时间：{date}",
+      "checkUpdate": "检查更新",
+      "close": "关闭",
+      "latestVersion": "已是最新版本"
+    },
+    "update": {
+      "title": "更新完成",
+      "message": "系统更新已安装完成。",
+      "viewDetails": "查看详情",
+      "downloading": "正在自动更新...",
+      "restartNeeded": "等待重启完成更新"
+    },
+    "indexing": {
+      "inProgress": "正在索引: {file}",
+      "completed": "增加至知识图谱: {file}"
     }
   },
   "chat": {
@@ -370,7 +395,8 @@
     "backToBrowse": "返回浏览模式"
   },
   "fileBrowser": {
-    "title": "文件浏览器",
+    "quickReference": "快速引用",
+    "addToChat": "添加到对话",
     "refresh": "刷新",
     "close": "关闭",
     "loadingDir": "正在加载目录...",

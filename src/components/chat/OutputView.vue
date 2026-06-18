@@ -85,8 +85,18 @@ function speakContent() {
 const formattedContent = computed(() => {
   if (!props.content) return ''
   if (props.format === 'raw') return props.content
-  return md.render(props.content)
+  return md.render(preprocessPaths(props.content))
 })
+
+// 将文本中的文件/目录路径转换为 markdown 链接
+function preprocessPaths(text: string): string {
+  // Unix 绝对路径或 ~ 开头的路径
+  const re = /(?:~|\/)(?:[^\s:;,!?)]+\/)*[^\s:;,!?)]+/g
+  return text.replace(re, (match) => {
+    const name = match.split('/').filter(Boolean).pop() || match
+    return `[${name}](${match.startsWith('~') ? '' : 'file://'}${match})`
+  })
+}
 
 async function copyToClipboard() {
   if (navigator.clipboard && props.content) {
@@ -357,6 +367,28 @@ watch(
 
 .formatted-content :deep(a) {
   color: #22d3ee;
+  text-decoration: none;
+}
+
+.formatted-content :deep(a[href^="file://"]) {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #5eead4;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(6, 182, 212, 0.08);
+  border: 1px solid rgba(6, 182, 212, 0.15);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.formatted-content :deep(a[href^="file://"]:hover) {
+  background: rgba(6, 182, 212, 0.15);
+  border-color: rgba(6, 182, 212, 0.35);
+  color: #67e8f9;
   text-decoration: none;
 }
 

@@ -67,6 +67,13 @@ const sortedEntries = computed(() => {
     .sort((a, b) => a.name.localeCompare(b.name))
 })
 
+/** 根据输入框内容解析最终路径：空→当前目录，有值→当前目录/<输入值> */
+const resolvedPath = computed(() => {
+  const dirName = newDirName.value?.trim()
+  if (!dirName) return currentPath.value
+  return currentPath.value.replace(/\/+$/, '') + '/' + dirName
+})
+
 const breadcrumbSegments = computed(() => {
   if (!currentPath.value) return []
   const disp = shortenPath(currentPath.value)
@@ -161,7 +168,7 @@ function handleClose() {
 
 function handleSelect() {
   emit('select', currentPath.value, newDirName.value)
-  emit('update:currentSelection', currentPath.value)
+  emit('update:currentSelection', resolvedPath.value)
   emit('update:visible', false)
 }
 
@@ -191,6 +198,8 @@ watch(() => props.visible, (val) => {
     handleOpen()
   }
 }, { immediate: true })
+
+defineExpose({ resolvedPath, newDirName })
 </script>
 
 <template>

@@ -13,6 +13,7 @@ import CompactionView from './CompactionView.vue'
 import MaxTurnsView from './MaxTurnsView.vue'
 import FormView from './FormView.vue'
 import DiffView from './DiffView.vue'
+import FormattedContent from './FormattedContent.vue'
 
 const { t } = useI18n()
 
@@ -143,7 +144,7 @@ function formatContent(content: string): string {
     <template v-if="componentType === 'user' && message.content">
       <div class="user-message">
         <span class="user-indicator"></span>
-        <p class="user-content">{{ message.content }}</p>
+        <p class="user-content"><FormattedContent :content="message.content" /></p>
       </div>
     </template>
 

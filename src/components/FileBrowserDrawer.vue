@@ -4,11 +4,9 @@ import { useI18n } from 'vue-i18n'
 import {
   Folder,
   Document,
-  ArrowLeft,
+  Plus,
   RefreshRight,
   House,
-  FullScreen,
-  Edit,
   Close
 } from '@element-plus/icons-vue'
 import { useConnectionStore } from '../stores/connectionStore'
@@ -25,7 +23,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:visible', 'open-file'])
+const emit = defineEmits(['update:visible', 'open-file', 'add-ref'])
 
 const connectionStore = useConnectionStore()
 const { t } = useI18n()
@@ -34,16 +32,6 @@ const currentPath = ref('')
 const entries = ref<FSEntry[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
-const showFileViewer = ref(false)
-const selectedFile = ref<{ path: string; name: string; content: string } | null>(null)
-
-const TEXT_EXTENSIONS = new Set([
-  'txt', 'md', 'markdown', 'json', 'yaml', 'yml', 'toml', 'xml', 'html', 'css',
-  'js', 'ts', 'jsx', 'tsx', 'vue', 'py', 'java', 'go', 'rs', 'c', 'cpp', 'h', 'hpp',
-  'sh', 'bash', 'zsh', 'fish', 'rb', 'php', 'swift', 'kt', 'scala', 'r', 'sql',
-  'csv', 'ini', 'conf', 'cfg', 'env', 'gitignore', 'dockerignore', 'dockerfile',
-  'makefile', 'cmake', 'gradle', 'pom', 'log', 'readme', 'license', 'changelog'
-])
 
 const sortedEntries = computed(() => {
   const dirs = entries.value.filter(e => e.is_dir).sort((a, b) => a.name.localeCompare(b.name))
@@ -59,13 +47,6 @@ const breadcrumbSegments = computed(() => {
     return { label: part, path: fullPath }
   })
 })
-
-function isTextFile(name: string): boolean {
-  const ext = name.split('.').pop()?.toLowerCase() || ''
-  const baseName = name.toLowerCase()
-  if (!ext && ['readme', 'license', 'changelog', 'dockerfile', 'makefile', '.gitignore'].includes(baseName)) return true
-  return TEXT_EXTENSIONS.has(ext)
-}
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -154,38 +135,16 @@ function navigateTo(path: string) {
   fetchFSList(path)
 }
 
-function goUp() {
-  const parent = currentPath.value.replace(/\/+$/, '').split('/').slice(0, -1).join('/') || '/'
-  fetchFSList(parent)
-}
-
 function refresh() {
   if (currentPath.value) {
     fetchFSList(currentPath.value)
   }
 }
 
-async function handleFileClick(entry: FSEntry) {
+async function handleDirClick(entry: FSEntry) {
   if (entry.is_dir) {
     fetchFSList(entry.path)
-  } else {
-    if (isTextFile(entry.name)) {
-      try {
-        const content = await connectionStore.readFile(entry.path)
-        selectedFile.value = { path: entry.path, name: entry.name, content }
-        showFileViewer.value = true
-      } catch (err: any) {
-        console.error('[FileBrowser] Failed to read file:', err)
-      }
-    } else {
-      window.open(`file://${entry.path}`, '_blank')
-    }
   }
-}
-
-function closeFileViewer() {
-  showFileViewer.value = false
-  selectedFile.value = null
 }
 
 function closeDrawer() {
@@ -205,7 +164,7 @@ watch(() => props.visible, (val) => {
       <div class="drawer-header">
         <div class="drawer-title">
           <el-icon><Folder /></el-icon>
-          <span>{{ t('fileBrowser.title') }}</span>
+          <span>{{ t('fileBrowser.quickReference') }}</span>
         </div>
         <div class="drawer-actions">
           <el-button text circle @click="refresh" :loading="loading" :title="t('common.refresh')">
@@ -231,11 +190,6 @@ watch(() => props.visible, (val) => {
             <a class="breadcrumb-link" @click.prevent="navigateTo(seg.path)">{{ seg.label }}</a>
           </el-breadcrumb-item>
         </el-breadcrumb>
-      </div>
-
-      <div class="path-bar">
-        <el-icon class="go-up-icon" @click="goUp"><ArrowLeft /></el-icon>
-        <code class="current-path">{{ currentPath || '/' }}</code>
       </div>
 
       <div class="file-list">
@@ -264,8 +218,8 @@ watch(() => props.visible, (val) => {
           v-for="entry in sortedEntries"
           :key="entry.path"
           class="file-item"
-          :class="{ 'dir-item': entry.is_dir, 'text-file': !entry.is_dir && isTextFile(entry.name) }"
-          @click="handleFileClick(entry)"
+          :class="{ 'dir-item': entry.is_dir }"
+          @click="entry.is_dir && handleDirClick(entry)"
         >
           <div class="file-icon">
             <el-icon v-if="entry.is_dir" :size="18"><Folder /></el-icon>
@@ -282,11 +236,8 @@ watch(() => props.visible, (val) => {
             </span>
           </div>
           <div class="file-actions">
-            <el-icon v-if="!entry.is_dir && isTextFile(entry.name)" class="edit-icon" @click.stop="handleFileClick(entry)">
-              <Edit />
-            </el-icon>
-            <el-icon v-if="!entry.is_dir && !isTextFile(entry.name)" class="open-icon" @click.stop="window.open(`file://${entry.path}`, '_blank')">
-              <FullScreen />
+            <el-icon class="ref-icon" :title="t('fileBrowser.addToChat')" @click.stop="emit('add-ref', entry.path, entry.name); emit('update:visible', false)">
+              <Plus />
             </el-icon>
           </div>
         </div>
@@ -296,32 +247,6 @@ watch(() => props.visible, (val) => {
           <span>{{ t('fileBrowser.dirEmpty') }}</span>
         </div>
       </div>
-
-      <Transition name="file-viewer">
-        <div v-if="showFileViewer && selectedFile" class="file-viewer-overlay">
-          <div class="file-viewer">
-            <div class="viewer-header">
-              <div class="viewer-title">
-                <el-icon><Document /></el-icon>
-                <span>{{ selectedFile.name }}</span>
-                <code class="viewer-path">{{ selectedFile.path }}</code>
-              </div>
-              <div class="viewer-actions">
-                <el-button text circle @click="closeFileViewer" :title="t('fileBrowser.close')">
-                  <el-icon><Close /></el-icon>
-                </el-button>
-              </div>
-            </div>
-            <div class="viewer-body">
-              <textarea
-                v-model="selectedFile.content"
-                class="file-editor"
-                spellcheck="false"
-              ></textarea>
-            </div>
-          </div>
-        </div>
-      </Transition>
     </div>
   </Transition>
 </template>
@@ -391,36 +316,6 @@ watch(() => props.visible, (val) => {
 
 .breadcrumb-link:hover {
   text-decoration: underline;
-}
-
-.path-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-primary);
-}
-
-.go-up-icon {
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color 0.2s ease;
-  flex-shrink: 0;
-}
-
-.go-up-icon:hover {
-  color: var(--accent-cyan);
-}
-
-.current-path {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
 }
 
 .file-list {
@@ -497,7 +392,7 @@ watch(() => props.visible, (val) => {
 }
 
 .file-item.text-file .file-name {
-  color: #a78bfa;
+  color: var(--text-primary);
 }
 
 .file-icon {
@@ -559,96 +454,13 @@ watch(() => props.visible, (val) => {
   opacity: 1;
 }
 
-.file-actions .edit-icon,
-.file-actions .open-icon {
+.file-actions .ref-icon {
   color: var(--text-muted);
   cursor: pointer;
   transition: color 0.2s ease;
 }
 
-.edit-icon:hover {
-  color: #a78bfa;
-}
-
-.open-icon:hover {
-  color: var(--accent-cyan);
-}
-
-.file-viewer-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.8);
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
-
-.file-viewer {
-  width: 100%;
-  height: 100%;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.file-viewer-enter-active,
-.file-viewer-leave-active {
-  transition: all 0.3s ease;
-}
-
-.file-viewer-enter-from,
-.file-viewer-leave-to {
-  opacity: 0;
-  transform: scale(0.95);
-}
-
-.viewer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-}
-
-.viewer-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.viewer-path {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-.viewer-body {
-  flex: 1;
-  overflow: hidden;
-}
-
-.file-editor {
-  width: 100%;
-  height: 100%;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  border: none;
-  padding: 16px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  resize: none;
-  outline: none;
-  tab-size: 2;
+.ref-icon:hover {
+  color: #10b981;
 }
 </style>

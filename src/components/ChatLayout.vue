@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import Sidebar from './Sidebar.vue'
 import ChatArea from './ChatArea.vue'
 import FileBrowserDrawer from './FileBrowserDrawer.vue'
@@ -17,6 +17,24 @@ const emit = defineEmits(['update:selectedDirectory', 'setupConfirm', 'setupCanc
 
 const isCollapsed = ref(false)
 const fileBrowserVisible = ref(false)
+
+// ── 文件引用 ──
+const fileRefs = ref([])
+
+function addRef(path, name) {
+  // 去重
+  if (!fileRefs.value.some(r => r.path === path)) {
+    fileRefs.value.push({ path, name })
+  }
+}
+
+function removeRef(path) {
+  fileRefs.value = fileRefs.value.filter(r => r.path !== path)
+}
+
+function clearRefs() {
+  fileRefs.value = []
+}
 
 const connectionStore = useConnectionStore()
 const currentProjectDir = computed(() => {
@@ -42,6 +60,16 @@ function handleToggleSetupDialog() {
 function toggleFileBrowser() {
   fileBrowserVisible.value = !fileBrowserVisible.value
 }
+
+watch(() => connectionStore.showFileBrowser, (val) => {
+  if (val) {
+    fileBrowserVisible.value = true
+  }
+})
+
+watch(fileBrowserVisible, (val) => {
+  if (!val) connectionStore.showFileBrowser = false
+})
 
 async function handleRequestNewSession() {
   if (!connectionStore.isConnected || !connectionStore.currentAgent) {
@@ -71,6 +99,9 @@ async function handleRequestNewSession() {
         :is-sidebar-collapsed="isCollapsed"
         :on-request-new-session="handleRequestNewSession"
         :show-model-picker="showModelPicker"
+        :file-refs="fileRefs"
+        @remove-ref="removeRef"
+        @clear-refs="clearRefs"
         @update:show-model-picker="(v) => emit('update:showModel-picker', v)"
       />
     </div>
@@ -78,6 +109,7 @@ async function handleRequestNewSession() {
     <FileBrowserDrawer
       v-model:visible="fileBrowserVisible"
       :project-dir="currentProjectDir"
+      @add-ref="addRef"
     />
   </div>
 </template>
