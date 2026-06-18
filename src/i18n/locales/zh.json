@@ -81,13 +81,15 @@
     "about": {
       "title": "关于 MindX",
       "copyright": "© 2024 广州睿雅信息科技有限公司",
-      "releaseNotes": "发布说明",
+      "releaseNotes": "更新内容",
       "loadingRelease": "加载中...",
       "noReleaseNotes": "暂无发布说明",
       "publishedAt": "发布时间：{date}",
       "checkUpdate": "检查更新",
       "close": "关闭",
-      "latestVersion": "已是最新版本"
+      "latestVersion": "已是最新版本",
+      "updateAvailable": "发现新版本",
+      "applyUpdate": "下载并安装"
     },
     "update": {
       "title": "更新完成",
@@ -761,6 +763,7 @@
     "saveSuccess": "Agent 保存成功",
     "saveFailed": "Agent 保存失败",
     "noSkills": "暂无可用技能",
+    "noTools": "暂无工具",
     "tools": {
       "Grep": "全文搜索",
       "Glob": "文件搜索",
@@ -807,8 +810,8 @@
       "TeamGetTasks": "获取分配给团队的所有任务"
     },
     "groupNames": {
-      "task": "任务工具",
-      "team": "团队工具"
+      "task": "任务分解",
+      "team": "团队合作"
     },
     "groupDescs": {
       "task": "可将复杂任务分解为多个具体工作项逐项完成",

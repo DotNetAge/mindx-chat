@@ -66,18 +66,25 @@ const showRuleEditor = ref(false)
 const showEntityTags = ref(false)
 const showAgentSelector = ref(false)
 const showAbout = ref(false)
-const latestRelease = ref<any>(null)
+const showDirBrowser = ref(false)
+const currentRelease = ref<any>(null)
 const loadingRelease = ref(false)
 const checkingUpdate = ref(false)
 const isLatestVersion = ref(false)
+const updateInfo = ref<any>(null)       // VersionInfo from daemon check_update
+const updateRelease = ref<any>(null)     // GitHub release data for the newer version
+const loadingUpdateRelease = ref(false)
+const applyingUpdate = ref(false)
 
-async function fetchLatestRelease() {
-  if (latestRelease.value) return
+// 获取当前版本的 Release Notes（匹配 connectionStore.serverVersion）
+async function fetchCurrentRelease() {
+  const version = connectionStore.serverVersion
+  if (!version) return
   loadingRelease.value = true
   try {
-    const resp = await fetch('https://api.github.com/repos/DotNetAge/mindx/releases/latest')
+    const resp = await fetch(`https://api.github.com/repos/DotNetAge/mindx/releases/tags/v${version}`)
     if (resp.ok) {
-      latestRelease.value = await resp.json()
+      currentRelease.value = await resp.json()
     }
   } catch (e) {
     console.warn('[MindX] Failed to fetch release notes:', e)
@@ -88,6 +95,9 @@ async function fetchLatestRelease() {
 
 async function checkForUpdates() {
   checkingUpdate.value = true
+  isLatestVersion.value = false
+  updateInfo.value = null
+  updateRelease.value = null
   try {
     const client = getMindXClient()
     if (client) {
@@ -95,10 +105,21 @@ async function checkForUpdates() {
       console.log('[MindX] Update check result:', result)
       if (result && !result.update_available) {
         isLatestVersion.value = true
+      } else if (result && result.update_available) {
+        updateInfo.value = result
+        // 获取新版本的 Release Notes
+        try {
+          loadingUpdateRelease.value = true
+          const resp = await fetch(`https://api.github.com/repos/DotNetAge/mindx/releases/tags/v${result.latest_version}`)
+          if (resp.ok) {
+            updateRelease.value = await resp.json()
+          }
+        } catch (e) {
+          console.warn('[MindX] Failed to fetch update release notes:', e)
+        } finally {
+          loadingUpdateRelease.value = false
+        }
       }
-      // Re-fetch release notes to get the latest version info
-      latestRelease.value = null
-      await fetchLatestRelease()
     }
   } catch (e) {
     console.warn('[MindX] Failed to check for updates:', e)
@@ -107,10 +128,27 @@ async function checkForUpdates() {
   }
 }
 
+async function applyUpdate() {
+  applyingUpdate.value = true
+  try {
+    const client = getMindXClient()
+    if (client) {
+      await client.call('server.apply_update', {})
+      // update_started / update_installed 事件由 connectionStore 处理
+    }
+  } catch (e) {
+    console.warn('[MindX] Failed to apply update:', e)
+  } finally {
+    applyingUpdate.value = false
+  }
+}
+
 function showAboutDialog() {
   showAbout.value = true
   isLatestVersion.value = false
-  fetchLatestRelease()
+  updateInfo.value = null
+  updateRelease.value = null
+  fetchCurrentRelease()
 }
 
 watch(() => connectionStore.pendingShowAbout, (val) => {
@@ -131,8 +169,8 @@ function formatDate(dateStr: string): string {
 
 const { md } = useMarkdown()
 const releaseBodyHtml = computed(() => {
-  if (!latestRelease.value?.body) return ''
-  return md.render(latestRelease.value.body)
+  if (!currentRelease.value?.body) return ''
+  return md.render(currentRelease.value.body)
 })
 
 // --- 用户偏好设定（来自服务端 user.config）---
@@ -591,7 +629,13 @@ watch(showTokenReport, (val) => {
          :disabled="!connectionStore.isConnected"
          :title="t('agentSelector.title')"
        >
-         <el-icon><UserFilled /></el-icon>
+         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+           <path d="M9 15C8.44771 15 8 15.4477 8 16C8 16.5523 8.44771 17 9 17C9.55229 17 10 16.5523 10 16C10 15.4477 9.55229 15 9 15Z"/>
+           <path d="M14 16C14 15.4477 14.4477 15 15 15C15.5523 15 16 15.4477 16 16C16 16.5523 15.5523 17 15 17C14.4477 17 14 16.5523 14 16Z"/>
+           <path fill-rule="evenodd" clip-rule="evenodd" d="M12 1C10.8954 1 10 1.89543 10 3C10 3.74028 10.4022 4.38663 11 4.73244V7H6C4.34315 7 3 8.34315 3 10V20C3 21.6569 4.34315 23 6 23H18C19.6569 23 21 21.6569 21 20V10C21 8.34315 19.6569 7 18 7H13V4.73244C13.5978 4.38663 14 3.74028 14 3C14 1.89543 13.1046 1 12 1ZM5 10C5 9.44772 5.44772 9 6 9H7.38197L8.82918 11.8944C9.16796 12.572 9.86049 13 10.618 13H13.382C14.1395 13 14.832 12.572 15.1708 11.8944L16.618 9H18C18.5523 9 19 9.44772 19 10V20C19 20.5523 18.5523 21 18 21H6C5.44772 21 5 20.5523 5 20V10ZM13.382 11L14.382 9H9.61803L10.618 11H13.382Z"/>
+           <path d="M1 14C0.447715 14 0 14.4477 0 15V17C0 17.5523 0.447715 18 1 18C1.55228 18 2 17.5523 2 17V15C2 14.4477 1.55228 14 1 14Z"/>
+           <path d="M22 15C22 14.4477 22.4477 14 23 14C23.5523 14 24 14.4477 24 15V17C24 17.5523 23.5523 18 23 18C22.4477 18 22 17.5523 22 17V15Z"/>
+         </svg>
        </el-button>
      </div>
 
@@ -699,6 +743,32 @@ watch(showTokenReport, (val) => {
 
     <!-- Footer -->
     <div class="sidebar-footer" v-show="!isCollapsed">
+      <div class="footer-links">
+        <a
+          class="footer-link"
+          href="https://github.com/dotNetAge/mindx"
+          target="_blank"
+          rel="noopener noreferrer"
+          :title="'GitHub'"
+        >
+          <svg class="footer-link-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 0a12 12 0 1 0 0 24 12 12 0 0 0 0-24zm3.163 21.783h-.093a.513.513 0 0 1-.382-.14.513.513 0 0 1-.14-.372v-1.406c.006-.467.01-.94.01-1.416a3.693 3.693 0 0 0-.151-1.028 1.832 1.832 0 0 0-.542-.875 8.014 8.014 0 0 0 2.038-.471 4.051 4.051 0 0 0 1.466-.964c.407-.427.71-.943.885-1.506a6.77 6.77 0 0 0 .3-2.13 4.138 4.138 0 0 0-.26-1.476 3.892 3.892 0 0 0-.795-1.284 2.81 2.81 0 0 0 .162-.582c.033-.2.05-.402.05-.604 0-.26-.03-.52-.09-.773a5.309 5.309 0 0 0-.221-.763.293.293 0 0 0-.111-.02h-.11c-.23.002-.456.04-.674.111a5.34 5.34 0 0 0-.703.26 6.503 6.503 0 0 0-.661.343c-.215.127-.405.249-.573.362a9.578 9.578 0 0 0-5.143 0 13.507 13.507 0 0 0-.572-.362 6.022 6.022 0 0 0-.672-.342 4.516 4.516 0 0 0-.705-.261 2.203 2.203 0 0 0-.662-.111h-.11a.29.29 0 0 0-.11.02 5.844 5.844 0 0 0-.23.763c-.054.254-.08.513-.081.773 0 .202.017.404.051.604.033.199.086.394.16.582A3.888 3.888 0 0 0 5.702 10a4.142 4.142 0 0 0-.263 1.476 6.871 6.871 0 0 0 .292 2.12c.181.563.483 1.08.884 1.516.415.422.915.75 1.466.964.653.25 1.337.41 2.033.476a1.828 1.828 0 0 0-.452.633 2.99 2.99 0 0 0-.2.744 2.754 2.754 0 0 1-1.175.27 1.788 1.788 0 0 1-1.065-.3 2.904 2.904 0 0 1-.752-.824 3.1 3.1 0 0 0-.292-.382 2.693 2.693 0 0 0-.372-.343 1.841 1.841 0 0 0-.432-.24 1.2 1.2 0 0 0-.481-.101c-.04.001-.08.005-.12.01a.649.649 0 0 0-.162.02.408.408 0 0 0-.13.06.116.116 0 0 0-.06.1.33.33 0 0 0 .14.242c.093.074.17.131.232.171l.03.021c.133.103.261.214.382.333.112.098.213.209.3.33.09.119.168.246.231.381.073.134.15.288.231.463.188.474.522.875.954 1.145.453.243.961.364 1.476.351.174 0 .349-.01.522-.03.172-.028.343-.057.515-.091v1.743a.5.5 0 0 1-.533.521h-.062a10.286 10.286 0 1 1 6.324 0v.005z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+        <a
+          class="footer-link"
+          href="https://gitee.com/ray_liang/mindx"
+          target="_blank"
+          rel="noopener noreferrer"
+          :title="'Gitee'"
+        >
+          <svg class="footer-link-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+            <path d="M11.984 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.016 0zm6.09 5.333c.328 0 .593.266.592.593v1.482a.594.594 0 0 1-.593.592H9.777c-.982 0-1.778.796-1.778 1.778v5.63c0 .327.266.592.593.592h5.63c.982 0 1.778-.796 1.778-1.778v-.296a.593.593 0 0 0-.592-.593h-4.15a.592.592 0 0 1-.592-.592v-1.482a.593.593 0 0 1 .593-.592h6.815c.327 0 .593.265.593.592v3.408a4 4 0 0 1-4 4H5.926a.593.593 0 0 1-.593-.593V9.778a4.444 4.444 0 0 1 4.445-4.444h8.296z"/>
+          </svg>
+          <span>Gitee</span>
+        </a>
+      </div>
     </div>
 
     <!-- Connection Dialog -->
@@ -820,26 +890,59 @@ watch(showTokenReport, (val) => {
         <div class="about-release-notes">
           <h3>{{ t('sidebar.about.releaseNotes') }}</h3>
           <div v-if="loadingRelease" class="about-loading">{{ t('sidebar.about.loadingRelease') }}</div>
-          <div v-else-if="!latestRelease" class="about-loading">{{ t('sidebar.about.noReleaseNotes') }}</div>
+          <div v-else-if="!currentRelease" class="about-loading">{{ t('sidebar.about.noReleaseNotes') }}</div>
           <div v-else class="release-item">
             <div class="release-header">
               <a
-                :href="latestRelease.html_url"
+                :href="currentRelease.html_url"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="release-tag"
-              >{{ latestRelease.tag_name }}</a>
-              <span class="release-date">{{ t('sidebar.about.publishedAt', { date: formatDate(latestRelease.published_at) }) }}</span>
+              >{{ currentRelease.tag_name }}</a>
+              <span class="release-date">{{ t('sidebar.about.publishedAt', { date: formatDate(currentRelease.published_at) }) }}</span>
             </div>
             <div
-              v-if="latestRelease.body"
+              v-if="currentRelease.body"
               class="release-body"
               v-html="releaseBodyHtml"></div>
           </div>
         </div>
+
+        <!-- 可用更新提示 -->
+        <div v-if="updateInfo" class="about-update-available">
+          <div class="about-update-divider"></div>
+          <div class="about-update-header">
+            <span class="about-update-badge">{{ t('sidebar.about.updateAvailable') }}</span>
+            <span class="about-update-version">v{{ updateInfo.current_version }} → <strong>v{{ updateInfo.latest_version }}</strong></span>
+          </div>
+          <div v-if="loadingUpdateRelease" class="about-loading">{{ t('sidebar.about.loadingRelease') }}</div>
+          <div v-else-if="updateRelease" class="release-item">
+            <div class="release-header">
+              <a
+                :href="updateRelease.html_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="release-tag"
+              >{{ updateRelease.tag_name }}</a>
+              <span class="release-date">{{ t('sidebar.about.publishedAt', { date: formatDate(updateRelease.published_at) }) }}</span>
+            </div>
+            <div
+              v-if="updateRelease.body"
+              class="release-body"
+              v-html="md.render(updateRelease.body)"></div>
+          </div>
+        </div>
       </div>
       <div class="about-footer">
-        <template v-if="isLatestVersion">
+        <template v-if="updateInfo">
+          <el-button
+            size="small"
+            type="primary"
+            :loading="applyingUpdate"
+            @click="applyUpdate"
+          >{{ t('sidebar.about.applyUpdate') }}</el-button>
+        </template>
+        <template v-else-if="isLatestVersion">
           <span class="about-latest-text">{{ t('sidebar.about.latestVersion') }}</span>
         </template>
         <template v-else>
@@ -1340,6 +1443,34 @@ watch(showTokenReport, (val) => {
   background: var(--bg-card);
 }
 
+.footer-links {
+  display: flex;
+  gap: 12px;
+}
+
+.footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.footer-link:hover {
+  background: rgba(139, 92, 246, 0.1);
+  color: #a78bfa;
+}
+
+.footer-link-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 /* ===== Agents Section ===== */
 .dir-action-btn:hover {
   background: rgba(6, 182, 212, 0.1);
@@ -1747,6 +1878,41 @@ watch(showTokenReport, (val) => {
   font-size: 12px;
   color: #10b981;
   font-weight: 600;
+}
+
+/* ── 可用更新 ── */
+.about-update-available {
+  text-align: left;
+  margin-top: 4px;
+}
+.about-update-divider {
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(6, 182, 212, 0.4), transparent);
+  margin: 12px 0;
+}
+.about-update-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.about-update-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  padding: 3px 10px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.about-update-version {
+  font-size: 13px;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+}
+.about-update-version strong {
+  color: #06b6d4;
 }
 
 .release-list {

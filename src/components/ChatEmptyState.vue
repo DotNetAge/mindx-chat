@@ -35,17 +35,12 @@ onMounted(() => {
 <template>
   <div class="empty-state">
     <div class="empty-visual">
-      <svg width="120" height="120" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <linearGradient id="emptyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#06b6d4"/>
-            <stop offset="50%" stop-color="#8b5cf6"/>
-            <stop offset="100%" stop-color="#10b981"/>
-          </linearGradient>
-        </defs>
-        <circle cx="12" cy="12" r="10" stroke="url(#emptyGrad)" stroke-width="0.5" opacity="0.3"/>
-        <path d="M12 6v6l4 2" stroke="url(#emptyGrad)" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
-        <circle cx="12" cy="12" r="2" fill="url(#emptyGrad)" opacity="0.8"/>
+      <svg class="empty-robot" width="120" height="120" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M18,22H6a3,3,0,0,1-3-3V7A3,3,0,0,1,6,4H18a3,3,0,0,1,3,3V19A3,3,0,0,1,18,22ZM6,6A1,1,0,0,0,5,7V19a1,1,0,0,0,1,1H18a1,1,0,0,0,1-1V7a1,1,0,0,0-1-1Z" fill="currentColor" opacity="0.8"/>
+        <path d="M9,13a1,1,0,0,1-1-1V10a1,1,0,0,1,2,0v2A1,1,0,0,1,9,13Z" fill="currentColor" opacity="0.8"/>
+        <path d="M15,13a1,1,0,0,1-1-1V10a1,1,0,0,1,2,0v2A1,1,0,0,1,15,13Z" fill="currentColor" opacity="0.8"/>
+        <path d="M12,5a1,1,0,0,1-1-1V2a1,1,0,0,1,2,0V4A1,1,0,0,1,12,5Z" fill="currentColor" opacity="0.8"/>
+        <path d="M15,18H9a1,1,0,0,1,0-2h6a1,1,0,0,1,0,2Z" fill="currentColor" opacity="0.8"/>
       </svg>
     </div>
 
@@ -95,6 +90,12 @@ onMounted(() => {
 .empty-visual {
   opacity: 0.4;
   margin-bottom: 8px;
+}
+
+.empty-robot {
+  width: 120px;
+  height: 120px;
+  color: var(--text-muted, #94a3b8);
 }
 
 .empty-title {

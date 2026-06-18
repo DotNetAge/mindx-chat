@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { UserFilled, Monitor, Tools, CollectionTag, Warning } from '@element-plus/icons-vue'
+import { UserFilled, Tools, CollectionTag, Warning } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useChatStore } from '../stores/chatStore'
@@ -200,7 +200,50 @@ async function saveMetaField(field: 'name' | 'description') {
   }
 }
 
-// ── 当前选中的 Agent 对象 ──
+// ── 只读/编辑模式 ──
+const isEditing = ref(false)
+
+// 只读模式下已选技能
+const assignedSkills = computed(() => {
+  return allSkills.value.filter(s => localSkills.value.includes(s.name))
+})
+
+// 只读模式下已启用工具组（全部成员都已启用才算完整组）
+const enabledToolGroups = computed(() => {
+  return TOOL_GROUPS.filter(g => g.members.every(m => localEnabledTools.value.has(m)))
+})
+
+// 只读模式下已启用独立工具（不在任何已启用组中）
+const enabledStandaloneTools = computed(() => {
+  const groupedMemberSet = new Set(TOOL_GROUPS.reduce((acc: string[], g) => acc.concat(g.members), []))
+  return STANDALONE_TOOLS.filter(t => localEnabledTools.value.has(t.name))
+})
+
+// 只读模式下工具组完整信息（含 i18n label 和描述）
+interface ReadonlyToolGroup {
+  key: string
+  label: string
+  desc: string
+  memberCount: number
+}
+const readonlyToolGroups = computed<ReadonlyToolGroup[]>(() => {
+  return enabledToolGroups.value.map(g => ({
+    key: g.key,
+    label: t(`agentEditor.groupNames.${g.key}`),
+    desc: t(`agentEditor.groupDescs.${g.key}`),
+    memberCount: g.members.length
+  }))
+})
+
+function startEditing() {
+  isEditing.value = true
+}
+
+function cancelEditing() {
+  // 重置为当前 Agent 的原始状态
+  initEditor(selectedAgentName.value)
+  isEditing.value = false
+}
 const selectedAgent = computed(() => {
   return connectionStore.agents.find(a => a.name === selectedAgentName.value)
 })
@@ -408,7 +451,7 @@ async function handleSave() {
       exclude_tools: excludeTools
     })
     ElMessage.success(t('agentEditor.saveSuccess'))
-    emit('update:visible', false)
+    isEditing.value = false
   } catch (err: any) {
     ElMessage.error(err.message || t('agentEditor.saveFailed'))
   }
@@ -417,6 +460,7 @@ async function handleSave() {
 // ── 对话框打开时初始化 ──
 watch(() => props.visible, (val) => {
   if (val) {
+    isEditing.value = false
     const first = connectionStore.agents[0]
     if (first) {
       selectAgent(first.name)
@@ -436,12 +480,12 @@ function switchActiveAgent(name: string) {
 </script>
 
 <template>
-  <div v-if="visible">
+  <div class="agent-editor-dialog-wrapper">
     <el-dialog
-      :model-value="true"
-      @update:model-value="emit('update:visible', false)"
-      title=""
-      width="1100px"
+      :model-value="visible"
+      @update:model-value="emit('update:visible', $event)"
+    title=""
+    width="1100px"
       class="agent-editor-dialog"
       append-to-body
       destroy-on-close
@@ -449,7 +493,13 @@ function switchActiveAgent(name: string) {
       <template #header>
         <div class="dialog-header">
           <h2>
-            <el-icon><Monitor /></el-icon>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="dialog-header-icon">
+              <path d="M9 15C8.44771 15 8 15.4477 8 16C8 16.5523 8.44771 17 9 17C9.55229 17 10 16.5523 10 16C10 15.4477 9.55229 15 9 15Z"/>
+              <path d="M14 16C14 15.4477 14.4477 15 15 15C15.5523 15 16 15.4477 16 16C16 16.5523 15.5523 17 15 17C14.4477 17 14 16.5523 14 16Z"/>
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M12 1C10.8954 1 10 1.89543 10 3C10 3.74028 10.4022 4.38663 11 4.73244V7H6C4.34315 7 3 8.34315 3 10V20C3 21.6569 4.34315 23 6 23H18C19.6569 23 21 21.6569 21 20V10C21 8.34315 19.6569 7 18 7H13V4.73244C13.5978 4.38663 14 3.74028 14 3C14 1.89543 13.1046 1 12 1ZM5 10C5 9.44772 5.44772 9 6 9H7.38197L8.82918 11.8944C9.16796 12.572 9.86049 13 10.618 13H13.382C14.1395 13 14.832 12.572 15.1708 11.8944L16.618 9H18C18.5523 9 19 9.44772 19 10V20C19 20.5523 18.5523 21 18 21H6C5.44772 21 5 20.5523 5 20V10ZM13.382 11L14.382 9H9.61803L10.618 11H13.382Z"/>
+              <path d="M1 14C0.447715 14 0 14.4477 0 15V17C0 17.5523 0.447715 18 1 18C1.55228 18 2 17.5523 2 17V15C2 14.4477 1.55228 14 1 14Z"/>
+              <path d="M22 15C22 14.4477 22.4477 14 23 14C23.5523 14 24 14.4477 24 15V17C24 17.5523 23.5523 18 23 18C22.4477 18 22 17.5523 22 17V15Z"/>
+            </svg>
             {{ t('agentEditor.title') }}
           </h2>
           <span class="header-hint">{{ t('agentEditor.hint') }} — {{ t('agentEditor.clickEditHint') }}</span>
@@ -472,7 +522,13 @@ function switchActiveAgent(name: string) {
               >
                 <div class="ali-avatar">
                   <el-icon v-if="agent.isActive" :size="18"><UserFilled /></el-icon>
-                  <el-icon v-else :size="18"><Monitor /></el-icon>
+                  <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="ali-avatar-icon">
+                    <path d="M9 15C8.44771 15 8 15.4477 8 16C8 16.5523 8.44771 17 9 17C9.55229 17 10 16.5523 10 16C10 15.4477 9.55229 15 9 15Z"/>
+                    <path d="M14 16C14 15.4477 14.4477 15 15 15C15.5523 15 16 15.4477 16 16C16 16.5523 15.5523 17 15 17C14.4477 17 14 16.5523 14 16Z"/>
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M12 1C10.8954 1 10 1.89543 10 3C10 3.74028 10.4022 4.38663 11 4.73244V7H6C4.34315 7 3 8.34315 3 10V20C3 21.6569 4.34315 23 6 23H18C19.6569 23 21 21.6569 21 20V10C21 8.34315 19.6569 7 18 7H13V4.73244C13.5978 4.38663 14 3.74028 14 3C14 1.89543 13.1046 1 12 1ZM5 10C5 9.44772 5.44772 9 6 9H7.38197L8.82918 11.8944C9.16796 12.572 9.86049 13 10.618 13H13.382C14.1395 13 14.832 12.572 15.1708 11.8944L16.618 9H18C18.5523 9 19 9.44772 19 10V20C19 20.5523 18.5523 21 18 21H6C5.44772 21 5 20.5523 5 20V10ZM13.382 11L14.382 9H9.61803L10.618 11H13.382Z"/>
+                    <path d="M1 14C0.447715 14 0 14.4477 0 15V17C0 17.5523 0.447715 18 1 18C1.55228 18 2 17.5523 2 17V15C2 14.4477 1.55228 14 1 14Z"/>
+                    <path d="M22 15C22 14.4477 22.4477 14 23 14C23.5523 14 24 14.4477 24 15V17C24 17.5523 23.5523 18 23 18C22.4477 18 22 17.5523 22 17V15Z"/>
+                  </svg>
                 </div>
                 <div class="ali-info">
                   <div class="ali-name">{{ agent.nameZh }}</div>
@@ -497,26 +553,46 @@ function switchActiveAgent(name: string) {
             <!-- 基本信息 -->
             <div class="detail-header">
               <div class="dh-top">
-                <h3
-                  v-if="editingField !== 'name'"
-                  class="editable-field"
-                  @click="startEdit('name')"
-                >{{ localeMetaValue(selectedAgent.meta, 'name', selectedAgent.name) }}</h3>
-                <el-input
-                  v-else
-                  ref="nameInputRef"
-                  v-model="editValue"
-                  size="small"
-                  style="width: 300px;"
-                  @blur="saveMetaField('name')"
-                  @keydown.enter="saveMetaField('name')"
-                />
-                <el-button
-                  size="small"
-                  @click="handleSave"
-                >
-                  {{ t('common.save') }}
-                </el-button>
+                <div class="dh-left">
+                  <h3
+                    v-if="editingField !== 'name'"
+                    class="editable-field"
+                    @click="startEdit('name')"
+                  >{{ localeMetaValue(selectedAgent.meta, 'name', selectedAgent.name) }}</h3>
+                  <el-input
+                    v-else
+                    ref="nameInputRef"
+                    v-model="editValue"
+                    size="small"
+                    style="width: 300px;"
+                    @blur="saveMetaField('name')"
+                    @keydown.enter="saveMetaField('name')"
+                  />
+                </div>
+                <div class="dh-actions">
+                  <el-button
+                    v-if="!isEditing"
+                    size="small"
+                    @click="startEditing"
+                  >
+                    {{ t('common.edit') }}
+                  </el-button>
+                  <template v-else>
+                    <el-button
+                      size="small"
+                      @click="cancelEditing"
+                    >
+                      {{ t('common.cancel') }}
+                    </el-button>
+                    <el-button
+                      size="small"
+                      type="primary"
+                      @click="handleSave"
+                    >
+                      {{ t('common.save') }}
+                    </el-button>
+                  </template>
+                </div>
               </div>
               <div class="detail-meta">
                 <span class="meta-role">{{ localeMetaValue(selectedAgent.meta, 'role', selectedAgent.role) }}</span>
@@ -542,140 +618,209 @@ function switchActiveAgent(name: string) {
               />
             </div>
 
-            <!-- Tab: 技能 / 基本能力 -->
-            <div class="detail-tabs">
-              <div
-                class="dt-tab"
-                :class="{ active: editorTab === 'skills' }"
-                @click="editorTab = 'skills'"
-              >
-                <el-icon><CollectionTag /></el-icon>
-                {{ t('agentEditor.tabSkills') }} ({{ localSkills.length }}/{{ allSkills.length }})
+            <!-- ── 只读模式：已选技能与工具摘要 ── -->
+            <div v-if="!isEditing" class="readonly-summary">
+              <!-- 已选技能 -->
+              <div class="summary-section">
+                <div class="summary-section-title">
+                  <el-icon><CollectionTag /></el-icon>
+                  {{ t('agentEditor.tabSkills') }} ({{ assignedSkills.length }})
+                </div>
+                <div class="summary-list">
+                  <div
+                    v-for="sk in assignedSkills"
+                    :key="sk.name"
+                    class="summary-item"
+                  >
+                    <div class="si-title">{{ localeMetaValue(sk.metadata, 'name', sk.name) }}</div>
+                    <div class="si-desc">{{ localeMetaValue(sk.metadata, 'description', sk.description || '') }}</div>
+                    <div class="sk-meta">
+                      <span v-if="sk.metadata?.author" class="sk-tag">{{ sk.metadata?.author }}</span>
+                      <span v-if="sk.metadata?.version" class="sk-tag sk-version">v{{ sk.metadata?.version }}</span>
+                      <span
+                        v-if="sk.license"
+                        class="sk-tag sk-license"
+                        @click.stop="openLicense(sk.name, sk.license)"
+                      >{{ t('agentEditor.licenseLink') }}</span>
+                    </div>
+                  </div>
+                  <div v-if="assignedSkills.length === 0" class="summary-empty">{{ t('agentEditor.noSkills') }}</div>
+                </div>
               </div>
-              <div
-                class="dt-tab"
-                :class="{ active: editorTab === 'tools' }"
-                @click="editorTab = 'tools'"
-              >
-                <el-icon><Tools /></el-icon>
-                {{ t('agentEditor.tabTools') }} ({{ localEnabledTools.size }}/{{ TOOLS.length }})
+
+              <!-- 已启用的工具 -->
+              <div class="summary-section">
+                <div class="summary-section-title">
+                  <el-icon><Tools /></el-icon>
+                  {{ t('agentEditor.tabTools') }} ({{ localEnabledTools.size }}/{{ TOOLS.length }})
+                </div>
+                <div class="summary-list">
+                  <!-- 工具组 -->
+                  <div
+                    v-for="g in readonlyToolGroups"
+                    :key="g.key"
+                    class="summary-item summary-item-group"
+                  >
+                    <div class="si-title">{{ g.label }} <span class="si-badge">{{ g.memberCount }} tools</span></div>
+                    <div class="si-desc">{{ g.desc }}</div>
+                  </div>
+                  <!-- 独立工具 -->
+                  <div
+                    v-for="tool in enabledStandaloneTools"
+                    :key="tool.name"
+                    class="summary-item"
+                  >
+                    <div class="si-title">{{ t(`agentEditor.tools.${tool.name}`) }}</div>
+                    <div class="si-desc">{{ t(`agentEditor.toolDescs.${tool.name}`) }}</div>
+                  </div>
+                  <div v-if="localEnabledTools.size === 0" class="summary-empty">{{ t('agentEditor.noTools') }}</div>
+                </div>
               </div>
             </div>
 
-            <!-- 技能列表 -->
-            <div v-show="editorTab === 'skills'" class="tab-panel">
-              <div v-loading="skillsLoading" class="tab-panel-inner">
+            <!-- ── 编辑模式：多选 Tab ── -->
+            <template v-if="isEditing">
+              <!-- Tab: 技能 / 基本能力 -->
+              <div class="detail-tabs">
+                <div
+                  class="dt-tab"
+                  :class="{ active: editorTab === 'skills' }"
+                  @click="editorTab = 'skills'"
+                >
+                  <el-icon><CollectionTag /></el-icon>
+                  {{ t('agentEditor.tabSkills') }} ({{ localSkills.length }}/{{ allSkills.length }})
+                </div>
+                <div
+                  class="dt-tab"
+                  :class="{ active: editorTab === 'tools' }"
+                  @click="editorTab = 'tools'"
+                >
+                  <el-icon><Tools /></el-icon>
+                  {{ t('agentEditor.tabTools') }} ({{ localEnabledTools.size }}/{{ TOOLS.length }})
+                </div>
+              </div>
+
+              <!-- 技能列表 -->
+              <div v-show="editorTab === 'skills'" class="tab-panel">
+                <div v-loading="skillsLoading" class="tab-panel-inner">
+                  <div class="tab-actions">
+                    <el-checkbox
+                      :model-value="allSkillsAssigned()"
+                      :indeterminate="someSkillsAssigned()"
+                      @change="toggleAllSkills"
+                      :disabled="allSkills.length === 0"
+                    >
+                      {{ t('agentEditor.selectAll') }}
+                    </el-checkbox>
+                    <div class="tab-actions-right">
+                        <span class="tab-summary">{{ t('agentEditor.skillsAssigned', { n: localSkills.length, total: allSkills.length }) }}</span>
+                        <el-popover
+                          placement="bottom-end"
+                          :width="320"
+                          trigger="click"
+                          :show-arrow="false"
+                          popper-class="skill-tip-popper"
+                        >
+                          <template #reference>
+                            <span class="tip-link">{{ t('agentEditor.skillTip') }}</span>
+                          </template>
+                          <div class="tip-popover-body">
+                            <p>{{ t('agentEditor.skillTipContent') }}</p>
+                            <el-button size="small" @click="selectDifficulty">
+                              <el-icon :size="14"><Warning /></el-icon>
+                              {{ t('agentEditor.skillTipAction') }}
+                            </el-button>
+                          </div>
+                        </el-popover>
+                        <span class="sep">|</span>
+                        <span class="tip-link" @click="skillShortage">{{ t('agentEditor.skillShortage') }}</span>
+                      </div>
+                  </div>
+                  <div class="checkbox-list">
+                    <div
+                      v-for="sk in skillsList"
+                      :key="sk.name"
+                      class="checkbox-item"
+                    >
+                      <el-checkbox
+                        :model-value="sk.assigned"
+                        @change="toggleSkill(sk.origName, $event)"
+                      >
+                        <div class="skill-content">
+                          <span class="sk-label">
+                            {{ sk.name }}
+                            <span v-if="sk.author || sk.license" class="sk-third-badge">{{ t('agentEditor.thirdParty') }}</span>
+                          </span>
+                          <span class="sk-desc">{{ sk.desc }}</span>
+                          <div class="sk-meta">
+                            <span v-if="sk.author" class="sk-tag">{{ sk.author }}</span>
+                            <span v-if="sk.version" class="sk-tag sk-version">v{{ sk.version }}</span>
+                            <span
+                              v-if="sk.license"
+                              class="sk-tag sk-license"
+                              @click.stop="openLicense(sk.name, sk.license)"
+                            >{{ t('agentEditor.licenseLink') }}</span>
+                          </div>
+                        </div>
+                      </el-checkbox>
+                    </div>
+                    <div v-if="allSkills.length === 0 && !skillsLoading" class="empty-hint">
+                      {{ t('agentEditor.noSkills') }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 基本能力列表 -->
+              <div v-show="editorTab === 'tools'" class="tab-panel">
                 <div class="tab-actions">
                   <el-checkbox
-                    :model-value="allSkillsAssigned()"
-                    :indeterminate="someSkillsAssigned()"
-                    @change="toggleAllSkills"
-                    :disabled="allSkills.length === 0"
+                    :model-value="allToolsEnabled()"
+                    :indeterminate="someToolsEnabled()"
+                    @change="toggleAllTools"
                   >
                     {{ t('agentEditor.selectAll') }}
                   </el-checkbox>
-                  <div class="tab-actions-right">
-                      <span class="tab-summary">{{ t('agentEditor.skillsAssigned', { n: localSkills.length, total: allSkills.length }) }}</span>
-                      <el-popover
-                        placement="bottom-end"
-                        :width="320"
-                        trigger="click"
-                        :show-arrow="false"
-                        popper-class="skill-tip-popper"
-                      >
-                        <template #reference>
-                          <span class="tip-link">{{ t('agentEditor.skillTip') }}</span>
-                        </template>
-                        <div class="tip-popover-body">
-                          <p>{{ t('agentEditor.skillTipContent') }}</p>
-                          <el-button size="small" @click="selectDifficulty">
-                            <el-icon :size="14"><Warning /></el-icon>
-                            {{ t('agentEditor.skillTipAction') }}
-                          </el-button>
-                        </div>
-                      </el-popover>
-                      <span class="sep">|</span>
-                      <span class="tip-link" @click="skillShortage">{{ t('agentEditor.skillShortage') }}</span>
-                    </div>
+                  <span class="tab-summary">{{ t('agentEditor.toolsEnabled', { n: localEnabledTools.size, total: TOOLS.length }) }}</span>
                 </div>
                 <div class="checkbox-list">
                   <div
-                    v-for="sk in skillsList"
-                    :key="sk.name"
+                    v-for="item in toolsList"
+                    :key="item.key"
                     class="checkbox-item"
                   >
                     <el-checkbox
-                      :model-value="sk.assigned"
-                      @change="toggleSkill(sk.origName, $event)"
+                      :model-value="item.enabled"
+                      :indeterminate="item.type === 'group' ? item.indeterminate : undefined"
+                      @change="item.type === 'group' ? toggleGroup(item.members || [], $event) : toggleTool(item.name, $event)"
                     >
-                      <div class="skill-content">
-                        <span class="sk-label">
-                          {{ sk.name }}
-                          <span v-if="sk.author || sk.license" class="sk-third-badge">{{ t('agentEditor.thirdParty') }}</span>
-                        </span>
-                        <span class="sk-desc">{{ sk.desc }}</span>
-                        <div class="sk-meta">
-                          <span v-if="sk.author" class="sk-tag">{{ sk.author }}</span>
-                          <span v-if="sk.version" class="sk-tag sk-version">v{{ sk.version }}</span>
-                          <span
-                            v-if="sk.license"
-                            class="sk-tag sk-license"
-                            @click.stop="openLicense(sk.name, sk.license)"
-                          >{{ t('agentEditor.licenseLink') }}</span>
-                        </div>
+                      <div class="ci-content">
+                        <span class="ci-label">{{ item.label }}</span>
+                        <span class="ci-id">{{ item.type === 'group' ? (item.key === 'task' ? 'Tasks' : 'Teams') : item.name }}</span>
+                        <span class="ci-desc">{{ item.desc }}</span>
                       </div>
                     </el-checkbox>
                   </div>
-                  <div v-if="allSkills.length === 0 && !skillsLoading" class="empty-hint">
-                    {{ t('agentEditor.noSkills') }}
-                  </div>
                 </div>
               </div>
-            </div>
 
-            <!-- 基本能力列表 -->
-            <div v-show="editorTab === 'tools'" class="tab-panel">
-              <div class="tab-actions">
-                <el-checkbox
-                  :model-value="allToolsEnabled()"
-                  :indeterminate="someToolsEnabled()"
-                  @change="toggleAllTools"
-                >
-                  {{ t('agentEditor.selectAll') }}
-                </el-checkbox>
-                <span class="tab-summary">{{ t('agentEditor.toolsEnabled', { n: localEnabledTools.size, total: TOOLS.length }) }}</span>
+              <!-- 底部提示 -->
+              <div class="detail-footer">
+                <span>{{ t('agentEditor.dblClickHint') }}</span>
               </div>
-              <div class="checkbox-list">
-                <div
-                  v-for="item in toolsList"
-                  :key="item.key"
-                  class="checkbox-item"
-                >
-                  <el-checkbox
-                    :model-value="item.enabled"
-                    :indeterminate="item.type === 'group' ? item.indeterminate : undefined"
-                    @change="item.type === 'group' ? toggleGroup(item.members || [], $event) : toggleTool(item.name, $event)"
-                  >
-                    <div class="ci-content">
-                      <span class="ci-label">{{ item.label }}</span>
-                      <span class="ci-id">{{ item.type === 'group' ? (item.key === 'task' ? 'Tasks' : 'Teams') : item.name }}</span>
-                      <span class="ci-desc">{{ item.desc }}</span>
-                    </div>
-                  </el-checkbox>
-                </div>
-              </div>
-            </div>
-
-            <!-- 底部提示 -->
-            <div class="detail-footer">
-              <span>{{ t('agentEditor.dblClickHint') }}</span>
-            </div>
+            </template>
           </div>
 
           <!-- 未选择 -->
           <div class="right-panel" v-else>
             <div class="no-selection">
-              <el-icon :size="40" color="#64748b"><Monitor /></el-icon>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="no-selection-icon">
+                <path d="M9 15C8.44771 15 8 15.4477 8 16C8 16.5523 8.44771 17 9 17C9.55229 17 10 16.5523 10 16C10 15.4477 9.55229 15 9 15Z"/>
+                <path d="M14 16C14 15.4477 14.4477 15 15 15C15.5523 15 16 15.4477 16 16C16 16.5523 15.5523 17 15 17C14.4477 17 14 16.5523 14 16Z"/>
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M12 1C10.8954 1 10 1.89543 10 3C10 3.74028 10.4022 4.38663 11 4.73244V7H6C4.34315 7 3 8.34315 3 10V20C3 21.6569 4.34315 23 6 23H18C19.6569 23 21 21.6569 21 20V10C21 8.34315 19.6569 7 18 7H13V4.73244C13.5978 4.38663 14 3.74028 14 3C14 1.89543 13.1046 1 12 1ZM5 10C5 9.44772 5.44772 9 6 9H7.38197L8.82918 11.8944C9.16796 12.572 9.86049 13 10.618 13H13.382C14.1395 13 14.832 12.572 15.1708 11.8944L16.618 9H18C18.5523 9 19 9.44772 19 10V20C19 20.5523 18.5523 21 18 21H6C5.44772 21 5 20.5523 5 20V10ZM13.382 11L14.382 9H9.61803L10.618 11H13.382Z"/>
+                <path d="M1 14C0.447715 14 0 14.4477 0 15V17C0 17.5523 0.447715 18 1 18C1.55228 18 2 17.5523 2 17V15C2 14.4477 1.55228 14 1 14Z"/>
+                <path d="M22 15C22 14.4477 22.4477 14 23 14C23.5523 14 24 14.4477 24 15V17C24 17.5523 23.5523 18 23 18C22.4477 18 22 17.5523 22 17V15Z"/>
+              </svg>
               <p>{{ t('agentEditor.noSelection') }}</p>
             </div>
           </div>
@@ -869,6 +1014,76 @@ function switchActiveAgent(name: string) {
   color: #22d3ee;
 }
 
+/* ── 只读摘要 ── */
+.readonly-summary {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.summary-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.summary-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.summary-item {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(55, 65, 81, 0.25);
+}
+.summary-item-group {
+  border-color: rgba(6, 182, 212, 0.2);
+  background: rgba(6, 182, 212, 0.04);
+}
+.si-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.si-badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: #06b6d4;
+  background: rgba(6, 182, 212, 0.1);
+  padding: 0 6px;
+  border-radius: 4px;
+  line-height: 1.6;
+}
+.si-desc {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+  line-height: 1.5;
+}
+.summary-empty {
+  font-size: 12px;
+  color: #64748b;
+  font-style: italic;
+  padding: 6px 10px;
+}
+
 /* ── 右侧面板 ── */
 .right-panel {
   flex: 1;
@@ -886,6 +1101,19 @@ function switchActiveAgent(name: string) {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 4px;
+}
+.dh-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.dh-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 .dh-top h3 {
   font-size: 18px;
@@ -1157,6 +1385,9 @@ function switchActiveAgent(name: string) {
   height: 100%;
   gap: 12px;
 }
+.no-selection-icon {
+  color: #64748b;
+}
 .no-selection p {
   color: #64748b;
   font-size: 13px;
@@ -1210,6 +1441,7 @@ function switchActiveAgent(name: string) {
   --el-button-hover-border-color: #0891b2;
   --el-button-text-color: #fff;
   --el-button-hover-text-color: #fff;
+  color: #fff;
 }
 
 /* Checkbox styling to match theme */

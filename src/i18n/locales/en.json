@@ -81,13 +81,15 @@
     "about": {
       "title": "About MindX",
       "copyright": "© 2024 Raya Information Technology Co., Ltd.",
-      "releaseNotes": "Release Notes",
+      "releaseNotes": "What's New",
       "loadingRelease": "Loading...",
       "noReleaseNotes": "No release notes available.",
       "publishedAt": "Published: {date}",
       "checkUpdate": "Check for Updates",
       "close": "Close",
-      "latestVersion": "Already the latest version"
+      "latestVersion": "Already the latest version",
+      "updateAvailable": "Update Available",
+      "applyUpdate": "Download & Install"
     },
     "update": {
       "title": "Update Installed",
@@ -761,6 +763,7 @@
     "saveSuccess": "Agent saved successfully",
     "saveFailed": "Failed to save agent",
     "noSkills": "No skills available",
+    "noTools": "No tools enabled",
     "tools": {
       "Grep": "Grep",
       "Glob": "Glob",
@@ -807,8 +810,8 @@
       "TeamGetTasks": "Get all tasks assigned to a team"
     },
     "groupNames": {
-      "task": "Task Tools",
-      "team": "Team Tools"
+      "task": "Task Decomposition",
+      "team": "Team Collaboration"
     },
     "groupDescs": {
       "task": "Break down complex tasks into actionable work items and track them individually",
