@@ -139,6 +139,7 @@ export const useConnectionStore = defineStore('connection', {
       if (newState === 'connected') {
         this.reconnectAttempts = 0
         this.lastError = null
+        this.updateState = ''
       }
     },
 

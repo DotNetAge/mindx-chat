@@ -64,6 +64,17 @@
     "defaultUserName": "MindX 使用者",
     "noAgents": "連線後可查看 Agents",
     "connectDaemon": "連線 MindX Daemon",
+    "settingsLanguageDesc": "選擇介面顯示語言",
+    "settingsEntityTagsDesc": "配置知識圖譜實體標籤類型",
+    "settingsRulesDesc": "設定 AI 對話行為規則",
+    "settingsSelectBtn": "選擇",
+    "settingsManageBtn": "管理",
+    "settingsRestartTitle": "重啟服務",
+    "settingsRestartDesc": "重啟 MindX 後端守護行程",
+    "settingsRestartBtn": "重啟",
+    "settingsRestartConfirm": "確定要重啟 MindX 服務嗎？重啟期間 WebUI 將斷開連線。",
+    "settingsRestartSuccess": "重啟命令已發送，服務即將重啟",
+    "settingsRestartFailed": "重啟失敗",
     "timeAgo": {
       "justNow": "剛剛",
       "minutesAgo": "{n}分鐘前",
@@ -88,7 +99,8 @@
       "close": "關閉",
       "latestVersion": "已是最新版本",
       "updateAvailable": "發現新版本",
-      "applyUpdate": "下載並安裝"
+      "applyUpdate": "下載並安裝",
+      "updateSuccess": "更新安裝成功，正在重啟服務..."
     },
     "update": {
       "title": "更新完成",
@@ -96,6 +108,20 @@
       "viewDetails": "檢視詳情",
       "downloading": "正在自動更新...",
       "restartNeeded": "等待重啟完成更新"
+    },
+    "autoIndex": {
+      "enabled": "自動索引",
+      "disabled": "索引已暫停",
+      "notAvailable": "索引不可用",
+      "running": "自動索引運行中",
+      "stopped": "自動索引已暫停",
+      "startFailed": "無法啟動自動索引",
+      "startFailedDesc": "自動索引需要滿足以下條件：",
+      "startFailedUnknown": "自動索引啟動失敗，請檢查 Daemon 日誌。",
+      "started": "自動索引已啟動",
+      "stopFailed": "自動索引停止失敗，請重試。",
+      "requirementWatchedDirs": "有待監控的會話工作目錄",
+      "requirementEntityTags": "已設定知識標籤（實體標籤）"
     },
     "indexing": {
       "inProgress": "正在索引: {file}",
@@ -594,7 +620,13 @@
     "newCount": "新增",
     "changedCount": "变更",
     "relatedPaths": "关联图谱路径",
-    "hops": "跳"
+    "hops": "跳",
+    "watchedDirs": "監控目錄",
+    "noWatchedDirs": "暫無監控目錄",
+    "removeWatchTitle": "移除監控目錄",
+    "removeWatchConfirm": "確定要移除監控目錄 {dir} 嗎？移除後該目錄將不再被自動索引。",
+    "removeWatchSuccess": "監控目錄已移除",
+    "removeWatchFailed": "移除監控目錄失敗"
   },
   "entityTags": {
     "button": "知识标签",

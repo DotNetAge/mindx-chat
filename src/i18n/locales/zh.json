@@ -65,6 +65,17 @@
     "defaultUserName": "MindX 用户",
     "noAgents": "连接后可查看 Agents",
     "connectDaemon": "连接 MindX Daemon",
+    "settingsLanguageDesc": "选择界面显示语言",
+    "settingsEntityTagsDesc": "配置知识图谱实体标签类型",
+    "settingsRulesDesc": "设置 AI 对话行为规则",
+    "settingsSelectBtn": "选择",
+    "settingsManageBtn": "管理",
+    "settingsRestartTitle": "重启服务",
+    "settingsRestartDesc": "重启 MindX 后端守护进程",
+    "settingsRestartBtn": "重启",
+    "settingsRestartConfirm": "确定要重启 MindX 服务吗？重启期间 WebUI 将断开连接。",
+    "settingsRestartSuccess": "重启命令已发送，服务即将重启",
+    "settingsRestartFailed": "重启失败",
     "timeAgo": {
       "justNow": "刚刚",
       "minutesAgo": "{n}分钟前",
@@ -89,7 +100,8 @@
       "close": "关闭",
       "latestVersion": "已是最新版本",
       "updateAvailable": "发现新版本",
-      "applyUpdate": "下载并安装"
+      "applyUpdate": "下载并安装",
+      "updateSuccess": "更新安装成功，正在重启服务..."
     },
     "update": {
       "title": "更新完成",
@@ -98,9 +110,23 @@
       "downloading": "正在自动更新...",
       "restartNeeded": "等待重启完成更新"
     },
+    "autoIndex": {
+      "enabled": "自动索引",
+      "disabled": "索引已暂停",
+      "notAvailable": "索引不可用",
+      "running": "自动索引运行中",
+      "stopped": "自动索引已暂停",
+      "startFailed": "无法启动自动索引",
+      "startFailedDesc": "自动索引需要满足以下条件：",
+      "startFailedUnknown": "自动索引启动失败，请检查 Daemon 日志。",
+      "started": "自动索引已启动",
+      "stopFailed": "自动索引停止失败，请重试。",
+      "requirementWatchedDirs": "有待监控的会话工作目录",
+      "requirementEntityTags": "已配置知识标签（实体标签）"
+    },
     "indexing": {
       "inProgress": "正在索引: {file}",
-      "completed": "增加至知识图谱: {file}"
+      "completed": "已增至知识图谱: {file}"
     }
   },
   "chat": {
@@ -550,7 +576,13 @@
     "newCount": "新增",
     "changedCount": "变更",
     "relatedPaths": "关联图谱路径",
-    "hops": "跳"
+    "hops": "跳",
+    "watchedDirs": "监控目录",
+    "noWatchedDirs": "暂无监控目录",
+    "removeWatchTitle": "移除监控目录",
+    "removeWatchConfirm": "确定要移除监控目录 {dir} 吗？移除后该目录将不再被自动索引。",
+    "removeWatchSuccess": "监控目录已移除",
+    "removeWatchFailed": "移除监控目录失败"
   },
   "ruleEditor": {
     "title": "规则编辑器",

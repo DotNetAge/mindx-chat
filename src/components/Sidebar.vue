@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { Search, UserFilled, Monitor, ChatDotRound, FolderOpened, Folder, CollectionTag, Setting, Link, SwitchButton, Plus, Close, Document, FolderAdd } from '@element-plus/icons-vue'
+import { Search, UserFilled, Monitor, ChatDotRound, FolderOpened, Folder, CollectionTag, Setting, Link, SwitchButton, Plus, Close, Document, FolderAdd, Refresh } from '@element-plus/icons-vue'
 import { useSessionStore } from '../stores/sessionStore'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useChatStore } from '../stores/chatStore'
@@ -14,12 +14,14 @@ import EntityTagsDialog from './EntityTagsDialog.vue'
 import AgentSelectorDialog from './AgentSelectorDialog.vue'
 import FileExplorer from './FileExplorer.vue'
 import { useFileExplorerStore } from '../stores/fileExplorerStore'
+import { useGraphStore } from '../stores/graphStore'
 import { useI18n } from 'vue-i18n'
 import { useMarkdown } from '../composables/useMarkdown'
 
 const { t, locale } = useI18n()
 const currentLocale = ref(locale.value)
 const fileExplorerStore = useFileExplorerStore()
+const graphStore = useGraphStore()
 
 const langOptions = [
   { value: 'zh', label: '简体中文' },
@@ -64,6 +66,7 @@ const setupSelectedPath = ref('')
 const showTokenReport = ref(false)
 const showRuleEditor = ref(false)
 const showEntityTags = ref(false)
+const restarting = ref(false)
 const showAgentSelector = ref(false)
 const showAbout = ref(false)
 const showDirBrowser = ref(false)
@@ -134,7 +137,12 @@ async function applyUpdate() {
     const client = getMindXClient()
     if (client) {
       await client.call('server.apply_update', {})
-      // update_started / update_installed 事件由 connectionStore 处理
+      // 安装成功：关闭对话框、清除更新信息、显示通知
+      showAbout.value = false
+      updateInfo.value = null
+      updateRelease.value = null
+      isLatestVersion.value = false
+      ElMessage.success(t('sidebar.about.updateSuccess'))
     }
   } catch (e) {
     console.warn('[MindX] Failed to apply update:', e)
@@ -348,6 +356,31 @@ function handleDisconnect() {
   connectionStore.disconnect()
 }
 
+async function handleRestartService() {
+  try {
+    await ElMessageBox.confirm(
+      t('sidebar.settingsRestartConfirm'),
+      t('sidebar.settingsRestartTitle'),
+      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
+    )
+  } catch {
+    return // user cancelled
+  }
+
+  restarting.value = true
+  try {
+    const client = getMindXClient()
+    if (client) {
+      await client.call('server.restart_daemon', {})
+      ElMessage.success(t('sidebar.settingsRestartSuccess'))
+    }
+  } catch (e: any) {
+    ElMessage.error(t('sidebar.settingsRestartFailed') + (e.message ? `: ${e.message}` : ''))
+  } finally {
+    restarting.value = false
+  }
+}
+
 function handleNewSession() {
   if (connectionStore.isConnected && connectionStore.currentAgent) {
     setupSelectedPath.value = ''
@@ -404,6 +437,8 @@ async function handleDeleteSession(sessionId: string, event: Event) {
     try {
       if (!connectionStore.isOfflineMode) {
         await connectionStore.deleteSession(sessionId)
+        // Refresh filewatch status to reflect removed watch dir
+        graphStore.refreshFilewatchStatus()
       }
     } catch (serverErr) {
       console.warn('[MindX] 服务端删除失败，继续从本地移除:', serverErr)
@@ -530,42 +565,15 @@ watch(showTokenReport, (val) => {
         <div class="settings-panel">
           <h4>⚙️ {{ t('sidebar.settings') }}</h4>
 
-          <!-- Connection Settings -->
-          <div class="setting-section">
-            <h5>{{ t('sidebar.connectionConfig') }}</h5>
-            <div class="setting-item">
-              <label>{{ t('sidebar.connectionConfig') }}</label>
-              <el-input
-                v-model="serverUrl"
-                size="small"
-                placeholder="ws://localhost:1314/ws"
-              />
+          <!-- Language -->
+          <div class="setting-row setting-row-lang">
+            <div class="setting-row-info">
+              <el-icon class="setting-row-icon"><ChatDotRound /></el-icon>
+              <div class="setting-row-text">
+                <div class="setting-row-title">{{ t('sidebar.language') }}</div>
+                <div class="setting-row-desc">{{ t('sidebar.settingsLanguageDesc') }}</div>
+              </div>
             </div>
-
-            <div class="setting-actions">
-              <el-button
-                v-if="!connectionStore.isConnected"
-                type="primary"
-                size="small"
-                @click="handleConnect"
-                :loading="connectionStore.state === 'connecting'"
-              >
-                {{ connectionStore.state === 'connecting' ? t('sidebar.status.connecting') : t('sidebar.connect') }}
-              </el-button>
-
-              <el-button
-                v-else
-                size="small"
-                @click="handleDisconnect"
-              >
-                {{ t('sidebar.disconnect') }}
-              </el-button>
-            </div>
-          </div>
-
-          <!-- Language Switcher -->
-          <div class="setting-section">
-            <h5>{{ t('sidebar.language') }}</h5>
             <div class="lang-switcher">
               <button
                 v-for="opt in langOptions"
@@ -578,28 +586,57 @@ watch(showTokenReport, (val) => {
           </div>
 
           <!-- Entity Tags -->
-          <div class="setting-section">
+          <div class="setting-row">
+            <div class="setting-row-info">
+              <el-icon class="setting-row-icon"><CollectionTag /></el-icon>
+              <div class="setting-row-text">
+                <div class="setting-row-title">{{ t('entityTags.button') }}</div>
+                <div class="setting-row-desc">{{ t('sidebar.settingsEntityTagsDesc') }}</div>
+              </div>
+            </div>
             <el-button
               size="small"
-              style="width: 100%"
               @click="showEntityTags = true"
               :disabled="!connectionStore.isConnected"
             >
-              <el-icon><CollectionTag /></el-icon>
-              {{ t('entityTags.button') }}
+              {{ t('sidebar.settingsSelectBtn') }}
             </el-button>
           </div>
 
-          <!-- Rules Editor -->
-          <div class="setting-section" style="border-bottom: none; margin-bottom: 0;">
+          <!-- Rules -->
+          <div class="setting-row">
+            <div class="setting-row-info">
+              <el-icon class="setting-row-icon"><Document /></el-icon>
+              <div class="setting-row-text">
+                <div class="setting-row-title">{{ t('sidebar.rules') }}</div>
+                <div class="setting-row-desc">{{ t('sidebar.settingsRulesDesc') }}</div>
+              </div>
+            </div>
             <el-button
               size="small"
-              style="width: 100%"
               @click="showRuleEditor = true"
               :disabled="!connectionStore.isConnected"
             >
-              <el-icon><Document /></el-icon>
-              {{ t('sidebar.rules') }}
+              {{ t('sidebar.settingsManageBtn') }}
+            </el-button>
+          </div>
+
+          <!-- Restart Service -->
+          <div class="setting-row">
+            <div class="setting-row-info">
+              <el-icon class="setting-row-icon"><Refresh /></el-icon>
+              <div class="setting-row-text">
+                <div class="setting-row-title">{{ t('sidebar.settingsRestartTitle') }}</div>
+                <div class="setting-row-desc">{{ t('sidebar.settingsRestartDesc') }}</div>
+              </div>
+            </div>
+            <el-button
+              size="small"
+              type="danger"
+              @click="handleRestartService"
+              :loading="restarting"
+            >
+              {{ t('sidebar.settingsRestartBtn') }}
             </el-button>
           </div>
         </div>
@@ -1446,6 +1483,7 @@ watch(showTokenReport, (val) => {
 .footer-links {
   display: flex;
   gap: 12px;
+  justify-content: center;
 }
 
 .footer-link {
@@ -1604,47 +1642,66 @@ watch(showTokenReport, (val) => {
   color: var(--text-primary);
 }
 
-.setting-section {
-  margin-bottom: 20px;
-  padding-bottom: 16px;
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border-color);
 }
 
-.setting-section:last-child {
+.setting-row:last-child {
   border-bottom: none;
-  margin-bottom: 0;
-  padding-bottom: 0;
 }
 
-.setting-section.danger {
-  border-color: rgba(239, 68, 68, 0.2);
+.setting-row-lang {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
 }
 
-.setting-section h5 {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-muted);
-  margin-bottom: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+.setting-row-lang .lang-switcher {
+  width: 100%;
+  flex-shrink: initial;
 }
 
-.setting-item {
-  margin-bottom: 12px;
-}
-
-.setting-item label {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-}
-
-.setting-actions {
+.setting-row-info {
   display: flex;
-  gap: 8px;
-  margin-top: 12px;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-row-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+  color: var(--accent-cyan);
+  margin-top: 1px;
+}
+
+.setting-row-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-row-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.setting-row-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.setting-row .el-button {
+  flex-shrink: 0;
 }
 
 .cache-stats {
@@ -1678,7 +1735,7 @@ watch(showTokenReport, (val) => {
 .lang-switcher {
   display: flex;
   gap: 0;
-  width: 100%;
+  flex-shrink: 0;
 }
 
 .lang-btn {
@@ -1871,6 +1928,10 @@ watch(showTokenReport, (val) => {
 }
 
 .about-close-btn {
+  color: #fff !important;
+}
+
+.about-dialog :deep(.el-button--primary) {
   color: #fff !important;
 }
 
@@ -2114,6 +2175,13 @@ watch(showTokenReport, (val) => {
 }
 </style>
 
+<!-- 全局样式：穿透 el-dialog Teleport -->
+<style>
+.about-dialog .el-button--primary {
+  color: #fff !important;
+}
+</style>
+
 <style>
 .el-popover:has(.settings-panel) {
   background: #111827 !important;
@@ -2126,15 +2194,15 @@ watch(showTokenReport, (val) => {
   color: #e2e8f0 !important;
 }
 
-.settings-panel .setting-section h5 {
-  color: #94a3b8 !important;
-}
-
-.settings-panel .setting-section {
+.settings-panel .setting-row {
   border-bottom-color: rgba(55, 65, 81, 0.5) !important;
 }
 
-.settings-panel .setting-item label {
+.settings-panel .setting-row:last-child {
+  border-bottom: none !important;
+}
+
+.settings-panel .setting-row-desc {
   color: #94a3b8 !important;
 }
 

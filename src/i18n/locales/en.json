@@ -65,6 +65,17 @@
     "defaultUserName": "MindX User",
     "noAgents": "Connect to see Agents",
     "connectDaemon": "Connect to MindX Daemon",
+    "settingsLanguageDesc": "Choose your display language",
+    "settingsEntityTagsDesc": "Configure entity tag types for the knowledge graph",
+    "settingsRulesDesc": "Set AI conversation behavior rules",
+    "settingsSelectBtn": "Select",
+    "settingsManageBtn": "Manage",
+    "settingsRestartTitle": "Restart Service",
+    "settingsRestartDesc": "Restart the MindX backend daemon",
+    "settingsRestartBtn": "Restart",
+    "settingsRestartConfirm": "Are you sure you want to restart the MindX service? The WebUI will disconnect during restart.",
+    "settingsRestartSuccess": "Restart command sent, service is restarting",
+    "settingsRestartFailed": "Restart failed",
     "timeAgo": {
       "justNow": "Just now",
       "minutesAgo": "{n} min ago",
@@ -89,7 +100,8 @@
       "close": "Close",
       "latestVersion": "Already the latest version",
       "updateAvailable": "Update Available",
-      "applyUpdate": "Download & Install"
+      "applyUpdate": "Download & Install",
+      "updateSuccess": "Update installed, restarting daemon..."
     },
     "update": {
       "title": "Update Installed",
@@ -97,6 +109,20 @@
       "viewDetails": "View Details",
       "downloading": "Auto-updating...",
       "restartNeeded": "Restart to complete update"
+    },
+    "autoIndex": {
+      "enabled": "Auto Index",
+      "disabled": "Index Paused",
+      "notAvailable": "Index Unavailable",
+      "running": "Auto Index Running",
+      "stopped": "Auto Index Paused",
+      "startFailed": "Cannot Start Auto Index",
+      "startFailedDesc": "Auto Index requires the following conditions:",
+      "startFailedUnknown": "Failed to start auto index. Check Daemon logs.",
+      "started": "Auto Index Started",
+      "stopFailed": "Failed to stop auto index. Please retry.",
+      "requirementWatchedDirs": "At least one session with a working directory",
+      "requirementEntityTags": "Knowledge tags (entity tags) configured"
     },
     "indexing": {
       "inProgress": "Indexing: {file}",
@@ -550,7 +576,13 @@
     "newCount": "New",
     "changedCount": "Changed",
     "relatedPaths": "Related Graph Paths",
-    "hops": "hops"
+    "hops": "hops",
+    "watchedDirs": "Monitored Directories",
+    "noWatchedDirs": "No monitored directories",
+    "removeWatchTitle": "Remove Monitored Directory",
+    "removeWatchConfirm": "Remove \"{dir}\" from the watchlist? It will no longer be auto-indexed.",
+    "removeWatchSuccess": "Directory removed from watchlist",
+    "removeWatchFailed": "Failed to remove directory"
   },
   "ruleEditor": {
     "title": "Rules Editor",

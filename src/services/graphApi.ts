@@ -283,6 +283,11 @@ export async function filewatchStatus(): Promise<FilewatchStatus> {
   return call('filewatch.status')
 }
 
+/** Remove a directory from the filewatch watchlist */
+export async function filewatchRemove(dir: string): Promise<{ status: string; dir: string }> {
+  return call('filewatch.remove', { dir })
+}
+
 /** Scan project directory for file states (read-only, no indexing) */
 export async function scanFileStates(projectDir: string): Promise<FileStateResult> {
   return call('memory.file_states', { project_dir: projectDir })

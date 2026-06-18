@@ -1,21 +1,135 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, watch, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useChatStore } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useFileExplorerStore } from '../stores/fileExplorerStore'
-import { FolderOpened, Plus } from '@element-plus/icons-vue'
+import { useGraphStore } from '../stores/graphStore'
+import { getMindXClient } from '../services/websocket'
+import { FolderOpened, Plus, Document } from '@element-plus/icons-vue'
+import LogDrawer from './LogDrawer.vue'
 
 const { t } = useI18n()
 const connectionStore = useConnectionStore()
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const fileExplorerStore = useFileExplorerStore()
+const graphStore = useGraphStore()
+
+const logDrawerRef = ref<InstanceType<typeof LogDrawer> | null>(null)
+function openLogDrawer() { logDrawerRef.value?.open() }
 
 const statusColor = computed(() => connectionStore.statusColor)
 const statusLabel = computed(() => connectionStore.statusLabel)
 const version = computed(() => connectionStore.serverVersion ? `v${connectionStore.serverVersion}` : '')
+
+const filewatchAvailable = computed(() => graphStore.filewatchStatus?.available ?? false)
+const filewatchRunning = computed(() => graphStore.filewatchStatus?.running ?? false)
+const autoIndexColor = computed(() => {
+  if (!filewatchAvailable.value) return '#64748b'
+  return filewatchRunning.value ? '#10b981' : '#64748b'
+})
+const autoIndexLabel = computed(() => {
+  if (!filewatchAvailable.value) return t('sidebar.autoIndex.notAvailable')
+  return filewatchRunning.value ? t('sidebar.autoIndex.enabled') : t('sidebar.autoIndex.disabled')
+})
+const autoIndexTitle = computed(() => {
+  if (!filewatchAvailable.value) return t('sidebar.autoIndex.notAvailable')
+  return filewatchRunning.value ? t('sidebar.autoIndex.running') : t('sidebar.autoIndex.stopped')
+})
+
+const toggling = ref(false)
+
+async function handleToggleAutoIndex() {
+  if (!filewatchAvailable.value || toggling.value) return
+
+  toggling.value = true
+  try {
+    if (filewatchRunning.value) {
+      await graphStore.stopFilewatch()
+      // Refresh status to confirm
+      await graphStore.refreshFilewatchStatus()
+      if (!graphStore.filewatchStatus?.running) {
+        ElMessage.success(t('sidebar.autoIndex.stopped'))
+      } else {
+        ElMessage.warning(t('sidebar.autoIndex.stopFailed'))
+      }
+      return
+    }
+
+    // ── Prerequisites for starting auto-index ──
+    await graphStore.refreshFilewatchStatus()
+
+    const watched = graphStore.filewatchStatus?.watched || []
+    const hasWatchedDirs = watched.length > 0
+
+    const client = getMindXClient()
+    let hasTags = false
+    if (client) {
+      try {
+        const res = await client.call<{ types: any[] }>('entity_tags.get', {})
+        hasTags = (res?.types?.length ?? 0) > 0
+      } catch {
+        // RPC failed — treat as no tags
+      }
+    }
+
+    // Build requirements status
+    const requirements = [
+      { label: t('sidebar.autoIndex.requirementWatchedDirs'), ok: hasWatchedDirs },
+      { label: t('sidebar.autoIndex.requirementEntityTags'), ok: hasTags },
+    ]
+    const allMet = requirements.every(r => r.ok)
+
+    if (!allMet) {
+      const msg = t('sidebar.autoIndex.startFailedDesc') + '<br><br>' +
+        requirements.map(r =>
+          `<span style="color:${r.ok ? '#10b981' : '#ef4444'}">${r.ok ? '✓' : '✗'}</span> ${r.label}`
+        ).join('<br>')
+      await ElMessageBox.alert(msg, t('sidebar.autoIndex.startFailed'), {
+        confirmButtonText: t('common.confirm'),
+        type: 'warning',
+        dangerouslyUseHTMLString: true
+      })
+      return
+    }
+
+    // All checks passed — start auto-indexing
+    await graphStore.startFilewatch()
+    // Refresh status to confirm
+    await graphStore.refreshFilewatchStatus()
+    if (graphStore.filewatchStatus?.running) {
+      ElMessage.success(t('sidebar.autoIndex.started'))
+    } else {
+      ElMessage.warning(t('sidebar.autoIndex.startFailedUnknown'))
+    }
+  } finally {
+    toggling.value = false
+  }
+}
+
+onMounted(() => {
+  if (connectionStore.isConnected) {
+    graphStore.refreshFilewatchStatus()
+  }
+})
+
+watch(() => connectionStore.isConnected, async (connected) => {
+  if (connected) {
+    await graphStore.refreshFilewatchStatus()
+  } else {
+    graphStore.$patch({ filewatchStatus: null })
+  }
+})
+
+// GraphViewer 关闭时会清空 filewatchStatus，需要重新刷新
+watch(() => graphStore.visible, (visible) => {
+  if (!visible && connectionStore.isConnected) {
+    graphStore.refreshFilewatchStatus()
+  }
+})
 
 const activeProjectDir = computed(() => {
   const active = sessionStore.sessions.find(s => s.session_id === sessionStore.activeSessionId)
@@ -100,6 +214,18 @@ function handleOpenAbout() {
         </svg>
       </button>
 
+      <!-- Auto Index Status -->
+      <button
+        class="auto-index-indicator"
+        v-if="filewatchAvailable"
+        :title="autoIndexTitle"
+        @click="handleToggleAutoIndex"
+        :disabled="toggling"
+      >
+        <span class="auto-index-dot" :class="{ running: filewatchRunning }"></span>
+        <span class="auto-index-label">{{ autoIndexLabel }}</span>
+      </button>
+
       <!-- Project Directory / Indexing Status -->
       <div class="project-dir-section" v-if="activeProjectDir && !indexingState.active">
         <button
@@ -146,6 +272,13 @@ function handleOpenAbout() {
     </div>
 
     <div class="status-right">
+      <button
+        class="action-btn log-btn"
+        @click="openLogDrawer"
+        :title="t('chat.logTab')"
+      >
+        <el-icon :size="13"><Document /></el-icon>
+      </button>
       <template v-if="connectionStore.updateState">
         <span class="update-indicator" :class="{ downloading: connectionStore.updateState === 'downloading' }">
           <svg class="update-spinner" v-if="connectionStore.updateState === 'downloading'" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -165,6 +298,7 @@ function handleOpenAbout() {
       >{{ version }}</button>
     </div>
   </footer>
+  <LogDrawer ref="logDrawerRef" />
 </template>
 
 <style scoped>
@@ -205,6 +339,54 @@ function handleOpenAbout() {
   flex-shrink: 0;
 }
 
+/* Auto index status */
+.auto-index-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  transition: all 0.15s ease;
+}
+
+.auto-index-indicator:hover {
+  background: rgba(55, 65, 81, 0.3);
+  border-color: rgba(55, 65, 81, 0.5);
+}
+
+.auto-index-indicator:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.auto-index-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted, #64748b);
+  transition: background 0.3s;
+}
+
+.auto-index-dot.running {
+  background: #10b981;
+  box-shadow: 0 0 5px rgba(16, 185, 129, 0.5);
+}
+
+.auto-index-label {
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text-muted, #94a3b8);
+}
+
 .action-btn {
   display: inline-flex;
   align-items: center;
@@ -229,6 +411,11 @@ function handleOpenAbout() {
 .disconnect-btn:hover {
   background: rgba(239, 68, 68, 0.15);
   color: #ef4444;
+}
+
+.log-btn:hover {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
 }
 
 /* Project directory */

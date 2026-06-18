@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import {
   Document, Collection, DataAnalysis, Search,
-  RefreshLeft, Delete,
+  RefreshLeft,
   Link, FolderOpened
 } from '@element-plus/icons-vue'
 import { useGraphStore, CATEGORY_COLORS } from '../stores/graphStore'
+import { filewatchRemove } from '../services/graphApi'
 
 const { t } = useI18n()
 const store = useGraphStore()
@@ -18,6 +20,8 @@ const unindexedCount = computed(() => store.fileStates?.counts
 )
 
 const searchInput = ref('')
+const removingDir = ref('')
+
 const tabs = [
   { key: 'documents' as const, icon: Document, label: t('kgViewer.documents') },
   { key: 'entities' as const, icon: Collection, label: t('kgViewer.entities') },
@@ -37,6 +41,37 @@ function onSearchInput() {
 watch(searchInput, () => {
   if (!searchInput.value) store.clearSearch()
 })
+
+// ── Watch directory management ──
+
+async function handleRemoveWatch(dir: string) {
+  console.log('[GraphSidebar] handleRemoveWatch called:', dir)
+  try {
+    await ElMessageBox.confirm(
+      t('kgViewer.removeWatchConfirm', { dir }),
+      t('kgViewer.removeWatchTitle'),
+      { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning' }
+    )
+    console.log('[GraphSidebar] user confirmed delete')
+  } catch (e) {
+    console.log('[GraphSidebar] user cancelled or dismissed:', e)
+    return // user cancelled
+  }
+
+  removingDir.value = dir
+  try {
+    console.log('[GraphSidebar] calling filewatchRemove RPC...')
+    const result = await filewatchRemove(dir)
+    console.log('[GraphSidebar] RPC success:', result)
+    ElMessage.success(t('kgViewer.removeWatchSuccess'))
+    await store.refreshFilewatchStatus()
+  } catch (e: any) {
+    console.error('[GraphSidebar] RPC failed:', e)
+    ElMessage.error(t('kgViewer.removeWatchFailed') + (e.message ? `: ${e.message}` : ''))
+  } finally {
+    removingDir.value = ''
+  }
+}
 
 // ── Helpers ──
 
@@ -236,14 +271,30 @@ onMounted(() => {
 
         <!-- Watched directories -->
         <div v-if="store.filewatchStatus" class="stat-section">
-          <h4>监控目录</h4>
+          <h4>{{ t('kgViewer.watchedDirs') }}</h4>
           <ul v-if="store.filewatchStatus.watched?.length" class="watch-dir-list">
             <li v-for="dir in store.filewatchStatus.watched" :key="dir" class="watch-dir-item" :title="dir">
               <el-icon :size="13"><FolderOpened /></el-icon>
               <span class="watch-dir-name">{{ getDirName(dir) }}</span>
+              <button
+                class="watch-dir-remove-btn"
+                :class="{ 'is-loading': removingDir === dir }"
+                :disabled="removingDir === dir"
+                @click.stop="handleRemoveWatch(dir)"
+              >
+                <svg v-if="removingDir !== dir" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+                <svg v-else class="remove-spinning" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
+                  <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
+                  <line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>
+                  <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
+                </svg>
+              </button>
             </li>
           </ul>
-          <div v-else class="watch-dir-empty">暂无监控目录</div>
+          <div v-else class="watch-dir-empty">{{ t('kgViewer.noWatchedDirs') }}</div>
         </div>
 
         <div v-if="store.levelDistribution.length" class="stat-section">
@@ -683,9 +734,47 @@ onMounted(() => {
   color: var(--text-primary);
 }
 .watch-dir-name {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+}
+.watch-dir-remove-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s, background .15s, color .15s;
+  background: transparent;
+  color: var(--text-muted);
+}
+.watch-dir-item:hover .watch-dir-remove-btn {
+  opacity: 1;
+}
+.watch-dir-remove-btn:hover:not(:disabled) {
+  color: #ef4444;
+  background: rgba(239,68,68,.12);
+}
+.watch-dir-remove-btn.is-loading,
+.watch-dir-remove-btn:disabled {
+  opacity: 1 !important;
+  color: var(--text-muted) !important;
+  cursor: not-allowed;
+}
+.remove-spinning {
+  animation: remove-spin 1s linear infinite;
+}
+@keyframes remove-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 .watch-dir-empty {
   padding: 6px 8px;
@@ -708,4 +797,12 @@ onMounted(() => {
   cursor: pointer; transition: all .15s;
 }
 .clear-btn:hover { color: #ef4444; border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.06); }
+</style>
+
+<!-- 全局样式：确保确认对话框在 GraphViewer (z:8000) 之上 -->
+<style>
+/* Element Plus MessageBox overlay — must be above GraphViewer's z-index:8000 */
+.el-overlay:has(.el-message-box) {
+  z-index: 9000 !important;
+}
 </style>

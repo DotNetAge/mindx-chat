@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted, watch, computed } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElInput } from 'element-plus'
-import { Setting, Calendar } from '@element-plus/icons-vue'
+import { Setting } from '@element-plus/icons-vue'
 import { useChatStore } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useConnectionStore } from '../stores/connectionStore'
@@ -11,19 +11,47 @@ import ProviderModelPicker from './chat/ProviderModelPicker.vue'
 import ScheduleView from './chat/ScheduleView.vue'
 import ChatEmptyState from './ChatEmptyState.vue'
 import FileReviewBar from './FileReviewBar.vue'
-import LogDrawer from './LogDrawer.vue'
 import GraphViewer from './GraphViewer.vue'
 import StatusBar from './StatusBar.vue'
 import { useGraphStore } from '../stores/graphStore'
 import { useScheduleStore } from '../stores/scheduleStore'
 
-// 日志/图谱组件 ref
-const logDrawerRef = ref<InstanceType<typeof LogDrawer> | null>(null)
+// 图谱组件 ref
 const graphStore = useGraphStore()
 const scheduleStore = useScheduleStore()
 
-function openLogDrawer() { logDrawerRef.value?.open() }
 function openGraphViewer() { graphStore.open() }
+
+// ── Header clock ──
+const now = ref(new Date())
+let timer: ReturnType<typeof setInterval>
+
+function updateClock() {
+  now.value = new Date()
+}
+
+const headerDate = computed(() => {
+  const d = now.value
+  const weekdays = ['日', '一', '二', '三', '四', '五', '六']
+  return `${d.getDate()}日 / 周${weekdays[d.getDay()]}`
+})
+
+const headerTime = computed(() => {
+  const d = now.value
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+})
+
+function openSchedule() {
+  scheduleStore.open()
+}
+
+onMounted(() => {
+  timer = setInterval(updateClock, 1000)
+})
+
+onUnmounted(() => {
+  clearInterval(timer)
+})
 
 const props = defineProps({
   isSidebarCollapsed: {
@@ -377,9 +405,6 @@ function handleDismiss(messageId: string) {
           <el-button text circle class="gear-btn" @click="showProviderPicker = true">
             <el-icon><Setting /></el-icon>
           </el-button>
-          <el-button text circle class="gear-btn" @click="scheduleStore.open()">
-            <el-icon><Calendar /></el-icon>
-          </el-button>
         </div>
         <!-- Unconfigured: guide user to set up provider & API key -->
         <div v-else-if="connectionStore.isConnected" class="provider-info unconfigured-state">
@@ -400,11 +425,13 @@ function handleDismiss(messageId: string) {
       </div>
 
       <div class="header-right">
-        <button class="nav-pill" @click="openLogDrawer" :title="t('chat.logTab')">{{ t('chat.logTab') }}</button>
         <button class="nav-pill kg-btn" @click="openGraphViewer" :title="t('kgViewer.title')">
           {{ t('kgViewer.title') }}
           <span class="beta-tag">beta</span>
         </button>
+        <span class="header-clock" :title="now.toLocaleString()" @click="openSchedule">
+          {{ headerDate }} / {{ headerTime }}
+        </span>
       </div>
     </header>
 
@@ -575,9 +602,7 @@ function handleDismiss(messageId: string) {
 
     <StatusBar />
 
-    <!-- 全局组件：日志抽屉 + 知识图谱 -->
-    <LogDrawer ref="logDrawerRef" />
-    <!-- GraphViewer 通过 Teleport 渲染到 body，由 graphStore.visible 控制显隐 -->
+    <!-- 全局组件：知识图谱 -->
     <GraphViewer @close="graphStore.close()" />
 
     <!-- ScheduleView 通过 Teleport 渲染到 body -->
@@ -628,6 +653,26 @@ function handleDismiss(messageId: string) {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.header-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-muted, #64748b);
+  opacity: 0.7;
+  white-space: nowrap;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255,255,255,.08);
+  cursor: pointer;
+  transition: opacity .15s, color .15s;
+}
+
+.header-clock:hover {
+  opacity: 1;
+  color: var(--accent-cyan, #06b6d4);
 }
 
 .nav-pill {
