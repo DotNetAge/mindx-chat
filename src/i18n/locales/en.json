@@ -507,7 +507,8 @@
     "outputTokens": "Output Tokens",
     "requestCount": "Request Count",
     "apiRequests": "API Requests",
-    "dayTooltip": "{label}: {value}"
+    "dayTooltip": "{label}: {value}",
+    "viewDetails": "View Details"
   },
   "tokenUsage.month": "{m}",
   "tokenUsage.dayLabel": "{label}: {value}",
@@ -588,7 +589,35 @@
     "indexStateCompleted": "Indexed",
     "indexStateFailed": "Failed",
     "indexStateStartedAt": "Started at",
-    "indexStateCompletedAt": "Completed at"
+    "indexStateCompletedAt": "Completed at",
+    "defaultChunksTitle": "Knowledge Chunks",
+    "showAllNodes": "Show All Nodes",
+    "relationLabels": {
+      "DESCRIBES": "Describes",
+      "IS_A": "Is A",
+      "PART_OF": "Part Of",
+      "CONTAINS": "Contains",
+      "IMPLIES": "Implies",
+      "EQUIVALENT_TO": "Equivalent To",
+      "CONTRADICTS": "Contradicts",
+      "EXTENDS": "Extends",
+      "PRECEDES": "Precedes",
+      "DEPENDS_ON": "Depends On",
+      "COMPLEMENTS": "Complements",
+      "APPLIES_TO": "Applies To",
+      "SOLVES": "Solves",
+      "DEMONSTRATES": "Demonstrates",
+      "CITES": "Cites",
+      "EXEMPLIFIES": "Exemplifies",
+      "CLASSIFIED_AS": "Classified As",
+      "RELATED_TO": "Related To",
+      "COMPARES_TO": "Compares To",
+      "USES": "Uses",
+      "SUPPORTS": "Supports",
+      "INVOLVES": "Involves",
+      "Semantic": "Semantic",
+      "SEMANTIC": "Semantic"
+    }
   },
   "ruleEditor": {
     "title": "Rules Editor",

@@ -1,142 +1,81 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { useGraphStore, LEVEL_COLORS } from '../stores/graphStore'
+import { Document } from '@element-plus/icons-vue'
+import { useGraphStore } from '../stores/graphStore'
+import { useMarkdown } from '../composables/useMarkdown'
 
-const { t } = useI18n()
 const store = useGraphStore()
+const { md } = useMarkdown()
 
-const node = computed(() => store.selectedNode)
-const edges = computed(() => store.selectedNodeEdges)
-
-function levelBadge(level: string): string {
-  return level || 'unknown'
-}
-
-function levelColor(level: string): string {
-  return LEVEL_COLORS[level] || '#64748b'
-}
-
-// ── Multi-hop path grouping ──
-
-/** Group multi-hop nodes by hopLevel for tree display */
-const multiHopGroups = computed(() => {
-  if (!store.multiHopResult) return []
-  const groups: { level: number; nodes: { id: string; name: string; labels: string[] }[] }[] = []
-  for (let i = 0; i <= 3; i++) {
-    const nodesAtLevel = store.multiHopResult.nodes.filter(hn => hn.hopLevel === i)
-    if (nodesAtLevel.length > 0) {
-      groups.push({
-        level: i,
-        nodes: nodesAtLevel.map(hn => ({
-          id: hn.node.id,
-          name: hn.node.properties?.name || hn.node.id,
-          labels: hn.node.labels || [],
-        })),
-      })
-    }
-  }
-  return groups
+const nodeName = computed(() => {
+  const n = store.selectedNode
+  return n?.properties?.name || n?.id || ''
 })
+
+function renderMd(text: string): string {
+  if (!text) return ''
+  try { return md.render(text) }
+  catch { return text }
+}
+
+function closeDrawer() {
+  store.detailChunks = []
+}
 </script>
 
 <template>
-  <transition name="slide-up">
-    <div v-if="node" class="detail-panel">
-      <div class="detail-header">
-        <div class="detail-title-row">
-          <span class="detail-name">{{ node.properties.name || node.id }}</span>
-          <span
-            class="detail-level-badge"
-            :style="{ background: levelColor(node.properties.level) + '22', color: levelColor(node.properties.level), borderColor: levelColor(node.properties.level) + '55' }"
-          >
-            {{ levelBadge(node.properties.level) }}
-          </span>
+  <transition name="slide-right">
+    <div
+      v-if="store.detailChunks.length > 0 || store.detailLoading"
+      class="detail-drawer"
+    >
+      <!-- Header -->
+      <div class="drawer-header">
+        <div class="drawer-title-row">
+          <span class="drawer-title">{{ nodeName }}</span>
+          <span class="drawer-badge">{{ store.detailChunks.length }} 个分片</span>
         </div>
-        <button class="detail-close" @click="store.selectNode(null)">&times;</button>
+        <button class="drawer-close" @click="closeDrawer">&times;</button>
       </div>
 
-      <div class="detail-body">
-        <!-- Labels -->
-        <div class="detail-section" v-if="node.labels?.length">
-          <span class="section-label">Labels</span>
-          <div class="tag-group">
-            <span v-for="l in node.labels" :key="l" class="detail-tag">{{ l }}</span>
-          </div>
-        </div>
-
-        <!-- Summary -->
-        <div class="detail-section" v-if="node.properties.summary">
-          <span class="section-label">{{ t('kgViewer.summary') }}</span>
-          <p class="section-text">{{ node.properties.summary }}</p>
-        </div>
-
-        <!-- Aliases -->
-        <div class="detail-section" v-if="node.properties.aliases?.length">
-          <span class="section-label">{{ t('kgViewer.aliases') }}</span>
-          <div class="tag-group">
-            <span v-for="a in node.properties.aliases" :key="a" class="detail-tag alias">{{ a }}</span>
-          </div>
-        </div>
-
-        <!-- Source chunks -->
-        <div class="detail-section" v-if="node.properties.source_chunk_ids?.length">
-          <span class="section-label">{{ t('kgViewer.sourceChunks') }}</span>
-          <div class="chunk-refs">
-            <code
-              v-for="cid in node.properties.source_chunk_ids.slice(0, 10)"
-              :key="cid"
-              class="chunk-ref"
-            >{{ cid }}</code>
-            <span v-if="node.properties.source_chunk_ids.length > 10" class="more-hint">
-              +{{ node.properties.source_chunk_ids.length - 10 }} more
-            </span>
-          </div>
-        </div>
-
-        <!-- Connected relations -->
-        <div class="detail-section" v-if="edges.length">
-          <span class="section-label">{{ t('kgViewer.relations') }} ({{ edges.length }})</span>
-          <div class="edge-list">
-            <div v-for="e in edges.slice(0, 20)" :key="e.id" class="edge-item">
-              <span class="edge-from">{{ e.from_node_id === node.id ? 'self' : e.from_node_id.slice(0, 12) }}</span>
-              <span class="edge-arrow">
-                <span class="edge-type">{{ e.type }}</span>
-                &rarr;
-              </span>
-              <span class="edge-to">{{ e.to_node_id === node.id ? 'self' : e.to_node_id.slice(0, 12) }}</span>
-            </div>
-            <span v-if="edges.length > 20" class="more-hint">+{{ edges.length - 20 }} more relations</span>
-          </div>
-        </div>
-
-        <!-- Raw ID -->
-        <div class="detail-section">
-          <span class="section-label">{{ t('kgViewer.nodeId') }}</span>
-          <code class="raw-id">{{ node.id }}</code>
-        </div>
+      <!-- Loading -->
+      <div v-if="store.detailLoading" class="drawer-loading">
+        <div class="loading-spinner"></div>
+        <span>加载中…</span>
       </div>
 
-      <!-- ── Multi-hop Path Tree ── -->
-      <div v-if="multiHopGroups.length > 1" class="multi-hop-section">
-        <span class="section-label">{{ t('kgViewer.relatedPaths') }} ({{ (store.multiHopResult?.nodes.length || 0) - 1 }})</span>
-        <div class="hop-tree">
-          <div v-for="group in multiHopGroups" :key="group.level" class="hop-group">
-            <div class="hop-level-line">
-              <span class="hop-level-tag" :class="'tag-hop-' + group.level">Hop {{ group.level }}</span>
-              <span class="hop-level-count">{{ group.nodes.length }} node{{ group.nodes.length > 1 ? 's' : '' }}</span>
+      <!-- Chunk list -->
+      <div v-else-if="store.detailChunks.length > 0" class="drawer-body">
+        <!-- Empty state: no chunks found for this node -->
+        <div v-if="store.detailChunks.length === 0 && !store.detailLoading" class="empty-state">
+          该节点暂无关联的分片
+        </div>
+
+        <div
+          v-for="r in store.detailChunks"
+          :key="r.id"
+          class="chunk-card"
+        >
+          <!-- ── Summary ── -->
+          <div v-if="r.summary" class="chunk-title">
+            {{ r.summary }}
+          </div>
+
+          <!-- ── Content (markdown rendered) ── -->
+          <div class="chunk-content" v-html="renderMd(r.content)"></div>
+
+          <!-- ── Separator ── -->
+          <div v-if="r.source_file || (r.tags && r.tags.length)" class="chunk-separator"></div>
+
+          <!-- ── Footer: tags + source file ── -->
+          <div class="chunk-footer">
+            <div v-if="r.tags && r.tags.length" class="chunk-tags">
+              <span v-for="tag in r.tags.slice(0, 5)" :key="tag" class="chunk-tag">{{ tag }}</span>
+              <span v-if="r.tags.length > 5" class="chunk-tag-more">+{{ r.tags.length - 5 }}</span>
             </div>
-            <div class="hop-nodes">
-              <div
-                v-for="n in group.nodes.slice(0, 8)"
-                :key="n.id"
-                class="hop-node-chip"
-                @click="store.selectNode(n.id)"
-              >
-                <span class="hop-node-badge" :class="'badge-hop-' + group.level">{{ n.labels[0]?.[0] || '?' }}</span>
-                <span class="hop-node-name">{{ n.name }}</span>
-              </div>
-              <span v-if="group.nodes.length > 8" class="more-hint">+{{ group.nodes.length - 8 }} more</span>
+            <div v-if="r.source_file" class="chunk-file" :title="r.source_file" @click="store.openFile(r.source_file)">
+              <el-icon :size="11"><Document /></el-icon>
+              <span>{{ typeof r.source_file === 'string' ? r.source_file.split('/').pop() : '' }}</span>
             </div>
           </div>
         </div>
@@ -146,163 +85,150 @@ const multiHopGroups = computed(() => {
 </template>
 
 <style scoped>
-.detail-panel {
+.detail-drawer {
   position: absolute;
-  bottom: 0; left: 280px; right: 0;
-  max-height: 260px;
+  top: 0; right: 0; bottom: 0;
+  width: 380px;
   background: var(--bg-secondary);
-  border-top: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  z-index: 10;
-  box-shadow: 0 -4px 24px rgba(0,0,0,.3);
+  z-index: 20;
+  box-shadow: -4px 0 24px rgba(0,0,0,.3);
+  overflow: hidden;
 }
 
-.detail-header {
+/* ── Header ── */
+.drawer-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 20px;
+  padding: 12px 16px;
   border-bottom: 1px solid rgba(255,255,255,.06);
   flex-shrink: 0;
 }
-.detail-title-row {
-  display: flex; align-items: center; gap: 10px;
+.drawer-title-row {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 0;
 }
-.detail-name {
-  font-size: 15px; font-weight: 700; color: var(--text-primary);
+.drawer-title {
+  font-size: 14px; font-weight: 700; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.detail-level-badge {
-  font-size: 10.5px; font-weight: 700;
-  padding: 2px 8px; border-radius: 10px;
-  text-transform: uppercase; letter-spacing: .5px;
-  border: 1px solid;
+.drawer-badge {
+  font-size: 10.5px; font-weight: 600;
+  padding: 2px 7px; border-radius: 8px;
+  background: rgba(139,92,246,.12); color: #a78bfa;
+  white-space: nowrap;
 }
-.detail-close {
+.drawer-close {
   width: 26px; height: 26px;
   display: flex; align-items: center; justify-content: center;
   font-size: 18px; color: var(--text-muted);
   background: none; border: none; border-radius: 6px; cursor: pointer;
+  flex-shrink: 0;
 }
-.detail-close:hover { background: rgba(255,255,255,.08); color: var(--text-primary); }
+.drawer-close:hover { background: rgba(255,255,255,.08); color: var(--text-primary); }
 
-.detail-body {
+/* ── Body ── */
+.drawer-body {
   flex: 1; overflow-y: auto;
-  padding: 12px 20px 16px;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px 32px;
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
 }
 
-.detail-section { display: flex; flex-direction: column; gap: 4px; }
-.section-label {
-  font-size: 11px; font-weight: 600;
-  color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
+/* ── Loading ── */
+.drawer-loading {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 40px 0;
+  color: var(--text-muted); font-size: 13px;
 }
-.section-text {
-  font-size: 12.5px; line-height: 1.6;
-  color: var(--text-secondary); margin: 0;
+.loading-spinner {
+  width: 18px; height: 18px;
+  border: 2px solid rgba(139,92,246,.2);
+  border-top-color: #a78bfa;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Empty state ── */
+.empty-state {
+  text-align: center; padding: 40px 0;
+  color: var(--text-muted); font-size: 13px;
 }
 
-.tag-group { display: flex; flex-wrap: wrap; gap: 5px; }
-.detail-tag {
-  font-size: 11px; font-weight: 500;
-  padding: 2px 8px; border-radius: 4px;
-  background: rgba(139,92,246,.1); color: #a78bfa;
-  border: 1px solid rgba(139,92,246,.2);
+/* ── Chunk card ── */
+.chunk-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column;
+  gap: 6px;
+  transition: border-color .15s;
 }
-.detail-tag.alias {
-  background: rgba(245,158,11,.1); color: #fbbf24;
-  border-color: rgba(245,158,11,.2);
-}
+.chunk-card:hover { border-color: rgba(255,255,255,.12); }
 
-.chunk-refs { display: flex; flex-wrap: wrap; gap: 4px; }
-.chunk-ref {
-  font-family: 'JetBrains Mono', monospace; font-size: 10px;
-  padding: 2px 6px; border-radius: 4px;
-  background: rgba(6,182,212,.08); color: var(--accent-cyan);
-  border: 1px solid rgba(6,182,212,.15);
+.chunk-title {
+  font-size: 13px; font-weight: 600; color: var(--accent-cyan);
+  cursor: pointer; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+.chunk-title:hover { color: #67e8f9; }
 
-.edge-list { display: flex; flex-direction: column; gap: 3px; }
-.edge-item {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 11px; font-family: 'JetBrains Mono', monospace;
+.chunk-content {
+  font-size: 12px; line-height: 1.6;
   color: var(--text-secondary);
-}
-.edge-from, .edge-to { color: var(--text-muted); }
-.edge-type {
-  color: var(--accent-purple); font-weight: 600;
-  background: rgba(139,92,246,.1);
-  padding: 1px 5px; border-radius: 3px;
-}
-.edge-arrow { color: var(--text-muted); }
-
-.raw-id {
-  font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
-  padding: 4px 8px; border-radius: 4px;
-  background: rgba(255,255,255,.03);
-  color: var(--text-muted); word-break: break-all;
-}
-
-.more-hint {
-  font-size: 11px; color: var(--text-muted);
-}
-
-.slide-up-enter-active { transition: all .25s ease-out; }
-.slide-up-leave-active { transition: all .15s ease-in; }
-.slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); opacity: 0; }
-
-/* ── Multi-hop tree ── */
-.multi-hop-section {
-  padding: 12px 20px 16px;
-  border-top: 1px solid rgba(255,255,255,.06);
-}
-.hop-tree { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-.hop-group { display: flex; flex-direction: column; gap: 4px; }
-.hop-level-line {
-  display: flex; align-items: center; gap: 8px;
-}
-.hop-level-tag {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px; font-weight: 700;
-  padding: 1px 7px; border-radius: 4px;
-}
-.tag-hop-0 { background: rgba(6,182,212,.15); color: #06b6d4; }
-.tag-hop-1 { background: rgba(16,185,129,.12); color: #10b981; }
-.tag-hop-2 { background: rgba(245,158,11,.12); color: #f59e0b; }
-.tag-hop-3 { background: rgba(239,68,68,.1); color: #ef4444; }
-.hop-level-count {
-  font-size: 10.5px; color: var(--text-muted);
-}
-.hop-nodes {
-  display: flex; flex-wrap: wrap; gap: 4px;
-  margin-left: 8px;
-}
-.hop-node-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 8px; border-radius: 5px;
-  font-size: 11px;
-  background: rgba(255,255,255,.03);
-  border: 1px solid rgba(255,255,255,.06);
+  padding: 6px 0;
   cursor: pointer;
-  transition: all .12s;
 }
-.hop-node-chip:hover { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.12); }
-.hop-node-badge {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 9px; font-weight: 700;
-  width: 16px; height: 16px;
-  display: flex; align-items: center; justify-content: center;
+.chunk-content :deep(p) { margin: 0 0 4px; }
+.chunk-content :deep(code) {
+  font-size: 11px; padding: 1px 4px;
+  background: rgba(255,255,255,.04);
   border-radius: 3px;
 }
-.badge-hop-0 { background: rgba(6,182,212,.2); color: #06b6d4; }
-.badge-hop-1 { background: rgba(16,185,129,.2); color: #10b981; }
-.badge-hop-2 { background: rgba(245,158,11,.2); color: #f59e0b; }
-.badge-hop-3 { background: rgba(239,68,68,.15); color: #ef4444; }
-.hop-node-name {
-  color: var(--text-secondary);
-  max-width: 100px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.chunk-content :deep(pre) {
+  font-size: 11px; padding: 6px;
+  background: rgba(0,0,0,.2);
+  border-radius: 4px;
+  overflow-x: auto;
 }
+
+.chunk-separator {
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(255,255,255,.06), transparent);
+}
+
+.chunk-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 6px;
+}
+.chunk-tags {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.chunk-tag {
+  font-size: 10px; font-weight: 500;
+  padding: 1px 6px; border-radius: 3px;
+  background: rgba(139,92,246,.08); color: #a78bfa;
+  border: 1px solid rgba(139,92,246,.12);
+}
+.chunk-tag-more {
+  font-size: 10px; color: var(--text-muted);
+}
+.chunk-file {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 10.5px; color: var(--text-muted);
+  cursor: pointer; white-space: nowrap;
+  padding: 2px 6px; border-radius: 4px;
+  transition: all .12s;
+}
+.chunk-file:hover {
+  color: var(--accent-cyan);
+  background: rgba(6,182,212,.08);
+}
+
+/* ── Slide right animation ── */
+.slide-right-enter-active { transition: all .25s ease-out; }
+.slide-right-leave-active { transition: all .15s ease-in; }
+.slide-right-enter-from, .slide-right-leave-to { transform: translateX(100%); opacity: 0; }
 </style>

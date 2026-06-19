@@ -66,6 +66,10 @@ export interface SearchResult {
   doc_id?: string
   /** Extracted source filename */
   source?: string
+  // 以下字段从 metadata 中提取（分片列表用）
+  summary?: string
+  source_file?: string
+  entity_ids?: string[]
 }
 
 // ── File index state types ──
@@ -183,6 +187,16 @@ export async function upsertEdges(edges: Partial<GraphEdge>[]): Promise<{ create
 
 // ── RAG / Memory methods ──
 
+/** List all nodes (bypasses broken Cypher functions like labels(), properties()) */
+export async function listAllNodes(): Promise<GraphNode[]> {
+  return call('graph.list_nodes')
+}
+
+/** List all edges (bypasses broken Cypher functions like type(), startNode(), endNode()) */
+export async function listAllEdges(): Promise<GraphEdge[]> {
+  return call('graph.list_edges')
+}
+
 /** Paginated chunk list (for document discovery) */
 export async function listChunks(page = 1, pageSize = 200): Promise<ChunksPage> {
   return call('memory.chunks', { page, page_size: pageSize, doc_id: 'all' })
@@ -205,8 +219,8 @@ export async function getGraphStats(): Promise<{
     graphQuery('MATCH ()-[r]->() RETURN count(r) as cnt'),
   ])
   return {
-    totalNodes: nodeRes?.rows?.[0]?.[0] ?? 0,
-    totalEdges: edgeRes?.rows?.[0]?.[0] ?? 0,
+    totalNodes: nodeRes?.rows?.[0]?.cnt ?? 0,
+    totalEdges: edgeRes?.rows?.[0]?.cnt ?? 0,
   }
 }
 
@@ -215,7 +229,7 @@ export async function getLabelDistribution(): Promise<LabelCount[]> {
   const res = await graphQuery(
     'MATCH (n) RETURN labels(n)[0] as label, count(*) as cnt ORDER BY cnt DESC'
   )
-  return (res?.rows ?? []).map(([label, cnt]) => ({ label: label || 'Unknown', count: cnt }))
+  return (res?.rows ?? []).map((row: any) => ({ label: row.label || 'Unknown', count: row.cnt }))
 }
 
 /** Edge distribution by relation type */
@@ -223,7 +237,7 @@ export async function getRelationTypeDistribution(): Promise<RelationTypeCount[]
   const res = await graphQuery(
     'MATCH ()-[r]->() RETURN type(r) as t, count(*) as cnt ORDER BY cnt DESC'
   )
-  return (res?.rows ?? []).map(([type, cnt]) => ({ type, count: cnt }))
+  return (res?.rows ?? []).map((row: any) => ({ type: row.t, count: row.cnt }))
 }
 
 /** Node distribution by knowledge level */
@@ -231,7 +245,7 @@ export async function getLevelDistribution(): Promise<LabelCount[]> {
   const res = await graphQuery(
     "MATCH (n) WHERE n.level IS NOT NULL RETURN n.level as lvl, count(*) as cnt ORDER BY cnt DESC"
   )
-  return (res?.rows ?? []).map(([level, cnt]) => ({ label: level || 'unknown', count: cnt }))
+  return (res?.rows ?? []).map((row: any) => ({ label: row.lvl || 'unknown', count: row.cnt }))
 }
 
 /** Discover unique document IDs from RAG chunks (iterates pages until exhausted) */
@@ -266,15 +280,54 @@ export async function discoverDocs(page = 1, pageSize = 500): Promise<string[]> 
 /** Semantic search across the knowledge base (memory.query) */
 export async function semanticSearch(query: string, limit = 5, minScore = 0): Promise<SearchResult[]> {
   const records = await call<any[]>('memory.query', { query, limit, min_score: minScore })
-  return (records ?? []).map((r: any) => ({
-    id: r.id || '',
-    title: r.title || '',
-    content: r.content || '',
-    tags: r.tags || [],
-    score: r.score || 0,
-    doc_id: r.title || r.id?.split('_')[0] || '',
-    source: (r.tags?.find((t: string) => t.startsWith('source:'))?.slice(7)) || r.title || '',
-  }))
+  console.log('[graphApi] semanticSearch raw:', JSON.stringify(records, null, 2))
+  return (records ?? []).map((r: any) => {
+    const meta = r.metadata || r.chunk_meta || {}
+    return {
+      id: r.id || '',
+      title: r.title || '',
+      content: r.content || '',
+      tags: Array.isArray(meta.tags) ? meta.tags : (r.tags || []),
+      score: r.score || 0,
+      doc_id: r.doc_id || r.title || r.id?.split('_')[0] || '',
+      source: (Array.isArray(r.tags) ? r.tags.find((t: string) => t.startsWith('source:'))?.slice(7) : '') || r.title || '',
+      summary: meta.summary || '',
+      source_file: meta.source_file || '',
+      entity_ids: Array.isArray(meta.entity_ids) ? meta.entity_ids : [],
+    }
+  })
+}
+
+/** List chunks from the memory indexer (memory.chunks) — returns raw RPC data */
+export async function listMemoryChunksRaw(page = 1, pageSize = 10): Promise<any> {
+  const result = await call<any>('memory.chunks', { page, page_size: pageSize })
+  return result
+}
+
+/** List chunks from the memory indexer (memory.chunks) */
+export async function listMemoryChunks(page = 1, pageSize = 10): Promise<{
+  chunks: SearchResult[]
+  total: number
+  has_more: boolean
+}> {
+  const result = await call<any>('memory.chunks', { page, page_size: pageSize })
+  const chunks: SearchResult[] = (result.chunks ?? []).map((c: any) => {
+    const meta = c.metadata || {}
+    const tags: string[] = Array.isArray(meta.tags) ? meta.tags : []
+    return {
+      id: c.id || '',
+      title: '',
+      content: c.content || '',
+      tags,
+      score: 0,
+      doc_id: c.doc_id || '',
+      source: meta.source_file || c.doc_id || '',
+      summary: meta.summary || '',
+      source_file: meta.source_file || '',
+      entity_ids: Array.isArray(meta.entity_ids) ? meta.entity_ids : [],
+    }
+  })
+  return { chunks, total: result.total ?? 0, has_more: result.has_more ?? false }
 }
 
 // ── File index state ──
@@ -355,4 +408,17 @@ export async function loadMultiHop(
     nodes: Array.from(allNodes.values()),
     edges: Array.from(allEdges.values()),
   }
+}
+
+// ── File content reading ──
+
+/** Read a file from local filesystem via daemon */
+export async function readFileContent(path: string): Promise<string> {
+  const result = await call<{ content: string }>('fs.read', { path })
+  return result.content
+}
+
+/** Reveal a file in the native file manager (Finder/Explorer) */
+export async function revealInFileManager(path: string): Promise<void> {
+  await call('fs.reveal', { path })
 }

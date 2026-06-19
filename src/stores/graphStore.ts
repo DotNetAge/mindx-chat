@@ -48,10 +48,30 @@ export interface GraphViewerState {
   searchResults: api.SearchResult[]
   searchLoading: boolean
 
+  // Default chunk list (paginated from indexer, 20 per page)
+  defaultChunks: api.SearchResult[]
+  defaultChunksLoading: boolean
+  chunkPage: number
+  chunkTotal: number
+
+  // File reader panel
+  activeFilePath: string | null
+
   // Multi-hop graph
   multiHopResult: api.MultiHopResult | null
   multiHopLoading: boolean
   multiHopRootId: string | null
+
+  // Chunk node highlighting & filtering
+  highlightedNodeIds: Set<string>
+  chunkNodeIds: Set<string>
+
+  // Node detail drawer chunks
+  detailChunks: api.SearchResult[]
+  detailLoading: boolean
+
+  // Show all nodes (bypass entity label filter, include isolated nodes)
+  showAllNodes: boolean
 
   // File index status
   filewatchStatus: api.FilewatchStatus | null
@@ -79,9 +99,19 @@ export const useGraphStore = defineStore('graph', {
     searchQuery: '',
     searchResults: [],
     searchLoading: false,
+    defaultChunks: [],
+    defaultChunksLoading: false,
+    chunkPage: 1,
+    chunkTotal: 0,
+    activeFilePath: null,
     multiHopResult: null,
-    multiHopLoading: false,
-    multiHopRootId: null,
+      multiHopLoading: false,
+      multiHopRootId: null,
+      highlightedNodeIds: new Set(),
+      chunkNodeIds: new Set(),
+      detailChunks: [],
+      detailLoading: false,
+      showAllNodes: false,
     filewatchStatus: null,
     fileStates: null,
     fileStatesLoading: false,
@@ -100,10 +130,24 @@ export const useGraphStore = defineStore('graph', {
         )
       }
 
-      if (state.selectedLabels.length > 0) {
-        result = result.filter(n =>
-          n.labels.some(l => state.selectedLabels.includes(l))
-        )
+      if (state.showAllNodes) {
+        // Show all nodes — skip label filter & isolated-node exclusion
+      } else {
+        if (state.selectedLabels.length > 0) {
+          result = result.filter(n =>
+            n.labels.some(l => state.selectedLabels.includes(l))
+          )
+        }
+        // Exclude nodes that have no edges to other nodes in this filtered set
+        const filteredIds = new Set(result.map(n => n.id))
+        const connectedIds = new Set<string>()
+        for (const e of state.edges) {
+          if (filteredIds.has(e.from_node_id) && filteredIds.has(e.to_node_id)) {
+            connectedIds.add(e.from_node_id)
+            connectedIds.add(e.to_node_id)
+          }
+        }
+        result = result.filter(n => connectedIds.has(n.id))
       }
 
       if (state.searchQuery.trim()) {
@@ -111,6 +155,10 @@ export const useGraphStore = defineStore('graph', {
         result = result.filter(n =>
           (n.properties.name as string)?.toLowerCase().includes(q)
         )
+      }
+
+      if (state.chunkNodeIds.size > 0) {
+        result = result.filter(n => state.chunkNodeIds.has(n.id))
       }
 
       return result
@@ -147,6 +195,7 @@ export const useGraphStore = defineStore('graph', {
       this.visible = false
       this.selectedNodeId = null
       this.neighborNodeIds.clear()
+      this.clearHighlightedNodes() // also clears chunkNodeIds
       // Clear stale data to prevent flash on reopen
       this.nodes = []
       this.edges = []
@@ -159,9 +208,13 @@ export const useGraphStore = defineStore('graph', {
       this.selectedLabels = []
       this.searchQuery = ''
       this.searchResults = []
+      this.defaultChunks = []
+      this.detailChunks = []
+      this.showAllNodes = false
       this.multiHopResult = null
       this.multiHopRootId = null
       this.filewatchStatus = null
+      this.activeFilePath = null
       this.fileStates = null
       this.error = null
     },
@@ -171,8 +224,26 @@ export const useGraphStore = defineStore('graph', {
       this.neighborNodeIds.clear()
     },
 
+    /** Highlight entity nodes associated with a chunk (from entity_ids) and filter the graph */
+    selectChunkNodes(entityIds: string[]) {
+      this.highlightedNodeIds = new Set(entityIds)
+      this.chunkNodeIds = new Set(entityIds)
+      if (entityIds.length === 0) return
+      // If exactly one node, also select it for edge highlighting
+      if (entityIds.length === 1) {
+        this.selectedNodeId = entityIds[0]
+        this.neighborNodeIds.clear()
+      }
+    },
+
+    clearHighlightedNodes() {
+      this.highlightedNodeIds.clear()
+      this.chunkNodeIds.clear()
+    },
+
     setActiveTab(tab: 'documents' | 'entities' | 'stats') {
       this.activeTab = tab
+      this.clearSearch() // 切换 Tab 时自动清除搜索结果，恢复 Tab 内容
     },
 
     setSelectedDoc(docId: string | null) {
@@ -203,77 +274,67 @@ export const useGraphStore = defineStore('graph', {
     async loadAllData() {
       this.loading = true
       this.error = null
-      // Declare outside try so finally block can access them (avoids TDZ error)
-      let nodesRes: PromiseSettledResult<any>, edgesRes: PromiseSettledResult<any>
-      let stats: PromiseSettledResult<any>
-      let labelDist: PromiseSettledResult<any>, relDist: PromiseSettledResult<any>
-      let levelDist: PromiseSettledResult<any>, docs: PromiseSettledResult<any>
       try {
-        const results = await Promise.allSettled([
-          api.graphQuery('MATCH (n) RETURN n.id as id, labels(n) as labels, properties(n) as props LIMIT 2000'),
-          api.graphQuery('MATCH ()-[r]->() RETURN id(r) as id, startNode(r).id as from_id, endNode(r).id as to_id, type(r) as type, properties(r) as props LIMIT 5000'),
-          api.getGraphStats(),
-          api.getLabelDistribution(),
-          api.getRelationTypeDistribution(),
-          api.getLevelDistribution(),
-          api.discoverDocs(),
+        // Use direct storage APIs instead of Cypher (labels(), properties(), type(), etc. are not implemented in gograph)
+        const [nodes, edges] = await Promise.all([
+          api.listAllNodes(),
+          api.listAllEdges(),
         ])
-        ;[nodesRes, edgesRes, stats, labelDist, relDist, levelDist, docs] = results
 
-        // Parse nodes
-        if (nodesRes.status === 'fulfilled' && nodesRes.value?.rows) {
-          this.nodes = nodesRes.value.rows.map((row: any[]) => ({
-            id: row[0],
-            labels: row[1] || [],
-            properties: row[2] || {},
-          }))
-          console.log('[GraphStore] nodes loaded:', this.nodes.length, 'items', this.nodes.slice(0, 3))
-        }
+        this.nodes = nodes
+        this.edges = edges
+        console.log('[GraphStore] nodes loaded:', this.nodes.length, 'items', this.nodes.slice(0, 3))
+        console.log('[GraphStore] edges loaded:', this.edges.length, 'items', this.edges.slice(0, 3))
 
-        // Parse edges
-        if (edgesRes.status === 'fulfilled' && edgesRes.value?.rows) {
-          this.edges = edgesRes.value.rows.map((row: any[]) => ({
-            id: row[0],
-            from_node_id: row[1],
-            to_node_id: row[2],
-            type: row[3],
-            properties: row[4] || {},
-          }))
-          console.log('[GraphStore] edges loaded:', this.edges.length, 'items', this.edges.slice(0, 3))
-        }
+        // Derive stats from data
+        this.stats = { totalNodes: nodes.length, totalEdges: edges.length }
 
-        if (stats.status === 'fulfilled') {
-          this.stats = stats.value
-          console.log('[GraphStore] stats:', JSON.stringify(this.stats))
+        // Derive label distribution
+        const labelMap = new Map<string, number>()
+        for (const n of nodes) {
+          // Each node can have multiple labels; count each
+          const labels = n.labels.length > 0 ? n.labels : ['Unknown']
+          for (const l of labels) {
+            labelMap.set(l, (labelMap.get(l) || 0) + 1)
+          }
         }
-        if (labelDist.status === 'fulfilled') {
-          this.labelDistribution = labelDist.value
-          console.log('[GraphStore] labelDistribution:', JSON.stringify(this.labelDistribution))
+        this.labelDistribution = Array.from(labelMap.entries())
+          .map(([label, count]) => ({ label, count }))
+          .sort((a, b) => b.count - a.count)
+
+        // Derive relation type distribution
+        const relMap = new Map<string, number>()
+        for (const e of edges) {
+          const t = e.type || 'Unknown'
+          relMap.set(t, (relMap.get(t) || 0) + 1)
         }
-        if (relDist.status === 'fulfilled') {
-          this.relationDistribution = relDist.value
-          console.log('[GraphStore] relationDistribution:', JSON.stringify(this.relationDistribution))
+        this.relationDistribution = Array.from(relMap.entries())
+          .map(([type, count]) => ({ type, count }))
+          .sort((a, b) => b.count - a.count)
+
+        // Derive level distribution (from node properties)
+        const levelMap = new Map<string, number>()
+        for (const n of nodes) {
+          const lvl = n.properties?.level || n.properties?.knowledge_level || 'unknown'
+          const key = typeof lvl === 'string' ? lvl : String(lvl)
+          levelMap.set(key, (levelMap.get(key) || 0) + 1)
         }
-        if (levelDist.status === 'fulfilled') {
-          this.levelDistribution = levelDist.value
-          console.log('[GraphStore] levelDistribution:', JSON.stringify(this.levelDistribution))
-        }
-        if (docs.status === 'fulfilled') {
-          this.docs = docs.value
+        this.levelDistribution = Array.from(levelMap.entries())
+          .map(([label, count]) => ({ label, count }))
+          .sort((a, b) => b.count - a.count)
+
+        // Discover document IDs from chunks
+        try {
+          this.docs = await api.discoverDocs()
           console.log('[GraphStore] docs:', JSON.stringify(this.docs))
+        } catch (e) {
+          console.warn('[GraphStore] discoverDocs failed:', e)
+          this.docs = []
         }
       } catch (e: any) {
         this.error = e.message || String(e)
       } finally {
         this.loading = false
-        // Warn if data was truncated
-        if (stats.status === 'fulfilled' && nodesRes.status === 'fulfilled') {
-          const total = stats.value?.totalNodes ?? 0
-          const loaded = this.nodes.length
-          if (total > loaded && loaded > 0) {
-            console.warn(`[GraphStore] Nodes truncated: showing ${loaded} of ${total}`)
-          }
-        }
       }
     },
 
@@ -325,6 +386,71 @@ export const useGraphStore = defineStore('graph', {
 
     clearSearch() {
       this.searchResults = []
+      this.searchLoading = false
+    },
+
+    // ── Node detail drawer ──
+
+    /** Load chunks associated with an entity (node) by filtering all memory chunks by entity_id */
+    async loadNodeChunks(entityId: string) {
+      this.detailLoading = true
+      this.detailChunks = []
+      try {
+        // Load up to 100 chunks to find matches for this entity
+        const result = await api.listMemoryChunks(1, 100)
+        const filtered = result.chunks.filter(c =>
+          c.entity_ids?.includes(entityId)
+        )
+        this.detailChunks = filtered
+      } catch (e: any) {
+        console.warn('[GraphStore] Failed to load node chunks:', e)
+        this.detailChunks = []
+      } finally {
+        this.detailLoading = false
+      }
+    },
+
+    // ── Default chunk list ──
+
+    async loadDefaultChunks(page = 1) {
+      const pageSize = 20
+      this.defaultChunksLoading = true
+      this.chunkPage = page
+      try {
+        // 只在第1页时打印调试日志
+        if (page === 1) {
+          const rawResult = await api.listMemoryChunksRaw(page, pageSize)
+          console.log('========================================')
+          console.log('[GraphStore] === 全量分片原始数据 ===')
+          console.log('[GraphStore] 总数:', rawResult.total, '| 本次返回:', rawResult.chunks?.length ?? 0)
+          console.log('========================================')
+          const chunks = rawResult.chunks ?? []
+          for (let i = 0; i < chunks.length; i++) {
+            const c = chunks[i]
+            console.log(`\n--- chunk[${i}] ---`)
+            console.log('  id:       ', JSON.stringify(c.id))
+            console.log('  doc_id:   ', JSON.stringify(c.doc_id))
+            console.log('  parent_id:', JSON.stringify(c.parent_id))
+            console.log('  mime_type:', JSON.stringify(c.mime_type))
+            console.log('  content:  ', JSON.stringify(c.content))
+            console.log('  metadata: ', JSON.stringify(c.metadata, null, 2))
+            console.log('  chunk_meta:', JSON.stringify(c.chunk_meta, null, 2))
+          }
+          console.log('\n========================================')
+          console.log('[GraphStore] === 分片打印完毕 ===')
+          console.log('========================================')
+        }
+
+        const result = await api.listMemoryChunks(page, pageSize)
+        this.defaultChunks = result.chunks
+        this.chunkTotal = result.total
+      } catch (e: any) {
+        console.warn('[GraphStore] Failed to load default chunks:', e)
+        this.defaultChunks = []
+        this.chunkTotal = 0
+      } finally {
+        this.defaultChunksLoading = false
+      }
     },
 
     // ── Multi-hop graph ──
@@ -385,14 +511,41 @@ export const useGraphStore = defineStore('graph', {
     async refreshFileStates(projectDir: string) {
       this.fileStatesLoading = true
       try {
-        this.fileStates = await api.scanFileStates(projectDir)
-        console.log('[GraphStore] fileStates:', JSON.stringify(this.fileStates))
+        // memory.stats is lighter and proven to work (used by MemoryBrowser)
+        const conn = useConnectionStore()
+        const stats = await conn.fetchMemoryStats(projectDir)
+        this.fileStates = {
+          states: [],
+          counts: {
+            indexed: stats.indexed_files,
+            changed: 0,
+            new: 0,
+            removed: 0,
+            skipped: 0,
+            total: stats.total_files,
+          },
+        }
       } catch (e: any) {
-        console.warn('[GraphStore] Failed to scan file states:', e)
-        this.fileStates = null
+        // Fallback: memory.file_states (heavier)
+        try {
+          this.fileStates = await api.scanFileStates(projectDir)
+        } catch {
+          console.warn('[GraphStore] Failed to load file states:', e)
+          this.fileStates = null
+        }
       } finally {
         this.fileStatesLoading = false
       }
+    },
+
+    // ── File reader panel ──
+
+    openFile(filePath: string) {
+      this.activeFilePath = filePath
+    },
+
+    closeFileViewer() {
+      this.activeFilePath = null
     },
   },
 })

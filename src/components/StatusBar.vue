@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, watch, ref } from 'vue'
+import { computed, onMounted, watch, ref, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useConnectionStore } from '../stores/connectionStore'
@@ -152,6 +152,29 @@ const updateLabel = computed(() => {
 
 const indexingState = computed(() => connectionStore.indexingState)
 
+// ── Index progress bar ──
+const indexProgress = computed(() => {
+  const idx = graphStore.filewatchStatus?.index_state
+  if (!idx) return { indexed: 0, total: 0, percent: 0 }
+  let total = 0, indexed = 0
+  for (const s of Object.values(idx)) {
+    total += s.total_files
+    indexed += s.indexed_files
+  }
+  return { indexed, total, percent: total > 0 ? Math.round((indexed / total) * 100) : 0 }
+})
+// Periodic refresh of filewatchStatus while indexing is active
+let progressTimer: ReturnType<typeof setInterval> | null = null
+watch(indexingState, (s) => {
+  if (s.active && !progressTimer) {
+    progressTimer = setInterval(() => graphStore.refreshFilewatchStatus(), 2000)
+  } else if (!s.active && progressTimer) {
+    clearInterval(progressTimer)
+    progressTimer = null
+  }
+})
+onUnmounted(() => { if (progressTimer) { clearInterval(progressTimer); progressTimer = null } })
+
 const formatNumber = (num: number): string => {
   if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M'
   if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K'
@@ -252,14 +275,12 @@ function handleOpenAbout() {
           <el-icon :size="13"><Plus /></el-icon>
         </button>
       </div>
-      <div class="indexing-status" v-if="indexingState.active">
-        <svg v-if="indexingState.message.startsWith(t('sidebar.indexing.inProgress').substring(0,4))" class="indexing-spinner" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36"/>
-        </svg>
-        <svg v-else width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="20 6 9 17 4 12"/>
-        </svg>
-        <span class="indexing-text">{{ indexingState.message }}</span>
+      <div class="indexing-progress" v-if="indexingState.active || indexProgress.total > 0">
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" :style="{ width: indexProgress.percent + '%' }"></div>
+        </div>
+        <span class="progress-text">{{ indexProgress.indexed }}/{{ indexProgress.total }}</span>
+        <span v-if="indexingState.active" class="indexing-file">{{ indexingState.message }}</span>
       </div>
     </div>
 
@@ -592,5 +613,42 @@ function handleOpenAbout() {
 
 .update-label {
   white-space: nowrap;
+}
+
+/* ── Index progress bar ── */
+.indexing-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  padding-left: 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+.progress-bar-track {
+  width: 60px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #a78bfa, #22d3ee);
+  transition: width 0.5s ease;
+}
+.progress-text {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-muted, #94a3b8);
+  white-space: nowrap;
+}
+.indexing-file {
+  font-size: 10px;
+  color: var(--accent-cyan, #22d3ee);
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

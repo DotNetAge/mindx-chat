@@ -510,7 +510,8 @@
     "outputTokens": "輸出 Token",
     "requestCount": "請求次數",
     "apiRequests": "API 請求",
-    "dayTooltip": "{label}: {value}"
+    "dayTooltip": "{label}: {value}",
+    "viewDetails": "檢視詳情"
   },
   "tokenUsage.month": "{m}月",
   "tokenUsage.dayLabel": "{label}日: {value}",
@@ -632,7 +633,35 @@
     "indexStateCompleted": "已掃描",
     "indexStateFailed": "掃描失敗",
     "indexStateStartedAt": "開始於",
-    "indexStateCompletedAt": "完成於"
+    "indexStateCompletedAt": "完成於",
+    "defaultChunksTitle": "知識分片",
+    "showAllNodes": "顯示全部節點",
+    "relationLabels": {
+      "DESCRIBES": "描述",
+      "IS_A": "屬於",
+      "PART_OF": "組成部分",
+      "CONTAINS": "包含",
+      "IMPLIES": "蘊含",
+      "EQUIVALENT_TO": "等價於",
+      "CONTRADICTS": "矛盾",
+      "EXTENDS": "擴展",
+      "PRECEDES": "先於",
+      "DEPENDS_ON": "依賴",
+      "COMPLEMENTS": "互補",
+      "APPLIES_TO": "適用於",
+      "SOLVES": "解決",
+      "DEMONSTRATES": "演示",
+      "CITES": "引用",
+      "EXEMPLIFIES": "示例",
+      "CLASSIFIED_AS": "分類為",
+      "RELATED_TO": "相關",
+      "COMPARES_TO": "比較",
+      "USES": "使用",
+      "SUPPORTS": "支持",
+      "INVOLVES": "涉及",
+      "Semantic": "語義",
+      "SEMANTIC": "語義"
+    }
   },
   "entityTags": {
     "button": "知识标签",

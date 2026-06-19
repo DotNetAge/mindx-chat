@@ -4,6 +4,7 @@ import { Close } from '@element-plus/icons-vue'
 import GraphSidebar from './GraphSidebar.vue'
 import GraphCanvas from './GraphCanvas.vue'
 import GraphDetailPanel from './GraphDetailPanel.vue'
+import FileReaderPanel from './FileReaderPanel.vue'
 import { useGraphStore } from '../stores/graphStore'
 
 const { t } = useI18n()
@@ -18,10 +19,7 @@ function handleBack() {
 
 function handleNodeClick(nodeId: string) {
   store.selectNode(nodeId)
-}
-
-async function handleNodeDoubleClick(nodeId: string) {
-  await store.loadNeighbors(nodeId, 2)
+  store.loadNodeChunks(nodeId)
 }
 </script>
 
@@ -42,15 +40,17 @@ async function handleNodeDoubleClick(nodeId: string) {
           </div>
         </header>
 
-        <!-- Main body: sidebar + canvas + detail panel -->
+        <!-- Main body: sidebar + main area -->
         <div class="gv-body">
           <GraphSidebar />
           <div class="gv-main-area">
-            <GraphCanvas
-              :on-node-click="handleNodeClick"
-              :on-node-double-click="handleNodeDoubleClick"
-            />
-            <GraphDetailPanel />
+            <FileReaderPanel v-if="store.activeFilePath" />
+            <template v-else>
+              <GraphCanvas
+                :on-node-click="handleNodeClick"
+              />
+              <GraphDetailPanel />
+            </template>
           </div>
         </div>
       </div>

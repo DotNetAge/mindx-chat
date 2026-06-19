@@ -7,18 +7,75 @@ import {
   RefreshLeft,
   Link, FolderOpened
 } from '@element-plus/icons-vue'
-import { useGraphStore, CATEGORY_COLORS } from '../stores/graphStore'
+import { useGraphStore } from '../stores/graphStore'
 import { filewatchRemove } from '../services/graphApi'
 import type { DirIndexState } from '../services/graphApi'
+import { useMarkdown } from '../composables/useMarkdown'
+import { getChineseLabel, getEntityColor } from '../types/entityCategories'
 
 const { t } = useI18n()
 const store = useGraphStore()
+const { md } = useMarkdown()
 
-const indexedCount = computed(() => store.fileStates?.counts?.indexed ?? 0)
-const unindexedCount = computed(() => store.fileStates?.counts
-  ? store.fileStates.counts.total - store.fileStates.counts.indexed
-  : 0
-)
+const expandedChunkIds = ref<Set<string>>(new Set())
+
+function toggleChunkExpand(id: string) {
+  const s = expandedChunkIds.value
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  // trigger reactivity
+  expandedChunkIds.value = new Set(s)
+}
+
+function isChunkExpanded(id: string): boolean {
+  return expandedChunkIds.value.has(id)
+}
+
+function onChunkContentClick(entityIds: string[]) {
+  // Toggle: if same IDs already active, clear filter
+  const current = [...store.chunkNodeIds].sort().join(',')
+  const next = [...entityIds].sort().join(',')
+  if (current === next) {
+    store.clearHighlightedNodes()
+  } else {
+    store.selectChunkNodes(entityIds)
+  }
+}
+
+/** Render markdown to HTML */
+function renderMd(text: string): string {
+  if (!text) return ''
+  try {
+    return md.render(text)
+  } catch {
+    return text
+  }
+}
+
+function confidenceClass(score: number): string {
+  if (score > 0.7) return 'confidence-high'
+  if (score > 0.4) return 'confidence-mid'
+  return 'confidence-low'
+}
+
+function onChunkPageChange(page: number) {
+  if (page !== store.chunkPage) {
+    store.loadDefaultChunks(page)
+  }
+}
+
+const indexedCount = computed(() => {
+  const idx = store.filewatchStatus?.index_state
+  if (!idx) return 0
+  return Object.values(idx).reduce((sum, s) => sum + s.indexed_files, 0)
+})
+const unindexedCount = computed(() => {
+  const idx = store.filewatchStatus?.index_state
+  if (!idx) return 0
+  const total = Object.values(idx).reduce((sum, s) => sum + s.total_files, 0)
+  const indexed = Object.values(idx).reduce((sum, s) => sum + s.indexed_files, 0)
+  return total - indexed
+})
 
 function formatIndexState(st: DirIndexState): string {
   switch (st.state) {
@@ -58,7 +115,7 @@ const tabs = [
 
 // ── Search ──
 
-function onSearchInput() {
+function onSearchKeyup() {
   if (!searchInput.value.trim()) {
     store.clearSearch()
     return
@@ -66,8 +123,8 @@ function onSearchInput() {
   store.semanticSearch(searchInput.value.trim())
 }
 
-watch(searchInput, () => {
-  if (!searchInput.value) store.clearSearch()
+watch(searchInput, (val) => {
+  if (!val) store.clearSearch()
 })
 
 // ── Watch directory management ──
@@ -109,10 +166,14 @@ function shortenDocId(id: string): string {
 }
 
 function getLabelColor(label: string): string {
-  for (const [cat, color] of Object.entries(CATEGORY_COLORS)) {
-    if (label === cat || label.startsWith(cat)) return color
-  }
-  return '#64748b'
+  return getEntityColor(label)
+}
+
+/** Get relation label from i18n, fallback to raw type */
+function relationLabel(type: string): string {
+  const key = `kgViewer.relationLabels.${type}`
+  const label = t(key)
+  return label !== key ? label : type
 }
 
 /** Extract folder name (basename) from an absolute path */
@@ -123,6 +184,19 @@ function getDirName(fullPath: string): string {
 
 onMounted(() => {
   store.refreshFilewatchStatus()
+  store.loadDefaultChunks()
+})
+
+// Debug: log Documents tab state changes
+watch(() => store.activeTab, (tab) => {
+  if (tab === 'documents') {
+    console.log('[GraphSidebar] documents tab active, defaultChunks:', store.defaultChunks.length, 'loading:', store.defaultChunksLoading)
+  }
+  // 切换 Tab 时清空搜索框文字
+  searchInput.value = ''
+})
+watch(() => store.defaultChunks, (chunks) => {
+  console.log('[GraphSidebar] defaultChunks updated:', chunks.length, 'items')
 })
 
 </script>
@@ -150,7 +224,7 @@ onMounted(() => {
         :placeholder="t('kgViewer.searchKnowledge')"
         size="small"
         clearable
-        @input="onSearchInput"
+        @keyup.enter="onSearchKeyup"
       >
         <template #prefix>
           <el-icon class="search-icon" :class="{ loading: store.searchLoading }">
@@ -162,11 +236,8 @@ onMounted(() => {
 
     <!-- ── Content area ── -->
     <div class="sidebar-content">
-      <!-- Loading / Error -->
-      <div v-if="store.loading" class="sidebar-empty">
-        <span>{{ t('common.loading') }}</span>
-      </div>
-      <div v-else-if="store.error" class="sidebar-empty error">
+      <!-- Error (blocks content) -->
+      <div v-if="store.error" class="sidebar-empty error">
         <span>{{ store.error }}</span>
         <button class="retry-btn" @click="store.loadAllData()">
           <el-icon><RefreshLeft /></el-icon> {{ t('common.retry') }}
@@ -188,25 +259,46 @@ onMounted(() => {
             <div
               v-for="r in store.searchResults"
               :key="r.id"
-              class="search-result-item"
+              class="chunk-card search-result-card"
             >
-              <div class="result-header">
-                <span class="result-score" :style="{ color: r.score > 0.7 ? '#10b981' : r.score > 0.4 ? '#f59e0b' : '#64748b' }">
-                  {{ (r.score * 100).toFixed(0) }}%
-                </span>
-                <span class="result-doc-id" :title="r.doc_id">
-                  {{ shortenDocId(r.doc_id || '') }}
-                </span>
+              <!-- Confidence badge -->
+              <div class="confidence-badge" :class="confidenceClass(r.score)">
+                置信度：{{ (r.score * 100).toFixed(0) }}%
               </div>
-              <div v-if="r.title" class="result-title">{{ r.title }}</div>
-              <p class="result-preview">{{ r.content?.slice(0, 120) }}{{ r.content?.length > 120 ? '...' : '' }}</p>
-              <div v-if="r.tags && r.tags.length" class="result-tags">
-                <span v-for="tag in r.tags.slice(0, 4)" :key="tag" class="result-tag">{{ tag }}</span>
-                <span v-if="r.tags.length > 4" class="result-tag-more">+{{ r.tags.length - 4 }}</span>
+
+              <!-- ── Title: summary (from metadata) ── -->
+              <div
+                v-if="r.summary"
+                class="chunk-title"
+                :title="r.summary"
+                @click="toggleChunkExpand(r.id)"
+              >
+                {{ r.summary }}
               </div>
-              <div class="result-meta">
-                <el-icon :size="12"><FolderOpened /></el-icon>
-                <span class="result-source" :title="r.source">{{ r.source || r.doc_id }}</span>
+
+              <!-- ── Content (expanded, markdown rendered) ── -->
+              <div
+                v-if="isChunkExpanded(r.id)"
+                class="chunk-content"
+                :class="{ 'has-entities': r.entity_ids?.length }"
+                :title="r.entity_ids?.length ? '点击关联知识节点' : ''"
+                @click="r.entity_ids?.length && onChunkContentClick(r.entity_ids)"
+                v-html="renderMd(r.content)"
+              ></div>
+
+              <!-- ── Separator ── -->
+              <div v-if="r.source_file || (r.tags && r.tags.length)" class="chunk-separator"></div>
+
+              <!-- ── Footer: tags + source file ── -->
+              <div class="chunk-footer">
+                <div v-if="r.tags && r.tags.length" class="chunk-tags">
+                  <span v-for="tag in r.tags.slice(0, 5)" :key="tag" class="chunk-tag">{{ tag }}</span>
+                  <span v-if="r.tags.length > 5" class="chunk-tag-more">+{{ r.tags.length - 5 }}</span>
+                </div>
+                <div v-if="r.source_file" class="chunk-file" :title="r.source_file" @click="store.openFile(r.source_file)">
+                  <el-icon :size="11"><Document /></el-icon>
+                  <span>{{ typeof r.source_file === 'string' ? r.source_file.split('/').pop() : '' }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -229,23 +321,83 @@ onMounted(() => {
         </div>
       </template>
 
-      <!-- ── Tab: Documents ── -->
+      <!-- ── Tab: Documents (default chunks) ── -->
       <template v-else-if="store.activeTab === 'documents'">
-        <div v-if="!store.docs.length" class="sidebar-empty">
+        <!-- Chunk filter indicator -->
+        <div v-if="store.chunkNodeIds.size > 0" class="chunk-filter-bar">
+          <el-icon style="color:var(--accent-cyan);font-size:14px;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></el-icon>
+          <span>图谱已筛选，<span class="chunk-filter-link" @click="store.clearHighlightedNodes()">点击清除</span></span>
+        </div>
+
+        <!-- Loading skeleton -->
+        <div v-if="store.defaultChunksLoading" class="search-skeleton" style="padding:8px 0;">
+          <div v-for="i in 3" :key="i" class="skeleton-item"></div>
+        </div>
+
+        <!-- Chunk items -->
+        <template v-else-if="store.defaultChunks.length > 0">
+          <div class="search-results-section">
+            <h4 class="section-title">{{ t('kgViewer.defaultChunksTitle') }} ({{ store.defaultChunks.length }})</h4>
+            <div class="search-results">
+              <div v-for="r in store.defaultChunks" :key="r.id" class="chunk-card">
+                <!-- ── Title: summary (from metadata) ── -->
+                <div
+                  v-if="r.summary"
+                  class="chunk-title"
+                  :title="r.summary"
+                  @click="toggleChunkExpand(r.id)"
+                >
+                  {{ r.summary }}
+                </div>
+
+                <!-- ── Content (expanded, markdown rendered) ── -->
+                <div
+                  v-if="isChunkExpanded(r.id)"
+                  class="chunk-content"
+                  :class="{ 'has-entities': r.entity_ids?.length }"
+                  :title="r.entity_ids?.length ? '点击关联知识节点' : ''"
+                  @click="r.entity_ids?.length && onChunkContentClick(r.entity_ids)"
+                  v-html="renderMd(r.content)"
+                ></div>
+
+                <!-- ── Separator ── -->
+                <div v-if="r.source_file || (r.tags && r.tags.length)" class="chunk-separator"></div>
+
+                <!-- ── Footer: tags + source file ── -->
+                <div class="chunk-footer">
+                  <!-- Tags -->
+                  <div v-if="r.tags && r.tags.length" class="chunk-tags">
+                    <span v-for="tag in r.tags.slice(0, 5)" :key="tag" class="chunk-tag">{{ tag }}</span>
+                    <span v-if="r.tags.length > 5" class="chunk-tag-more">+{{ r.tags.length - 5 }}</span>
+                  </div>
+
+                  <!-- Source file -->
+                  <div v-if="r.source_file" class="chunk-file" :title="r.source_file" @click="store.openFile(r.source_file)">
+                    <el-icon :size="11"><Document /></el-icon>
+                    <span>{{ r.source_file.split('/').pop() }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- ── Paginator ── -->
+          <div v-if="store.chunkTotal > 20" class="chunk-paginator">
+            <el-pagination
+              size="small"
+              background
+              :current-page="store.chunkPage"
+              :page-size="20"
+              :total="store.chunkTotal"
+              :pager-count="3"
+              layout="prev, pager, next"
+              @current-change="onChunkPageChange"
+            />
+          </div>
+        </template>
+
+        <div v-else class="sidebar-empty">
           <span>{{ t('kgViewer.noDocuments') }}</span>
         </div>
-        <ul v-else class="doc-list">
-          <li
-            v-for="doc in store.docs"
-            :key="doc"
-            class="doc-item"
-            :class="{ active: store.selectedDocId === doc }"
-            @click="store.setSelectedDoc(doc)"
-          >
-            <el-icon :size="14"><Document /></el-icon>
-            <span class="doc-name">{{ shortenDocId(doc) }}</span>
-          </li>
-        </ul>
       </template>
 
       <!-- ── Tab: Entities ── -->
@@ -262,10 +414,18 @@ onMounted(() => {
             @click="store.toggleLabelFilter(item.label)"
           >
             <span class="entity-dot" :style="{ background: getLabelColor(item.label) }"></span>
-            <span class="entity-label">{{ item.label }}</span>
+            <span class="entity-label">{{ getChineseLabel(item.label) }}</span>
             <span class="entity-count">{{ item.count }}</span>
           </li>
         </ul>
+        <!-- Entity tab footer: show all nodes toggle -->
+        <div class="entity-footer">
+          <el-checkbox
+            v-model="store.showAllNodes"
+            size="small"
+            :label="t('kgViewer.showAllNodes') || '显示全部节点'"
+          />
+        </div>
       </template>
 
       <!-- ── Tab: Stats ── -->
@@ -356,7 +516,7 @@ onMounted(() => {
           <h4>{{ t('kgViewer.relationTypes') }}</h4>
           <ul class="rel-type-list">
             <li v-for="r in store.relationDistribution.slice(0, 15)" :key="r.type" class="rel-item">
-              <code class="rel-code">{{ r.type }}</code>
+              <code class="rel-code">{{ relationLabel(r.type) }}</code>
               <span class="rel-count">{{ r.count }}</span>
             </li>
           </ul>
@@ -477,6 +637,26 @@ onMounted(() => {
   padding: 8px 0;
 }
 
+.chunk-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--accent-cyan);
+  padding: 6px 8px;
+  margin: 4px 0;
+  background: rgba(6, 182, 212, 0.08);
+  border-radius: 6px;
+}
+.chunk-filter-link {
+  text-decoration: underline;
+  cursor: pointer;
+  font-weight: 600;
+}
+.chunk-filter-link:hover {
+  color: #fff;
+}
+
 .section-title {
   font-size: 11.5px;
   font-weight: 600;
@@ -511,89 +691,32 @@ onMounted(() => {
   cursor: pointer;
   transition: background .12s;
 }
-.search-result-item:hover {
-  background: rgba(139,92,246,.08);
+.search-result-card {
+  position: relative;
 }
 
-.result-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 3px;
-}
-.result-score {
+/* ── Confidence Badge ── */
+.confidence-badge {
+  display: inline-block;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  font-weight: 700;
-}
-.result-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin-bottom: 2px;
-  line-height: 1.3;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.result-doc-id {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10.5px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.result-preview {
-  margin: 0;
-  font-size: 11px;
-  color: var(--text-secondary);
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.result-meta {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 4px;
-  font-size: 10.5px;
-  color: var(--accent-cyan);
-}
-
-/* ── Result Tags ── */
-.result-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
-  margin-bottom: 2px;
-}
-.result-tag {
   font-size: 10px;
+  font-weight: 700;
   padding: 1px 6px;
+  margin-bottom: 4px;
   border-radius: 4px;
-  background: rgba(139, 92, 246, 0.12);
-  color: #a78bfa;
-  white-space: nowrap;
-  max-width: 100px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.5;
 }
-.result-tag-more {
-  font-size: 10px;
-  color: var(--text-muted);
-  padding: 1px 4px;
+.confidence-high {
+  background: rgba(16,185,129,.15);
+  color: #34d399;
 }
-.result-source {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.confidence-mid {
+  background: rgba(245,158,11,.15);
+  color: #fbbf24;
+}
+.confidence-low {
+  background: rgba(100,116,139,.15);
+  color: #94a3b8;
 }
 
 /* ── Related Paths ── */
@@ -683,6 +806,17 @@ onMounted(() => {
   font-family: 'JetBrains Mono', monospace; font-size: 11px;
   color: var(--text-muted); background: rgba(255,255,255,.06);
   padding: 1px 7px; border-radius: 10px;
+}
+
+.entity-footer {
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px 10px 4px;
+  margin-top: 4px;
+  border-top: 1px solid rgba(255,255,255,.06);
+}
+.entity-footer :deep(.el-checkbox__label) {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 /* ── Stats ── */
@@ -856,6 +990,240 @@ onMounted(() => {
   cursor: pointer; transition: all .15s;
 }
 .clear-btn:hover { color: #ef4444; border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.06); }
+
+/* ── Chunk card (Documents tab) ── */
+
+.chunk-card {
+  padding: 8px 8px 6px;
+  background: rgba(139,92,246,.04);
+  border: 1px solid rgba(139,92,246,.1);
+  border-radius: 7px;
+  transition: background .12s;
+}
+.chunk-card:hover {
+  background: rgba(139,92,246,.08);
+}
+
+/* Title = summary from metadata */
+.chunk-title {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  user-select: none;
+  transition: color .12s;
+}
+.chunk-title:hover {
+  color: var(--accent-cyan);
+}
+
+/* Expanded content — markdown rendered */
+.chunk-content {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: rgba(0,0,0,.15);
+  border-radius: 5px;
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.chunk-content.has-entities {
+  cursor: pointer;
+  transition: background .12s;
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin: 4px -6px;
+}
+.chunk-content.has-entities:hover {
+  background: rgba(251, 191, 36, 0.08);
+}
+.chunk-content :deep(pre) {
+  margin: 4px 0;
+  padding: 6px 8px;
+  background: rgba(0,0,0,.25);
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.chunk-content :deep(code) {
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+}
+.chunk-content :deep(p) {
+  margin: 4px 0;
+}
+.chunk-content :deep(ul),
+.chunk-content :deep(ol) {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+.chunk-content :deep(li) {
+  margin: 2px 0;
+}
+.chunk-content :deep(h1),
+.chunk-content :deep(h2),
+.chunk-content :deep(h3),
+.chunk-content :deep(h4) {
+  margin: 8px 0 4px;
+  color: var(--text-primary);
+  font-size: inherit;
+  font-weight: 600;
+}
+.chunk-content :deep(blockquote) {
+  margin: 4px 0;
+  padding: 2px 8px;
+  border-left: 2px solid var(--accent-cyan);
+  color: var(--text-muted);
+}
+.chunk-content :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 10.5px;
+  margin: 4px 0;
+}
+.chunk-content :deep(th),
+.chunk-content :deep(td) {
+  border: 1px solid rgba(255,255,255,.1);
+  padding: 3px 6px;
+  text-align: left;
+}
+.chunk-content :deep(th) {
+  background: rgba(255,255,255,.05);
+  font-weight: 600;
+}
+.chunk-content :deep(img) {
+  max-width: 100%;
+  border-radius: 4px;
+}
+.chunk-content :deep(a) {
+  color: var(--accent-cyan);
+}
+
+/* Separator between content and footer */
+.chunk-separator {
+  margin: 5px 0 4px;
+  height: 1px;
+  background: rgba(255,255,255,.06);
+}
+
+/* Footer: tags + file */
+.chunk-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.chunk-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.chunk-tag {
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(139, 92, 246, 0.12);
+  color: #a78bfa;
+  white-space: nowrap;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+.chunk-tag-more {
+  font-size: 9.5px;
+  color: var(--text-muted);
+  padding: 1px 3px;
+}
+.chunk-file {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .12s;
+}
+.chunk-file:hover {
+  color: var(--accent-cyan);
+}
+.chunk-file .el-icon {
+  flex-shrink: 0;
+}
+
+/* Paginator — dark theme, matches sidebar style */
+.chunk-paginator {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 2px;
+  overflow-x: auto;
+}
+.chunk-paginator .el-pagination {
+  --el-pagination-font-size: 10px;
+  --el-pagination-button-size: 20px;
+  --el-pagination-button-width: 20px;
+  --el-pagination-button-height: 20px;
+  --el-pagination-button-gap: 1px;
+  --el-pagination-bg-color: transparent;
+  --el-pagination-button-bg-color: rgba(255,255,255,.04);
+  --el-pagination-hover-bg-color: rgba(255,255,255,.1);
+  --el-pagination-button-color: var(--text-muted);
+  --el-pagination-button-disabled-bg-color: transparent;
+  --el-pagination-border-radius: 4px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.chunk-paginator .el-pagination .el-pager {
+  gap: 0;
+}
+.chunk-paginator .el-pagination button {
+  min-width: 20px;
+  padding: 0 2px;
+  border: none;
+  background: var(--el-pagination-button-bg-color);
+  color: var(--el-pagination-button-color);
+  border-radius: var(--el-pagination-border-radius);
+  transition: background .12s, color .12s;
+}
+.chunk-paginator .el-pagination button:hover {
+  color: var(--accent-cyan);
+  background: var(--el-pagination-hover-bg-color);
+}
+.chunk-paginator .el-pagination button:disabled {
+  opacity: .35;
+  background: transparent;
+}
+.chunk-paginator .el-pagination .el-pager li {
+  min-width: 20px;
+  padding: 0 2px;
+  font-weight: 500;
+  border: none;
+  background: var(--el-pagination-button-bg-color);
+  color: var(--el-pagination-button-color);
+  border-radius: var(--el-pagination-border-radius);
+  transition: background .12s, color .12s;
+}
+.chunk-paginator .el-pagination .el-pager li:hover {
+  color: var(--text-primary);
+  background: var(--el-pagination-hover-bg-color);
+}
+.chunk-paginator .el-pagination .el-pager li.is-active {
+  background: var(--el-color-primary) !important;
+  color: #fff !important;
+  font-weight: 700;
+}
+.chunk-paginator .el-pagination .el-pager li.is-active:hover {
+  background: var(--el-color-primary-light-3) !important;
+}
 </style>
 
 <!-- 全局样式：确保确认对话框在 GraphViewer (z:8000) 之上 -->
