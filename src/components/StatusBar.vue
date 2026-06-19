@@ -98,9 +98,17 @@ async function handleToggleAutoIndex() {
 
     // All checks passed — start auto-indexing
     await graphStore.startFilewatch()
-    // Refresh status to confirm
-    await graphStore.refreshFilewatchStatus()
-    if (graphStore.filewatchStatus?.running) {
+    // Refresh status to confirm — retry a few times to handle startup race
+    let running = false
+    for (let i = 0; i < 10; i++) {
+      await graphStore.refreshFilewatchStatus()
+      if (graphStore.filewatchStatus?.running) {
+        running = true
+        break
+      }
+      await new Promise(r => setTimeout(r, 100))
+    }
+    if (running) {
       ElMessage.success(t('sidebar.autoIndex.started'))
     } else {
       ElMessage.warning(t('sidebar.autoIndex.startFailedUnknown'))
