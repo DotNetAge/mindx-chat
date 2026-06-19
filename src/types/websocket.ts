@@ -83,6 +83,7 @@ export interface JsonRpcNotification {
 export interface EventEnvelope {
   data: any;
   session_id?: string;
+  agent_id?: string;
   title?: string;
   meta?: Record<string, any>;
   type: string;

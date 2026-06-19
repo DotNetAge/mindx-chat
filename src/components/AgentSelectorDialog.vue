@@ -53,8 +53,9 @@ interface ToolGroup {
   members: string[]
 }
 const TOOL_GROUPS: ToolGroup[] = [
-  { key: 'task', members: ['TaskCreate', 'TaskList', 'TaskGet', 'TaskUpdate', 'CollectResults'] },
+  { key: 'task', members: ['TaskCreate', 'TaskList', 'TaskGet', 'TaskUpdate'] },
   { key: 'team', members: ['TeamCreate', 'TeamDelete', 'TeamList', 'TeamGetTasks'] },
+  { key: 'subagent', members: ['SubAgent', 'CollectResults'] },
 ]
 // 被分组的工具名集合，用于判断某个工具是否属于组
 const GROUPED_TOOL_NAMES = new Set(TOOL_GROUPS.reduce((acc: string[], g) => acc.concat(g.members), []))

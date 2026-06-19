@@ -683,7 +683,8 @@
       "finance": "金融",
       "medical": "医疗",
       "journalism": "新闻",
-      "enterprise": "企業"
+      "enterprise": "企業",
+      "project": "專案"
     },
     "types": {
       "Concept": "概念",
@@ -751,7 +752,13 @@
       "Project": "項目",
       "Department": "部門",
       "Employee": "員工",
-      "Invoice": "發票"
+      "Invoice": "發票",
+      "Requirement": "需求",
+      "Plan": "計劃",
+      "Decision": "決策",
+      "Feedback": "反饋",
+      "Quality": "質效",
+      "Evaluation": "測評"
     },
     "descs": {
       "Concept": "核心思想、理論、原理、範式",
@@ -819,7 +826,13 @@
       "Project": "專案、計劃、方案、里程碑",
       "Department": "部門、團隊、事業部",
       "Employee": "員工、同事、利益相關方",
-      "Invoice": "發票、帳單、收據、付款記錄"
+      "Invoice": "發票、帳單、收據、付款記錄",
+      "Requirement": "功能需求、用戶故事、功能請求",
+      "Plan": "計劃、路線圖、進度表、時間線",
+      "Decision": "決策、結論、決議、結果",
+      "Feedback": "反饋、評論、意見、建議",
+      "Quality": "質量、標準、要求、準則",
+      "Evaluation": "評估、考核、結果、報告"
     }
   },
   "agentSelector": {
@@ -894,11 +907,13 @@
     },
     "groupNames": {
       "task": "任務分解",
-      "team": "團隊合作"
+      "team": "團隊合作",
+      "subagent": "工作分發"
     },
     "groupDescs": {
       "task": "可将复杂任务分解为多个具体工作项逐项完成",
-      "team": "临时建立专家团协作完成的复杂任务"
+      "team": "临时建立专家团协作完成的复杂任务",
+      "subagent": "将子任务分发给其他数字员工处理"
     },
     "licenseTitle": "许可证 — {name}",
     "licenseLink": "查看授权",

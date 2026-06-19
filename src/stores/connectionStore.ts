@@ -381,6 +381,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('thinking_delta', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         if (targetSessionId) {
           chatStore.handleThinkingDelta(envelope.data, targetSessionId)
         } else {
@@ -394,6 +395,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('markdown', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleContentDelta(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title,
@@ -403,6 +405,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('content_delta', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleContentDelta(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -412,6 +415,7 @@ export const useConnectionStore = defineStore('connection', {
       // goharness ToolUseDelta: LLM 流式输出工具调用参数
       client.on('tool_use_delta', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleToolUseDelta(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -421,6 +425,7 @@ export const useConnectionStore = defineStore('connection', {
       // goharness ToolExecStart: 工具即将开始执行
       client.on('tool_exec_start', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleToolExecStart(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -430,6 +435,7 @@ export const useConnectionStore = defineStore('connection', {
       // goharness ToolExecEnd: 工具执行结束（成功或失败）
       client.on('tool_exec_end', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleToolExecEnd(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -438,6 +444,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('subtask_spawned', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleSubtaskSpawned(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -446,6 +453,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('subtask_completed', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleSubtaskCompleted(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -454,6 +462,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('final_answer', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleFinalAnswer(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -462,6 +471,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('permission_request', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handlePermissionRequest(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -470,6 +480,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('permission_denied', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handlePermissionDenied(envelope.data, {
           session_id: targetSessionId
         })
@@ -477,6 +488,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('form', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleAskUserRequest(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -485,6 +497,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('execution_summary', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleExecutionSummary(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title,
@@ -497,6 +510,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('token_usage_recorded', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleTokenUsageRecorded(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title,
@@ -508,6 +522,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('task_summary', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleTaskSummary(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title,
@@ -520,6 +535,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('error', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleError(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -528,6 +544,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('agent_talk_start', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleAgentTalkStart(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -536,6 +553,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('agent_talk_end', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleAgentTalkEnd(envelope.data, {
           session_id: targetSessionId
         })
@@ -543,6 +561,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('compaction', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleCompaction(envelope.data, {
           session_id: targetSessionId
         })
@@ -550,6 +569,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('max_turns_reached', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleMaxTurnsReached(envelope.data, {
           session_id: targetSessionId
         })
@@ -557,6 +577,7 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('file_modified', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_id)
         chatStore.handleFileModified(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title

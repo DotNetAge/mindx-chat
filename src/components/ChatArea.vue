@@ -3,7 +3,7 @@ import { ref, nextTick, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElInput } from 'element-plus'
 import { Setting } from '@element-plus/icons-vue'
-import { useChatStore } from '../stores/chatStore'
+import { useChatStore, ChatMessage } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useConnectionStore } from '../stores/connectionStore'
 import MessageComponentRouter from './chat/MessageComponentRouter.vue'
@@ -201,6 +201,38 @@ const currentAgentDisplayName = computed(() => {
   const agent = connectionStore.currentAgent
   if (!agent) return 'Agent'
   return localeMetaValue(agent.meta, 'name', agent.name)
+})
+
+function subAgentDisplayName(agentId: string): string {
+  const agent = connectionStore.agents.find(a => a.name === agentId)
+  if (!agent) return agentId
+  return localeMetaValue(agent.meta, 'name', agent.name)
+}
+
+interface MessageGroup {
+  agentId: string
+  isSubAgent: boolean
+  messages: ChatMessage[]
+}
+
+const messageGroups = computed<MessageGroup[]>(() => {
+  const messages = chatStore.currentMessages
+  const currentName = connectionStore.currentAgent?.name || ''
+  const groups: MessageGroup[] = []
+  let current: MessageGroup | null = null
+
+  for (const msg of messages) {
+    const agentId = msg.agentId || currentName
+    const isSubAgent = agentId !== currentName
+
+    if (!current || current.agentId !== agentId) {
+      current = { agentId, isSubAgent, messages: [] }
+      groups.push(current)
+    }
+    current.messages.push(msg)
+  }
+
+  return groups
 })
 
 function onQuickPrompt(text: string) {
@@ -496,23 +528,50 @@ function handleDismiss(messageId: string) {
     <!-- Messages Area -->
     <div class="chat-messages" ref="chatContainer">
       <div class="messages-container" v-if="chatStore.currentMessages.length > 0">
-        <transition-group name="message-list">
-          <div
-            v-for="message in chatStore.currentMessages"
-            :key="message.id"
-            class="message-wrapper"
-            :class="[message.role, message.eventType]"
-          >
-            <MessageComponentRouter 
-              :message="message"
-              @permission-grant="(data) => handlePermissionGrant(data)"
-              @permission-deny="(reason) => handlePermissionDeny(reason)"
-              @form-submit="(data) => handleFormSubmit(data)"
-              @retry="handleRetry(message.id)"
-              @dismiss="handleDismiss(message.id)"
-            />
+        <template v-for="group in messageGroups">
+          <!-- SubAgent group: nested container with agent header -->
+          <div v-if="group.isSubAgent" :key="group.agentId + 'sub'" class="subagent-group">
+            <div class="subagent-group-header">
+              <span class="subagent-agent-badge">{{ subAgentDisplayName(group.agentId) }}</span>
+              <span class="subagent-agent-meta">sub-agent</span>
+            </div>
+            <transition-group name="message-list" tag="div" class="subagent-messages">
+              <div
+                v-for="message in group.messages"
+                :key="message.id"
+                class="message-wrapper"
+                :class="[message.role, message.eventType]"
+              >
+                <MessageComponentRouter 
+                  :message="message"
+                  @permission-grant="(data) => handlePermissionGrant(data)"
+                  @permission-deny="(reason) => handlePermissionDeny(reason)"
+                  @form-submit="(data) => handleFormSubmit(data)"
+                  @retry="handleRetry(message.id)"
+                  @dismiss="handleDismiss(message.id)"
+                />
+              </div>
+            </transition-group>
           </div>
-        </transition-group>
+          <!-- Main agent group: flat rendering -->
+          <transition-group v-else :key="group.agentId + 'main'" name="message-list" tag="div" class="main-messages">
+            <div
+              v-for="message in group.messages"
+              :key="message.id"
+              class="message-wrapper"
+              :class="[message.role, message.eventType]"
+            >
+              <MessageComponentRouter 
+                :message="message"
+                @permission-grant="(data) => handlePermissionGrant(data)"
+                @permission-deny="(reason) => handlePermissionDeny(reason)"
+                @form-submit="(data) => handleFormSubmit(data)"
+                @retry="handleRetry(message.id)"
+                @dismiss="handleDismiss(message.id)"
+              />
+            </div>
+          </transition-group>
+        </template>
       </div>
 
       <ChatEmptyState
@@ -1053,6 +1112,56 @@ function handleDismiss(messageId: string) {
 .message-list-leave-to {
   opacity: 0;
   transform: translateX(16px);
+}
+
+/* ── SubAgent nested group ── */
+.subagent-group {
+  margin-left: -12px;
+  margin-right: -12px;
+  padding: 12px 12px 4px;
+  background: rgba(139, 92, 246, 0.03);
+  border: 1px solid rgba(139, 92, 246, 0.1);
+  border-radius: 10px;
+  position: relative;
+}
+
+.subagent-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.08);
+}
+
+.subagent-agent-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #a78bfa;
+  letter-spacing: 0.3px;
+}
+
+.subagent-agent-meta {
+  font-size: 9px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  background: rgba(139, 92, 246, 0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.subagent-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.main-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 /* Input Area */

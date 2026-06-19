@@ -667,7 +667,8 @@
       "finance": "Finance",
       "medical": "Medical",
       "journalism": "Journalism",
-      "enterprise": "Enterprise"
+      "enterprise": "Enterprise",
+      "project": "Project"
     },
     "types": {
       "Concept": "Concept",
@@ -735,7 +736,13 @@
       "Project": "Project",
       "Department": "Department",
       "Employee": "Employee",
-      "Invoice": "Invoice"
+      "Invoice": "Invoice",
+      "Requirement": "Requirement",
+      "Plan": "Plan",
+      "Decision": "Decision",
+      "Feedback": "Feedback",
+      "Quality": "Quality",
+      "Evaluation": "Evaluation"
     },
     "descs": {
       "Concept": "core idea, theory, principle, paradigm",
@@ -803,7 +810,13 @@
       "Project": "project, initiative, program, milestone",
       "Department": "department, team, division, business unit",
       "Employee": "employee, staff, colleague, stakeholder",
-      "Invoice": "invoice, bill, receipt, payment record"
+      "Invoice": "invoice, bill, receipt, payment record",
+      "Requirement": "functional requirement, user story, feature request",
+      "Plan": "plan, roadmap, schedule, timeline",
+      "Decision": "decision, conclusion, resolution, outcome",
+      "Feedback": "feedback, review, comment, suggestion",
+      "Quality": "quality, standard, requirement, criteria",
+      "Evaluation": "evaluation, assessment, result, report"
     }
   },
   "agentSelector": {
@@ -878,11 +891,13 @@
     },
     "groupNames": {
       "task": "Task Decomposition",
-      "team": "Team Collaboration"
+      "team": "Team Collaboration",
+      "subagent": "SubAgent Dispatch"
     },
     "groupDescs": {
       "task": "Break down complex tasks into actionable work items and track them individually",
-      "team": "Temporarily assemble expert teams to collaboratively complete complex tasks"
+      "team": "Temporarily assemble expert teams to collaboratively complete complex tasks",
+      "subagent": "Dispatch subtasks to other digital employees"
     },
     "licenseTitle": "License — {name}",
     "licenseLink": "License",
