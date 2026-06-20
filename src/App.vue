@@ -72,18 +72,13 @@ async function handleDirectoryConfirm() {
   }
 
   try {
-    const sessions = await connectionStore.fetchSessions(setupAgentName.value)
-    const existingSession = sessions.find(s => s.project_dir === selectedDirectory.value)
-
-    let sessionId
-    if (existingSession) {
-      sessionId = existingSession.session_id
-      console.log(`[MindX] Found existing session ${sessionId} for dir: ${selectedDirectory.value}`)
-    } else {
-      const result = await connectionStore.createSession(setupAgentName.value, selectedDirectory.value)
-      sessionId = result.session_id
-      console.log(`[MindX] Created new session ${sessionId} for agent: ${setupAgentName.value} with dir: ${selectedDirectory.value}`)
-    }
+    // Always call createSession via RPC so the server can ensure the
+    // session's project_dir is registered in the file watchlist.
+    // The server handles dedup: if a session for the same agent+dir
+    // already exists, it returns the existing one and adds the watch.
+    const result = await connectionStore.createSession(setupAgentName.value, selectedDirectory.value)
+    const sessionId = result.session_id
+    console.log(`[MindX] Using session ${sessionId} for agent: ${setupAgentName.value} with dir: ${selectedDirectory.value}`)
 
     connectionStore.setLastAgent(setupAgentName.value)
     connectionStore.setLastSession(sessionId)
