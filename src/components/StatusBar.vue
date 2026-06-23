@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, watch, ref, onUnmounted } from 'vue'
+import { computed, onMounted, watch, ref, onUnmounted, inject } from 'vue'
+import type { Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useChatStore } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
@@ -10,6 +11,7 @@ import { useGraphStore } from '../stores/graphStore'
 import { getMindXClient } from '../services/websocket'
 import { FolderOpened, Plus, Document } from '@element-plus/icons-vue'
 import LogDrawer from './LogDrawer.vue'
+import IndexDetailsDialog from './IndexDetailsDialog.vue'
 
 const { t } = useI18n()
 const connectionStore = useConnectionStore()
@@ -21,29 +23,76 @@ const graphStore = useGraphStore()
 const logDrawerRef = ref<InstanceType<typeof LogDrawer> | null>(null)
 function openLogDrawer() { logDrawerRef.value?.open() }
 
+const showSetupDialog = inject<Ref<boolean>>('showSetupDialog')!
+const showEntityTags = inject<Ref<boolean>>('showEntityTags')!
+
 const statusColor = computed(() => connectionStore.statusColor)
 const statusLabel = computed(() => connectionStore.statusLabel)
 const version = computed(() => connectionStore.serverVersion ? `v${connectionStore.serverVersion}` : '')
 
 const filewatchAvailable = computed(() => graphStore.filewatchStatus?.available ?? false)
 const filewatchRunning = computed(() => graphStore.filewatchStatus?.running ?? false)
-const autoIndexColor = computed(() => {
-  if (!filewatchAvailable.value) return '#64748b'
-  return filewatchRunning.value ? '#10b981' : '#64748b'
-})
 const autoIndexLabel = computed(() => {
-  if (!filewatchAvailable.value) return t('sidebar.autoIndex.notAvailable')
+  if (!filewatchAvailable.value) return t('sidebar.autoIndex.conditionsNotMet')
   return filewatchRunning.value ? t('sidebar.autoIndex.enabled') : t('sidebar.autoIndex.disabled')
 })
 const autoIndexTitle = computed(() => {
-  if (!filewatchAvailable.value) return t('sidebar.autoIndex.notAvailable')
+  if (!filewatchAvailable.value) return t('sidebar.autoIndex.conditionsNotMet')
   return filewatchRunning.value ? t('sidebar.autoIndex.running') : t('sidebar.autoIndex.stopped')
 })
 
 const toggling = ref(false)
 
+// ── Requirements Dialog ──
+const showRequirementsDialogVisible = ref(false)
+const requirementsList = ref<{ label: string; ok: boolean }[]>([])
+
+async function checkAndShowRequirements() {
+  await graphStore.refreshFilewatchStatus()
+
+  const watched = graphStore.filewatchStatus?.watched || []
+  const hasWatchedDirs = watched.length > 0
+
+  const client = getMindXClient()
+  let hasTags = false
+  if (client) {
+    try {
+      const res = await client.call<{ types: any[] }>('entity_tags.get', {})
+      hasTags = (res?.types?.length ?? 0) > 0
+    } catch {
+      // RPC failed — treat as no tags
+    }
+  }
+
+  requirementsList.value = [
+    { label: t('sidebar.autoIndex.requirementWatchedDirs'), ok: hasWatchedDirs },
+    { label: t('sidebar.autoIndex.requirementEntityTags'), ok: hasTags },
+  ]
+
+  const allMet = requirementsList.value.every(r => r.ok)
+  if (allMet) return true
+
+  showRequirementsDialogVisible.value = true
+  return false
+}
+
+function handleCreateSession() {
+  showRequirementsDialogVisible.value = false
+  showSetupDialog.value = true
+}
+
+function handleConfigureTags() {
+  showRequirementsDialogVisible.value = false
+  showEntityTags.value = true
+}
+
 async function handleToggleAutoIndex() {
-  if (!filewatchAvailable.value || toggling.value) return
+  if (toggling.value) return
+
+  if (!filewatchAvailable.value) {
+    await checkAndShowRequirements()
+    return
+  }
 
   toggling.value = true
   try {
@@ -60,41 +109,8 @@ async function handleToggleAutoIndex() {
     }
 
     // ── Prerequisites for starting auto-index ──
-    await graphStore.refreshFilewatchStatus()
-
-    const watched = graphStore.filewatchStatus?.watched || []
-    const hasWatchedDirs = watched.length > 0
-
-    const client = getMindXClient()
-    let hasTags = false
-    if (client) {
-      try {
-        const res = await client.call<{ types: any[] }>('entity_tags.get', {})
-        hasTags = (res?.types?.length ?? 0) > 0
-      } catch {
-        // RPC failed — treat as no tags
-      }
-    }
-
-    // Build requirements status
-    const requirements = [
-      { label: t('sidebar.autoIndex.requirementWatchedDirs'), ok: hasWatchedDirs },
-      { label: t('sidebar.autoIndex.requirementEntityTags'), ok: hasTags },
-    ]
-    const allMet = requirements.every(r => r.ok)
-
-    if (!allMet) {
-      const msg = t('sidebar.autoIndex.startFailedDesc') + '<br><br>' +
-        requirements.map(r =>
-          `<span style="color:${r.ok ? '#10b981' : '#ef4444'}">${r.ok ? '✓' : '✗'}</span> ${r.label}`
-        ).join('<br>')
-      await ElMessageBox.alert(msg, t('sidebar.autoIndex.startFailed'), {
-        confirmButtonText: t('common.confirm'),
-        type: 'warning',
-        dangerouslyUseHTMLString: true
-      })
-      return
-    }
+    const allMet = await checkAndShowRequirements()
+    if (!allMet) return
 
     // All checks passed — start auto-indexing
     await graphStore.startFilewatch()
@@ -151,6 +167,7 @@ const updateLabel = computed(() => {
 })
 
 const indexingState = computed(() => connectionStore.indexingState)
+const showIndexDialog = ref(false)
 
 // ── Index progress bar ──
 const indexProgress = computed(() => {
@@ -163,12 +180,27 @@ const indexProgress = computed(() => {
   }
   return { indexed, total, percent: total > 0 ? Math.round((indexed / total) * 100) : 0 }
 })
+// Debug: log indexing state changes
+watch(indexingState, (s) => {
+  console.log('[INDEXING-DEBUG] StatusBar indexingState changed:', JSON.stringify(s))
+})
+
+// Debug: log indexProgress changes
+watch(indexProgress, (p) => {
+  console.log('[INDEXING-DEBUG] StatusBar indexProgress:', JSON.stringify(p))
+})
+
 // Periodic refresh of filewatchStatus while indexing is active
 let progressTimer: ReturnType<typeof setInterval> | null = null
 watch(indexingState, (s) => {
   if (s.active && !progressTimer) {
-    progressTimer = setInterval(() => graphStore.refreshFilewatchStatus(), 2000)
+    console.log('[INDEXING-DEBUG] Starting 2s polling timer')
+    progressTimer = setInterval(() => {
+      graphStore.refreshFilewatchStatus()
+      chatStore.syncTotalTokenStats()
+    }, 2000)
   } else if (!s.active && progressTimer) {
+    console.log('[INDEXING-DEBUG] Stopping 2s polling timer')
     clearInterval(progressTimer)
     progressTimer = null
   }
@@ -248,12 +280,11 @@ function handleOpenAbout() {
       <!-- Auto Index Status -->
       <button
         class="auto-index-indicator"
-        v-if="filewatchAvailable"
         :title="autoIndexTitle"
         @click="handleToggleAutoIndex"
         :disabled="toggling"
       >
-        <span class="auto-index-dot" :class="{ running: filewatchRunning }"></span>
+        <span class="auto-index-dot" :class="{ running: filewatchRunning }" :style="!filewatchAvailable ? { background: '#f59e0b' } : undefined"></span>
         <span class="auto-index-label">{{ autoIndexLabel }}</span>
       </button>
 
@@ -275,13 +306,19 @@ function handleOpenAbout() {
           <el-icon :size="13"><Plus /></el-icon>
         </button>
       </div>
-      <div class="indexing-progress" v-if="indexingState.active || indexProgress.total > 0">
+      <!-- Indexing Progress Bar — always visible when service is available (it's the only entry point to IndexDetailsDialog) -->
+      <div class="indexing-progress" v-if="filewatchAvailable || indexingState.active || indexProgress.total > 0 || indexProgress.indexed > 0"
+        @click="showIndexDialog = true"
+        style="cursor: pointer;"
+        :title="t('sidebar.indexing.clickToViewDetails')"
+      >
         <div class="progress-bar-track">
           <div class="progress-bar-fill" :style="{ width: indexProgress.percent + '%' }"></div>
         </div>
         <span class="progress-text">{{ indexProgress.indexed }}/{{ indexProgress.total }}</span>
         <span v-if="indexingState.active" class="indexing-file">{{ indexingState.message }}</span>
       </div>
+      <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="graphStore.refreshFilewatchStatus()" />
     </div>
 
     <div class="status-center">
@@ -328,6 +365,40 @@ function handleOpenAbout() {
     </div>
   </footer>
   <LogDrawer ref="logDrawerRef" />
+
+  <!-- Requirements Dialog -->
+  <el-dialog
+    v-model="showRequirementsDialogVisible"
+    :title="t('sidebar.autoIndex.startFailed')"
+    :width="360"
+    :close-on-click-modal="true"
+    append-to-body
+  >
+    <div class="requirements-dialog-body">
+      <p class="requirements-desc">{{ t('sidebar.autoIndex.startFailedDesc') }}</p>
+      <div class="requirements-list">
+        <div
+          v-for="(req, idx) in requirementsList"
+          :key="idx"
+          class="requirement-row"
+        >
+          <span class="requirement-icon" :class="{ met: req.ok }">{{ req.ok ? '✓' : '✗' }}</span>
+          <span class="requirement-label">{{ req.label }}</span>
+          <el-button
+            v-if="!req.ok"
+            size="small"
+            class="requirement-action-btn"
+            @click="idx === 0 ? handleCreateSession() : handleConfigureTags()"
+          >
+            {{ idx === 0 ? t('directoryBrowser.title') : t('entityTags.configure') }}
+          </el-button>
+        </div>
+      </div>
+    </div>
+    <template #footer>
+      <el-button @click="showRequirementsDialogVisible = false">{{ t('common.confirm') }}</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -650,5 +721,56 @@ function handleOpenAbout() {
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ── Requirements Dialog ── */
+.requirements-dialog-body {
+  padding: 4px 0;
+}
+.requirements-desc {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: var(--text-secondary, #c8d6e5);
+  line-height: 1.5;
+}
+.requirements-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.requirement-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.requirement-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+.requirement-icon.met {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+.requirement-label {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-primary, #e2e8f0);
+  line-height: 1.4;
+}
+.requirement-action-btn {
+  flex-shrink: 0;
+  font-size: 11px;
 }
 </style>

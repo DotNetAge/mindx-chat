@@ -182,6 +182,18 @@ function getDirName(fullPath: string): string {
   return parts[parts.length - 1] || fullPath
 }
 
+/** Click entity label: filter graph + open table tab (don't switch to it) */
+function handleEntityClick(item: { label: string; count: number }) {
+  // Toggle label filter on graph
+  store.toggleLabelFilter(item.label)
+  // Ensure graph tab is active
+  if (store.activeMainTabId !== 'graph') {
+    store.activeMainTabId = 'graph'
+  }
+  // Open entity list table tab (but don't activate it — stays on graph)
+  store.openEntityTab(item.label, getChineseLabel(item.label))
+}
+
 onMounted(() => {
   store.refreshFilewatchStatus()
   store.loadDefaultChunks()
@@ -244,82 +256,7 @@ watch(() => store.defaultChunks, (chunks) => {
         </button>
       </div>
 
-      <!-- ── Search Results (shown when available) ── -->
-      <template v-else-if="store.searchResults.length > 0 || store.searchLoading">
-        <div class="search-results-section">
-          <h4 class="section-title">{{ t('kgViewer.searchResults') }} ({{ store.searchResults.length }})</h4>
-
-          <!-- Loading skeleton -->
-          <div v-if="store.searchLoading" class="search-skeleton">
-            <div v-for="i in 3" :key="i" class="skeleton-item"></div>
-          </div>
-
-          <!-- Result items -->
-          <div v-else class="search-results">
-            <div
-              v-for="r in store.searchResults"
-              :key="r.id"
-              class="chunk-card search-result-card"
-            >
-              <!-- Confidence badge -->
-              <div class="confidence-badge" :class="confidenceClass(r.score)">
-                置信度：{{ (r.score * 100).toFixed(0) }}%
-              </div>
-
-              <!-- ── Title: summary (from metadata) ── -->
-              <div
-                v-if="r.summary"
-                class="chunk-title"
-                :title="r.summary"
-                @click="toggleChunkExpand(r.id)"
-              >
-                {{ r.summary }}
-              </div>
-
-              <!-- ── Content (expanded, markdown rendered) ── -->
-              <div
-                v-if="isChunkExpanded(r.id)"
-                class="chunk-content"
-                :class="{ 'has-entities': r.entity_ids?.length }"
-                :title="r.entity_ids?.length ? '点击关联知识节点' : ''"
-                @click="r.entity_ids?.length && onChunkContentClick(r.entity_ids)"
-                v-html="renderMd(r.content)"
-              ></div>
-
-              <!-- ── Separator ── -->
-              <div v-if="r.source_file || (r.tags && r.tags.length)" class="chunk-separator"></div>
-
-              <!-- ── Footer: tags + source file ── -->
-              <div class="chunk-footer">
-                <div v-if="r.tags && r.tags.length" class="chunk-tags">
-                  <span v-for="tag in r.tags.slice(0, 5)" :key="tag" class="chunk-tag">{{ tag }}</span>
-                  <span v-if="r.tags.length > 5" class="chunk-tag-more">+{{ r.tags.length - 5 }}</span>
-                </div>
-                <div v-if="r.source_file" class="chunk-file" :title="r.source_file" @click="store.openFile(r.source_file)">
-                  <el-icon :size="11"><Document /></el-icon>
-                  <span>{{ typeof r.source_file === 'string' ? r.source_file.split('/').pop() : '' }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── Related Graph Paths ── -->
-        <div v-if="store.multiHopResult && store.multiHopResult.nodes.length > 0" class="related-paths-section">
-          <h4 class="section-title">{{ t('kgViewer.relatedPaths') }} ({{ store.multiHopResult.nodes.length }})</h4>
-          <div class="path-list">
-            <div
-              v-for="hn in store.multiHopResult.nodes.slice(0, 10)"
-              :key="hn.node.id"
-              class="path-item"
-              :style="{ paddingLeft: (hn.hopLevel * 16 + 8) + 'px' }"
-            >
-              <span class="hop-badge" :class="'hop-' + hn.hopLevel">{{ hn.hopLevel }}{{ t('kgViewer.hops') }}</span>
-              <span class="path-node-name">{{ hn.node.properties?.name || hn.node.id }}</span>
-            </div>
-          </div>
-        </div>
-      </template>
+      <!-- ═══════════════ Tab views (priority over search) ═══════════════ -->
 
       <!-- ── Tab: Documents (default chunks) ── -->
       <template v-else-if="store.activeTab === 'documents'">
@@ -384,11 +321,10 @@ watch(() => store.defaultChunks, (chunks) => {
           <div v-if="store.chunkTotal > 20" class="chunk-paginator">
             <el-pagination
               size="small"
-              background
               :current-page="store.chunkPage"
               :page-size="20"
               :total="store.chunkTotal"
-              :pager-count="3"
+              :pager-count="5"
               layout="prev, pager, next"
               @current-change="onChunkPageChange"
             />
@@ -411,19 +347,20 @@ watch(() => store.defaultChunks, (chunks) => {
             :key="item.label"
             class="entity-item"
             :class="{ active: store.selectedLabels.includes(item.label) }"
-            @click="store.toggleLabelFilter(item.label)"
+            @click="handleEntityClick(item)"
           >
             <span class="entity-dot" :style="{ background: getLabelColor(item.label) }"></span>
             <span class="entity-label">{{ getChineseLabel(item.label) }}</span>
             <span class="entity-count">{{ item.count }}</span>
           </li>
         </ul>
-        <!-- Entity tab footer: show all nodes toggle -->
+        <!-- Entity tab footer: orphan node toggle -->
         <div class="entity-footer">
-          <el-checkbox
-            v-model="store.showAllNodes"
+          <span class="orphan-label">{{ t('kgViewer.showOrphanNodes') || '显示孤儿节点' }}</span>
+          <el-switch
+            v-model="store.showOrphanNodes"
             size="small"
-            :label="t('kgViewer.showAllNodes') || '显示全部节点'"
+            :active-color="'#06b6d4'"
           />
         </div>
       </template>
@@ -520,6 +457,83 @@ watch(() => store.defaultChunks, (chunks) => {
               <span class="rel-count">{{ r.count }}</span>
             </li>
           </ul>
+        </div>
+      </template>
+
+      <!-- ═══════════════ Search Results (fallback when no tab active) ═══════════════ -->
+      <template v-else-if="store.searchResults.length > 0 || store.searchLoading">
+        <div class="search-results-section">
+          <h4 class="section-title">{{ t('kgViewer.searchResults') }} ({{ store.searchResults.length }})</h4>
+
+          <!-- Loading skeleton -->
+          <div v-if="store.searchLoading" class="search-skeleton">
+            <div v-for="i in 3" :key="i" class="skeleton-item"></div>
+          </div>
+
+          <!-- Result items -->
+          <div v-else class="search-results">
+            <div
+              v-for="r in store.searchResults"
+              :key="r.id"
+              class="chunk-card search-result-card"
+            >
+              <!-- Confidence badge -->
+              <div class="confidence-badge" :class="confidenceClass(r.score)">
+                置信度：{{ (r.score * 100).toFixed(0) }}%
+              </div>
+
+              <!-- ── Title: summary (from metadata) ── -->
+              <div
+                v-if="r.summary"
+                class="chunk-title"
+                :title="r.summary"
+                @click="toggleChunkExpand(r.id)"
+              >
+                {{ r.summary }}
+              </div>
+
+              <!-- ── Content (expanded, markdown rendered) ── -->
+              <div
+                v-if="isChunkExpanded(r.id)"
+                class="chunk-content"
+                :class="{ 'has-entities': r.entity_ids?.length }"
+                :title="r.entity_ids?.length ? '点击关联知识节点' : ''"
+                @click="r.entity_ids?.length && onChunkContentClick(r.entity_ids)"
+                v-html="renderMd(r.content)"
+              ></div>
+
+              <!-- ── Separator ── -->
+              <div v-if="r.source_file || (r.tags && r.tags.length)" class="chunk-separator"></div>
+
+              <!-- ── Footer: tags + source file ── -->
+              <div class="chunk-footer">
+                <div v-if="r.tags && r.tags.length" class="chunk-tags">
+                  <span v-for="tag in r.tags.slice(0, 5)" :key="tag" class="chunk-tag">{{ tag }}</span>
+                  <span v-if="r.tags.length > 5" class="chunk-tag-more">+{{ r.tags.length - 5 }}</span>
+                </div>
+                <div v-if="r.source_file" class="chunk-file" :title="r.source_file" @click="store.openFile(r.source_file)">
+                  <el-icon :size="11"><Document /></el-icon>
+                  <span>{{ typeof r.source_file === 'string' ? r.source_file.split('/').pop() : '' }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Related Graph Paths ── -->
+        <div v-if="store.multiHopResult && store.multiHopResult.nodes.length > 0" class="related-paths-section">
+          <h4 class="section-title">{{ t('kgViewer.relatedPaths') }} ({{ store.multiHopResult.nodes.length }})</h4>
+          <div class="path-list">
+            <div
+              v-for="hn in store.multiHopResult.nodes.slice(0, 10)"
+              :key="hn.node.id"
+              class="path-item"
+              :style="{ paddingLeft: (hn.hopLevel * 16 + 8) + 'px' }"
+            >
+              <span class="hop-badge" :class="'hop-' + hn.hopLevel">{{ hn.hopLevel }}{{ t('kgViewer.hops') }}</span>
+              <span class="path-node-name">{{ hn.node.properties?.name || hn.node.id }}</span>
+            </div>
+          </div>
         </div>
       </template>
     </div>
@@ -809,12 +823,14 @@ watch(() => store.defaultChunks, (chunks) => {
 }
 
 .entity-footer {
-  display: flex; align-items: center; justify-content: center;
-  padding: 8px 10px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
   margin-top: 4px;
   border-top: 1px solid rgba(255,255,255,.06);
 }
-.entity-footer :deep(.el-checkbox__label) {
+.orphan-label {
   font-size: 12px;
   color: var(--text-secondary);
 }
@@ -1168,61 +1184,8 @@ watch(() => store.defaultChunks, (chunks) => {
   overflow-x: auto;
 }
 .chunk-paginator .el-pagination {
-  --el-pagination-font-size: 10px;
-  --el-pagination-button-size: 20px;
-  --el-pagination-button-width: 20px;
-  --el-pagination-button-height: 20px;
-  --el-pagination-button-gap: 1px;
-  --el-pagination-bg-color: transparent;
-  --el-pagination-button-bg-color: rgba(255,255,255,.04);
-  --el-pagination-hover-bg-color: rgba(255,255,255,.1);
-  --el-pagination-button-color: var(--text-muted);
-  --el-pagination-button-disabled-bg-color: transparent;
-  --el-pagination-border-radius: 4px;
   flex-wrap: nowrap;
   white-space: nowrap;
-}
-.chunk-paginator .el-pagination .el-pager {
-  gap: 0;
-}
-.chunk-paginator .el-pagination button {
-  min-width: 20px;
-  padding: 0 2px;
-  border: none;
-  background: var(--el-pagination-button-bg-color);
-  color: var(--el-pagination-button-color);
-  border-radius: var(--el-pagination-border-radius);
-  transition: background .12s, color .12s;
-}
-.chunk-paginator .el-pagination button:hover {
-  color: var(--accent-cyan);
-  background: var(--el-pagination-hover-bg-color);
-}
-.chunk-paginator .el-pagination button:disabled {
-  opacity: .35;
-  background: transparent;
-}
-.chunk-paginator .el-pagination .el-pager li {
-  min-width: 20px;
-  padding: 0 2px;
-  font-weight: 500;
-  border: none;
-  background: var(--el-pagination-button-bg-color);
-  color: var(--el-pagination-button-color);
-  border-radius: var(--el-pagination-border-radius);
-  transition: background .12s, color .12s;
-}
-.chunk-paginator .el-pagination .el-pager li:hover {
-  color: var(--text-primary);
-  background: var(--el-pagination-hover-bg-color);
-}
-.chunk-paginator .el-pagination .el-pager li.is-active {
-  background: var(--el-color-primary) !important;
-  color: #fff !important;
-  font-weight: 700;
-}
-.chunk-paginator .el-pagination .el-pager li.is-active:hover {
-  background: var(--el-color-primary-light-3) !important;
 }
 </style>
 

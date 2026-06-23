@@ -612,10 +612,19 @@ export const useConnectionStore = defineStore('connection', {
         const data = envelope?.data || envelope
         const state = data?.state || ''
         const fileName = data?.file || ''
+        console.log('[MindX] file_indexing event:', JSON.stringify({ state, fileName, data }))
+        console.log('[INDEXING-DEBUG] setting indexingState:', { active: state === 'indexing' || state === 'indexed', state, fileName })
         if (state === 'indexing') {
           this.indexingState = { active: true, fileName, message: t('sidebar.indexing.inProgress', { file: fileName }) }
         } else if (state === 'indexed') {
           this.indexingState = { active: true, fileName, message: t('sidebar.indexing.completed', { file: fileName }) }
+          setTimeout(() => {
+            if (this.indexingState.fileName === fileName) {
+              this.indexingState = { active: false, fileName: '', message: '' }
+            }
+          }, 4000)
+        } else if (state === 'error') {
+          this.indexingState = { active: true, fileName, message: t('sidebar.indexing.error', { file: fileName }) }
           setTimeout(() => {
             if (this.indexingState.fileName === fileName) {
               this.indexingState = { active: false, fileName: '', message: '' }
@@ -962,14 +971,14 @@ export const useConnectionStore = defineStore('connection', {
       return client.call('memory.count', {})
     },
 
-    async fetchMemoryStats(projectDir: string): Promise<{
+    async fetchKBStats(projectDir: string): Promise<{
       total_files: number
       indexed_files: number
       total_chunks: number
     }> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      return client.call('memory.stats', { project_dir: projectDir })
+      return client.call('kb.stats', { project_dir: projectDir })
     }
   }
 })

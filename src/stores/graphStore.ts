@@ -20,6 +20,15 @@ export const LEVEL_COLORS: Record<string, string> = {
   practical: '#10b981',
 }
 
+export interface MainTab {
+  id: string
+  type: 'graph' | 'file' | 'entity'
+  label: string
+  labelType?: string   // entity tab: e.g. 'Method'
+  filePath?: string    // file tab
+  closable: boolean
+}
+
 export interface GraphViewerState {
   visible: boolean
   loading: boolean
@@ -57,6 +66,10 @@ export interface GraphViewerState {
   // File reader panel
   activeFilePath: string | null
 
+  // Main viewport tabs (graph / file / entity list)
+  mainTabs: MainTab[]
+  activeMainTabId: string
+
   // Multi-hop graph
   multiHopResult: api.MultiHopResult | null
   multiHopLoading: boolean
@@ -70,8 +83,8 @@ export interface GraphViewerState {
   detailChunks: api.SearchResult[]
   detailLoading: boolean
 
-  // Show all nodes (bypass entity label filter, include isolated nodes)
-  showAllNodes: boolean
+  // Show orphan nodes (when label filter is active, include isolated nodes)
+  showOrphanNodes: boolean
 
   // File index status
   filewatchStatus: api.FilewatchStatus | null
@@ -104,6 +117,8 @@ export const useGraphStore = defineStore('graph', {
     chunkPage: 1,
     chunkTotal: 0,
     activeFilePath: null,
+    mainTabs: [{ id: 'graph', type: 'graph', label: '图谱', closable: false }],
+    activeMainTabId: 'graph',
     multiHopResult: null,
       multiHopLoading: false,
       multiHopRootId: null,
@@ -111,7 +126,7 @@ export const useGraphStore = defineStore('graph', {
       chunkNodeIds: new Set(),
       detailChunks: [],
       detailLoading: false,
-      showAllNodes: false,
+      showOrphanNodes: false,
     filewatchStatus: null,
     fileStates: null,
     fileStatesLoading: false,
@@ -130,15 +145,26 @@ export const useGraphStore = defineStore('graph', {
         )
       }
 
-      if (state.showAllNodes) {
-        // Show all nodes — skip label filter & isolated-node exclusion
-      } else {
-        if (state.selectedLabels.length > 0) {
-          result = result.filter(n =>
-            n.labels.some(l => state.selectedLabels.includes(l))
-          )
+      if (state.selectedLabels.length > 0) {
+        // Label filter active: filter by selected labels
+        result = result.filter(n =>
+          n.labels.some(l => state.selectedLabels.includes(l))
+        )
+        // If orphan switch is OFF, further exclude isolated nodes
+        if (!state.showOrphanNodes) {
+          const filteredIds = new Set(result.map(n => n.id))
+          const connectedIds = new Set<string>()
+          for (const e of state.edges) {
+            if (filteredIds.has(e.from_node_id) && filteredIds.has(e.to_node_id)) {
+              connectedIds.add(e.from_node_id)
+              connectedIds.add(e.to_node_id)
+            }
+          }
+          result = result.filter(n => connectedIds.has(n.id))
         }
-        // Exclude nodes that have no edges to other nodes in this filtered set
+        // If orphan switch is ON, keep all matching nodes (including orphans)
+      } else {
+        // No label filter: exclude isolated nodes (keep only the largest connected component)
         const filteredIds = new Set(result.map(n => n.id))
         const connectedIds = new Set<string>()
         for (const e of state.edges) {
@@ -210,12 +236,14 @@ export const useGraphStore = defineStore('graph', {
       this.searchResults = []
       this.defaultChunks = []
       this.detailChunks = []
-      this.showAllNodes = false
+      this.showOrphanNodes = false
       this.multiHopResult = null
       this.multiHopRootId = null
       this.filewatchStatus = null
       this.activeFilePath = null
       this.fileStates = null
+      this.mainTabs = [{ id: 'graph', type: 'graph', label: '图谱', closable: false }]
+      this.activeMainTabId = 'graph'
       this.error = null
     },
 
@@ -374,10 +402,10 @@ export const useGraphStore = defineStore('graph', {
     async semanticSearch(query: string) {
       this.searchLoading = true
       try {
-        this.searchResults = await api.semanticSearch(query, 5)
-        console.log('[GraphStore] searchResults:', JSON.stringify(this.searchResults))
+        this.searchResults = await api.kbSearch(query, 10)
+        console.log('[GraphStore] kbSearch results:', JSON.stringify(this.searchResults))
       } catch (e: any) {
-        console.warn('[GraphStore] Semantic search failed:', e)
+        console.warn('[GraphStore] KB search failed:', e)
         this.searchResults = []
       } finally {
         this.searchLoading = false
@@ -391,13 +419,13 @@ export const useGraphStore = defineStore('graph', {
 
     // ── Node detail drawer ──
 
-    /** Load chunks associated with an entity (node) by filtering all memory chunks by entity_id */
+    /** Load chunks associated with an entity (node) by filtering all KB chunks by entity_id */
     async loadNodeChunks(entityId: string) {
       this.detailLoading = true
       this.detailChunks = []
       try {
-        // Load up to 100 chunks to find matches for this entity
-        const result = await api.listMemoryChunks(1, 100)
+        // Load up to 100 chunks from KB (GraphIndexer) to find matches for this entity
+        const result = await api.listKBChunksAsSearchResults(1, 100)
         const filtered = result.chunks.filter(c =>
           c.entity_ids?.includes(entityId)
         )
@@ -414,38 +442,45 @@ export const useGraphStore = defineStore('graph', {
 
     async loadDefaultChunks(page = 1) {
       const pageSize = 20
+      console.log('[GraphStore] loadDefaultChunks called, page=', page, 'pageSize=', pageSize)
       this.defaultChunksLoading = true
       this.chunkPage = page
       try {
-        // 只在第1页时打印调试日志
-        if (page === 1) {
-          const rawResult = await api.listMemoryChunksRaw(page, pageSize)
-          console.log('========================================')
-          console.log('[GraphStore] === 全量分片原始数据 ===')
-          console.log('[GraphStore] 总数:', rawResult.total, '| 本次返回:', rawResult.chunks?.length ?? 0)
-          console.log('========================================')
-          const chunks = rawResult.chunks ?? []
-          for (let i = 0; i < chunks.length; i++) {
+        // 调用 kb.chunks RPC 获取原始数据并打印完整结果
+        const rawResult = await api.listKBChunks(page, pageSize)
+        console.log('══════════════════════════════════════════')
+        console.log('[GraphStore] kb.chunks 原始返回:')
+        console.log('  total:     ', rawResult.total)
+        console.log('  page:      ', rawResult.page)
+        console.log('  page_size: ', rawResult.page_size)
+        console.log('  has_more:  ', rawResult.has_more)
+        console.log('  chunks数:  ', rawResult.chunks?.length ?? 0)
+        console.log('══════════════════════════════════════════')
+
+        const chunks = rawResult.chunks ?? []
+        if (chunks.length > 0) {
+          console.log('[GraphStore] --- 前3条 chunk 详情 ---')
+          for (let i = 0; i < Math.min(3, chunks.length); i++) {
             const c = chunks[i]
-            console.log(`\n--- chunk[${i}] ---`)
-            console.log('  id:       ', JSON.stringify(c.id))
-            console.log('  doc_id:   ', JSON.stringify(c.doc_id))
-            console.log('  parent_id:', JSON.stringify(c.parent_id))
-            console.log('  mime_type:', JSON.stringify(c.mime_type))
-            console.log('  content:  ', JSON.stringify(c.content))
-            console.log('  metadata: ', JSON.stringify(c.metadata, null, 2))
-            console.log('  chunk_meta:', JSON.stringify(c.chunk_meta, null, 2))
+            console.log(`  chunk[${i}]: id=${c.id}, doc_id=${c.doc_id}, content_len=${c.content?.length ?? 0}`)
+            console.log(`    metadata=`, JSON.stringify(c.metadata))
+            console.log(`    chunk_meta=`, JSON.stringify(c.chunk_meta))
           }
-          console.log('\n========================================')
-          console.log('[GraphStore] === 分片打印完毕 ===')
-          console.log('========================================')
+          if (chunks.length > 3) {
+            console.log(`  ... 还有 ${chunks.length - 3} 条`)
+          }
+        } else {
+          console.warn('[GraphStore] ⚠️ kb.chunks 返回空! chunks 数组为空或 undefined')
         }
 
-        const result = await api.listMemoryChunks(page, pageSize)
+        // 转换为 SearchResult 格式并赋值
+        const result = await api.listKBChunksAsSearchResults(page, pageSize)
         this.defaultChunks = result.chunks
         this.chunkTotal = result.total
+        console.log('[GraphStore] ✅ defaultChunks 已赋值: count=', this.defaultChunks.length, 'total=', this.chunkTotal)
       } catch (e: any) {
-        console.warn('[GraphStore] Failed to load default chunks:', e)
+        console.error('[GraphStore] ❌ loadDefaultChunks 异常:', e.message || e)
+        console.error('[GraphStack]', e.stack)
         this.defaultChunks = []
         this.chunkTotal = 0
       } finally {
@@ -511,9 +546,9 @@ export const useGraphStore = defineStore('graph', {
     async refreshFileStates(projectDir: string) {
       this.fileStatesLoading = true
       try {
-        // memory.stats is lighter and proven to work (used by MemoryBrowser)
+        // kb.stats provides file indexing progress from GraphIndexer
         const conn = useConnectionStore()
-        const stats = await conn.fetchMemoryStats(projectDir)
+        const stats = await conn.fetchKBStats(projectDir)
         this.fileStates = {
           states: [],
           counts: {
@@ -542,10 +577,46 @@ export const useGraphStore = defineStore('graph', {
 
     openFile(filePath: string) {
       this.activeFilePath = filePath
+      // Open as tab
+      const fileName = filePath.split('/').pop() || filePath
+      const tabId = `file:${filePath}`
+      const existing = this.mainTabs.find(t => t.id === tabId)
+      if (!existing) {
+        this.mainTabs.push({ id: tabId, type: 'file', label: fileName, filePath, closable: true })
+      }
+      this.activeMainTabId = tabId
     },
 
     closeFileViewer() {
       this.activeFilePath = null
+    },
+
+    // ── Main viewport tabs ──
+
+    /** Open an entity list tab for a given label (does NOT switch to it) */
+    openEntityTab(labelType: string, labelCN: string) {
+      const tabId = `entity:${labelType}`
+      const existing = this.mainTabs.find(t => t.id === tabId)
+      if (!existing) {
+        this.mainTabs.push({
+          id: tabId,
+          type: 'entity',
+          label: labelCN,
+          labelType,
+          closable: true,
+        })
+      }
+    },
+
+    closeMainTab(tabId: string) {
+      const idx = this.mainTabs.findIndex(t => t.id === tabId)
+      if (idx < 0 || !this.mainTabs[idx].closable) return
+      this.mainTabs.splice(idx, 1)
+      // Switch to adjacent tab if closing active one
+      if (this.activeMainTabId === tabId) {
+        const newIdx = Math.min(idx, this.mainTabs.length - 1)
+        this.activeMainTabId = this.mainTabs[newIdx]?.id || 'graph'
+      }
     },
   },
 })

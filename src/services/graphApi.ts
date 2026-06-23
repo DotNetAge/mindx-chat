@@ -106,6 +106,20 @@ export interface FileStateResult {
 
 // ── Filewatch types ──
 
+export interface FailedFileRecord {
+  path: string
+  error: string
+  timestamp: number
+  elapsed_ms: number
+}
+
+export interface CompletedFileRecord {
+  path: string
+  chunks: number
+  elapsed_ms: number
+  timestamp: number
+}
+
 export interface DirIndexState {
   dir: string
   state: string       // pending | indexing | completed | failed
@@ -114,6 +128,12 @@ export interface DirIndexState {
   error?: string
   started_at: number
   completed_at?: number
+  entities_created?: number
+  rels_created?: number
+  total_elapsed_ms?: number
+  failed_files?: FailedFileRecord[]
+  completed_files?: CompletedFileRecord[]
+  ignored_files?: string[]
 }
 
 export interface FilewatchStatus {
@@ -202,6 +222,16 @@ export async function listChunks(page = 1, pageSize = 200): Promise<ChunksPage> 
   return call('memory.chunks', { page, page_size: pageSize, doc_id: 'all' })
 }
 
+/** Paginated chunk list from knowledge base (GraphIndexer) */
+export async function listKBChunks(page = 1, pageSize = 200): Promise<ChunksPage> {
+  return call('kb.chunks', { page, page_size: pageSize })
+}
+
+/** 从服务端 Schema 定义获取每个实体类型的合法属性 key 列表 */
+export async function getSchemaProperties(): Promise<{ schemas: Record<string, string[]> }> {
+  return call('kb.schema_properties', {})
+}
+
 /** Fetch ALL chunks for a single document */
 export async function getDocChunks(docId: string): Promise<DocChunksResult> {
   return call('memory.get_chunks', { doc_id: docId })
@@ -248,7 +278,7 @@ export async function getLevelDistribution(): Promise<LabelCount[]> {
   return (res?.rows ?? []).map((row: any) => ({ label: row.lvl || 'unknown', count: row.cnt }))
 }
 
-/** Discover unique document IDs from RAG chunks (iterates pages until exhausted) */
+/** Discover unique document IDs from knowledge base chunks (iterates pages until exhausted) */
 export async function discoverDocs(page = 1, pageSize = 500): Promise<string[]> {
   const ids = new Set<string>()
   let currentPage = page
@@ -257,7 +287,7 @@ export async function discoverDocs(page = 1, pageSize = 500): Promise<string[]> 
 
   while (hasMore && currentPage - page < MAX_PAGES) {
     try {
-      const res = await listChunks(currentPage, pageSize)
+      const res = await listKBChunks(currentPage, pageSize)
       for (const c of res.chunks ?? []) {
         if (c.doc_id) ids.add(c.doc_id)
       }
@@ -277,7 +307,28 @@ export async function discoverDocs(page = 1, pageSize = 500): Promise<string[]> 
 
 // ── Semantic search ──
 
-/** Semantic search across the knowledge base (memory.query) */
+/** Semantic search across the knowledge base via GraphIndexer (kb.search) */
+export async function kbSearch(query: string, limit = 10, minScore = 0): Promise<SearchResult[]> {
+  const records = await call<any[]>('kb.search', { query, limit, min_score: minScore })
+  console.log('[graphApi] kbSearch raw:', JSON.stringify(records, null, 2))
+  return (records ?? []).map((r: any) => {
+    const meta = r.metadata || {}
+    return {
+      id: r.id || '',
+      title: meta.title || (meta.source_file as string) || '',
+      content: r.content || '',
+      tags: Array.isArray(meta.tags) ? meta.tags : [],
+      score: r.score || 0,
+      doc_id: r.doc_id || r.id?.split('_')[0] || '',
+      source: (meta.source_file as string) || '',
+      summary: meta.summary || '',
+      source_file: meta.source_file || '',
+      entity_ids: Array.isArray(meta.entity_ids) ? meta.entity_ids : (meta.entity_names as string[] || []),
+    }
+  })
+}
+
+/** Semantic search across memory (memory.query) */
 export async function semanticSearch(query: string, limit = 5, minScore = 0): Promise<SearchResult[]> {
   const records = await call<any[]>('memory.query', { query, limit, min_score: minScore })
   console.log('[graphApi] semanticSearch raw:', JSON.stringify(records, null, 2))
@@ -330,6 +381,33 @@ export async function listMemoryChunks(page = 1, pageSize = 10): Promise<{
   return { chunks, total: result.total ?? 0, has_more: result.has_more ?? false }
 }
 
+/** List chunks from the knowledge base GraphIndexer (kb.chunks) — returns SearchResult[] */
+export async function listKBChunksAsSearchResults(page = 1, pageSize = 20): Promise<{
+  chunks: SearchResult[]
+  total: number
+  has_more: boolean
+}> {
+  const result = await call<any>('kb.chunks', { page, page_size: pageSize })
+  const chunks: SearchResult[] = (result.chunks ?? []).map((c: any) => {
+    const meta = c.metadata || {}
+    const tags: string[] = Array.isArray(meta.tags) ? meta.tags : []
+    const entityIds: string[] = Array.isArray(meta.entity_ids) ? meta.entity_ids : []
+    return {
+      id: c.id || '',
+      title: meta.title || '',
+      content: c.content || '',
+      tags,
+      score: 0,
+      doc_id: c.doc_id || '',
+      source: meta.source_file || c.doc_id || '',
+      summary: meta.summary || '',
+      source_file: meta.source_file || '',
+      entity_ids: entityIds,
+    }
+  })
+  return { chunks, total: result.total ?? 0, has_more: result.has_more ?? false }
+}
+
 // ── File index state ──
 
 /** Start filewatch indexing service */
@@ -352,9 +430,19 @@ export async function filewatchRemove(dir: string): Promise<{ status: string; di
   return call('filewatch.remove', { dir })
 }
 
+/** Retry indexing failed files. Returns { status, indexed, errors }. */
+export async function filewatchRetryFailed(dir: string, files: string[]): Promise<{ status: string; indexed?: number; errors?: number }> {
+  return call('filewatch.retry-failed', { dir, files })
+}
+
+/** Mark failed files as ignored (hides them from the UI, won't retry). */
+export async function filewatchIgnoreFailed(dir: string, files: string[]): Promise<{ status: string }> {
+  return call('filewatch.ignore-failed', { dir, files })
+}
+
 /** Scan project directory for file states (read-only, no indexing) */
 export async function scanFileStates(projectDir: string): Promise<FileStateResult> {
-  return call('memory.file_states', { project_dir: projectDir })
+  return call('kb.file_states', { project_dir: projectDir })
 }
 
 // ── Multi-hop graph traversal ──

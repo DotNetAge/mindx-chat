@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, inject } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { Search, UserFilled, Monitor, ChatDotRound, FolderOpened, Folder, CollectionTag, Setting, Link, SwitchButton, Plus, Close, Document, FolderAdd, Refresh } from '@element-plus/icons-vue'
 import { useSessionStore } from '../stores/sessionStore'
@@ -65,7 +65,7 @@ const showConnectionDialog = ref(false)
 const setupSelectedPath = ref('')
 const showTokenReport = ref(false)
 const showRuleEditor = ref(false)
-const showEntityTags = ref(false)
+const showEntityTags = inject('showEntityTags', ref(false))
 const restarting = ref(false)
 const showAgentSelector = ref(false)
 const showAbout = ref(false)

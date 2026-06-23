@@ -33,7 +33,7 @@ const progressPercent = computed(() => {
 async function loadStats() {
   statsLoading.value = true
   try {
-    const data = await connectionStore.fetchMemoryStats('')
+    const data = await connectionStore.fetchKBStats('')
     stats.value = data
   } catch {
     try {

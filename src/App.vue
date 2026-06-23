@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ChatLayout from './components/ChatLayout.vue'
 import { useConnectionStore } from './stores/connectionStore'
@@ -13,6 +13,9 @@ const chatStore = useChatStore()
 const { t } = useI18n()
 
 const showSetupDialog = ref(false)
+const showEntityTags = ref(false)
+provide('showSetupDialog', showSetupDialog)
+provide('showEntityTags', showEntityTags)
 const setupAgentName = ref('')
 const selectedDirectory = ref('')
 const pendingSetup = ref(false)
@@ -113,6 +116,14 @@ function handleDirectoryCancel() {
   showSetupDialog.value = false
   pendingSetup.value = false
 }
+
+// 不论通过什么路径打开 setup 对话框（StatusBar → inject、Sidebar 按钮、ChatArea 等），
+// 都确保 setupAgentName 被正确赋值。
+watch(showSetupDialog, (val) => {
+  if (val) {
+    setupAgentName.value = connectionStore.currentAgentName || connectionStore.currentAgent?.name || ''
+  }
+})
 
 watch(() => connectionStore.state, (newState) => {
 })

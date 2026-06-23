@@ -171,7 +171,7 @@ export const presetCategories: EntityCategory[] = [
   },
 ]
 
-/** 根据英文 value 查找中文 label */
+/** 根据英文 value 查找中文 label（实体类型值，如 Concept → 概念） */
 export function getChineseLabel(value: string): string {
   for (const cat of presetCategories) {
     for (const t of cat.types) {
@@ -179,6 +179,396 @@ export function getChineseLabel(value: string): string {
     }
   }
   return value // fallback
+}
+
+// ── Schema 属性 key 中文映射 ──────────────────────────────────────
+
+/** Schema 属性 key → 中文显示名称 */
+export const PROPERTY_LABELS: Record<string, string> = {
+  // ── 通用语义属性 ──
+  'name': '名称',
+  'description': '描述',
+  'definition': '定义',
+  'summary': '摘要',
+  'detail': '详情',
+  'category': '分类',
+  'parent_topic': '上级主题',
+  'keywords': '关键词',
+  'related_concepts': '相关概念',
+  'related_topics': '相关主题',
+  'sub_topics': '子主题',
+  'topic_type': '主题类型',
+  'trending': '是否热门',
+  'status': '状态',
+  'state': '状态',
+  'level': '层级',
+  'priority': '优先级',
+  'confidence': '置信度',
+  'score': '评分',
+  'weight': '权重',
+  'importance': '重要度',
+  'example': '示例',
+  'note': '备注',
+  'remark': '说明',
+
+  // ── 方法 / 流程 ──
+  'steps': '步骤',
+  'prerequisites': '前置条件',
+  'tools_used': '使用工具',
+  'inputs': '输入',
+  'outputs': '输出',
+  'duration': '时长',
+  'complexity': '复杂度',
+
+  // ── 文档 / 资源 ──
+  'title': '标题',
+  'author': '作者',
+  'url': '链接',
+  'type': '类型',
+  'format': '格式',
+  'language': '语言',
+  'version': '版本',
+  'publish_date': '发布日期',
+  'created_at': '创建时间',
+  'updated_at': '更新时间',
+  'source': '来源',
+  'references': '引用',
+  'tags': '标签',
+
+  // ── 人物 ──
+  'email': '邮箱',
+  'role': '角色',
+  'speciality': '专业领域',
+  'organization': '组织机构',
+  'affiliation': '所属单位',
+  'title_pos': '职位',
+
+  // ── 事件 ──
+  'date': '日期',
+  'location': '地点',
+  'event_type': '事件类型',
+  'participants': '参与方',
+  'outcome': '结果',
+  'impact': '影响',
+
+  // ── 指标 / 度量 ──
+  'value': '值',
+  'unit': '单位',
+  'metric_type': '指标类型',
+  'period': '周期',
+  'target': '目标',
+  'baseline': '基线',
+
+  // ── 企业 ──
+  'order_id': '订单号',
+  'customer': '客户',
+  'customer_name': '客户名称',
+  'amount': '金额',
+  'items': '项目',
+  'parties': '签约方',
+  'effective_date': '生效日期',
+  'expiry_date': '到期日期',
+  'key_terms': '关键条款',
+  'contract_type': '合同类型',
+  'supplier': '供应商',
+  'department': '部门',
+  'employee_id': '员工编号',
+  'invoice_number': '发票号',
+  'project_name': '项目名称',
+  'manager': '负责人',
+  'deadline': '截止日期',
+  'budget': '预算',
+  'progress': '进度',
+
+  // ── 金融 ──
+  'ticker': '代码/ ticker',
+  'currency': '货币',
+  'market': '市场',
+  'asset_type': '资产类型',
+  'risk_level': '风险等级',
+  'return_rate': '收益率',
+  'volatility': '波动率',
+  'indicator': '指标',
+  'strategy': '策略',
+  'regulation': '监管要求',
+  'institution': '机构',
+
+  // ── 媒体 / 内容 ──
+  'platform': '平台',
+  'platform_type': '平台类型',
+  'region': '地区',
+  'user_base_size': '用户规模',
+  'tool_type': '工具类型',
+  'pricing_model': '定价模式',
+  'features': '功能特性',
+  'format_type': '格式类型',
+  'typical_duration': '典型时长',
+  'trend_direction': '趋势方向',
+  'demographics': '人群特征',
+  'size_estimate': '规模估算',
+  'interests': '兴趣偏好',
+  'creator': '创作者',
+  'performance_metrics': '表现数据',
+  'views': '播放量',
+  'likes': '点赞数',
+  'shares': '分享数',
+  'comments': '评论数',
+  'strategy_type': '策略类型',
+  'effectiveness': '效果评估',
+
+  // ── 医疗 ──
+  'treatment_type': '治疗类型',
+  'indications': '适应症',
+  'side_effects': '副作用',
+  'symptoms': '症状',
+  'severity': '严重程度',
+  'prevalence': '发病率',
+  'prognosis': '预后',
+  'drug_name': '药物名称',
+  'dosage': '剂量',
+  'anatomy_part': '解剖部位',
+  'diagnostic_criteria': '诊断标准',
+  'prevention_method': '预防方式',
+
+  // ── 新闻 ──
+  'source_name': '来源名称',
+  'source_type': '来源类型',
+  'claim_content': '声称内容',
+  'fact_detail': '事实细节',
+  'bias_description': '倾向描述',
+  'timeline_point': '时间线节点',
+  'figure_role': '人物角色',
+
+  // ── 研究 ──
+  'market_segment': '细分市场',
+  'product_name': '产品名称',
+  'competitor_name': '竞品名称',
+  'customer_segment': '客户细分',
+  'trend_pattern': '趋势形态',
+  'research_method': '研究方法',
+  'sample_size': '样本量',
+  'finding': '发现',
+  'recommendation': '建议',
+
+  // ── 写作 ──
+  'genre': '体裁',
+  'theme': '主题',
+  'character_name': '角色名',
+  'character_role': '角色定位',
+  'setting_desc': '设定描述',
+  'plot_summary': '情节概要',
+  'narrative_style': '叙事风格',
+  'structure_type': '结构类型',
+  'technique_name': '技法名称',
+
+  // ── 技术 ──
+  'framework': '框架',
+  'language_tech': '编程语言',
+  'api_endpoint': 'API 端点',
+  'dependency': '依赖',
+  'license': '许可证',
+  'compatibility': '兼容性',
+  'difficulty': '难度',
+
+  // ── 通用扩展属性（多 Schema 共用） ──
+  'owner': '负责人',
+  'start_date': '开始日期',
+  'end_date': '结束日期',
+  'created_date': '创建日期',
+  'published_date': '发布日期',
+  'publication_date': '出版日期',
+  'industry': '行业',
+  'contact': '联系方式',
+  'contact_person': '联系人',
+  'benchmark': '基准值/对标值',
+  'direction': '方向',
+  'evidence': '证据',
+  'impact_level': '影响程度',
+  'function': '功能',
+  'size': '规模/大小',
+
+  // ── 企业扩展 ──
+  'division': '分部/科室',
+  'head': '负责人',
+  'headcount': '人数/编制',
+  'products_services': '产品/服务',
+
+  // ── 金融扩展 ──
+  'regulatory_body': '监管机构',
+  'jurisdiction': '管辖范围',
+  'affected_sectors': '受影响行业',
+
+  // ── 媒体扩展 ──
+  'followers_count': '粉丝数',
+  'niche': '细分领域',
+  'account_handle': '账号标识',
+
+  // ── 写作扩展 ──
+  'technique_type': '技法类型',
+  'effect': '效果',
+  'example_usage': '使用示例',
+  'genre_type': '体裁类型',
+  'examples': '示例',
+  'conventions': '惯例/规范',
+  'work_type': '作品类型',
+  'synopsis': '简介',
+  'characters': '角色列表',
+  'nationality': '国籍',
+  'story': '故事内容',
+  'conflict_type': '冲突类型',
+  'structure_beat': '结构节拍',
+  'resolution': '结局',
+  'archetype': '原型',
+  'traits': '性格特征',
+  'motivation': '动机',
+  'arc_description': '角色弧描述',
+  'perspective': '叙事视角',
+  'voice_tone': '语调语气',
+  'stylistic_markers': '文体标记',
+  'influences': '影响来源',
+  'related_themes': '相关主题',
+  'significance': '意义',
+  'works': '相关作品',
+
+  // ── 医疗扩展 ──
+  'anatomy_type': '解剖类型',
+  'related_structures': '相关结构',
+  'associated_diseases': '相关疾病',
+  'severity_range': '严重程度范围',
+  'body_system': '身体系统',
+  'org_type': '组织类型',
+  'specialties': '专科专长',
+  'diagnosis_type': '诊断类型',
+  'conditions_diagnosed': '诊断疾病',
+  'accuracy': '准确度',
+  'procedure_type': '手术/操作类型',
+  'recovery_time': '恢复时间',
+  'risks': '风险项',
+  'applicable_to': '适用对象',
+
+
+  // ── 技术 / 实际数据中的自定义属性 ──
+  '4d-matrix': '四维矩阵',
+  'isFromOpen': '是否开源',
+  'urlTemplate': 'URL模板',
+  'jsonSchema': 'JSON模式',
+  'Compliance': '合规性',
+  'ownerName': '所有者名称',
+  'customer_type': '客户类型',
+
+  // ── 通用 Schema 遗漏 ──
+  'domain': '领域',
+  'synonyms': '同义词',
+  'expertise': '专业技能/专长',
+  'purpose': '用途/目的',
+  'vendor': '厂商/供应商',
+
+  // ── 金融 Schema 遗漏 ──
+  'affected_assets': '受影响资产',
+  'details': '详情',
+  'frequency': '频率',
+  'institution_type': '机构类型',
+  'assets_under_management': '管理资产规模(AUM)',
+  'specializations': '专长领域',
+  'market_type': '市场类型',
+  'operating_hours': '交易时间',
+  'index_tickers': '指数代码',
+  'interpretation': '解读/释义',
+  'reputation': '声誉',
+  'risk_type': '风险类型',
+  'mitigation_methods': '缓解措施',
+  'time_horizon': '投资期限',
+  'asset_classes': '资产类别',
+
+  // ── 新闻 Schema 遗漏 ──
+  'bias_type': '偏见类型',
+  'claim_text': '声称内容',
+  'claimant': '声称人',
+  'context': '背景/上下文',
+  'verification_status': '核实状态',
+  'statement': '陈述/声明',
+  'date_verified': '核实日期',
+  'methodology': '方法论',
+  'related_claims': '相关声称',
+  'relevance': '相关性',
+  'statements': '声明列表',
+  'location_type': '地点类型',
+  'coordinates': '坐标',
+  'sector': '行业/板块',
+  'headquarters': '总部地址',
+  'leadership': '领导层',
+  'reliability_rating': '可靠性评级',
+  'political_lean': '政治倾向',
+  'entries': '条目列表',
+
+  // ── 医疗 Schema 遗漏 ──
+  'icd_code': 'ICD编码',
+  'risk_factors': '风险因素',
+  'common_treatments': '常见治疗',
+  'generic_name': '通用名',
+  'drug_class': '药物分类',
+  'dosage_forms': '剂型',
+  'administration_route': '给药途径',
+  'target_conditions': '目标疾病',
+  'credentials': '资质证书',
+
+  // ── 研究 Schema 遗漏 ──
+  'market_position': '市场定位',
+  'strengths': '优势',
+  'weaknesses': '劣势',
+  'market_share': '市场份额',
+  'products': '产品列表',
+  'needs': '需求',
+  'pain_points': '痛点',
+  'behavior_patterns': '行为模式',
+  'financial_details': '财务详情',
+  'growth_rate': '增长率',
+  'key_players': '主要参与者',
+  'method_type': '方法类型',
+  'when_to_use': '适用时机',
+
+  // ── 技术 Schema 遗漏 ──
+  'related_principles': '相关原理',
+  'term': '术语',
+  'document_type': '文档类型',
+  'sections': '章节/分节',
+  'applications': '应用场景',
+  'affected_component': '受影响组件',
+  'workaround': '临时方案',
+  'access_date': '访问日期',
+  'citation': '引用格式',
+  'step_number': '步骤序号',
+  'duration_estimate': '预估时长',
+  'depends_on': '依赖项',
+  'color': '颜色标签',
+  'group': '标签分组',
+  'related_tags': '相关标签',
+  'version_number': '版本号',
+  'changes': '变更内容',
+
+  // ── 写作 Schema 遗漏 ──
+  'style_type': '风格类型',
+  'characteristics': '特征',
+  'components': '组成部分',
+  'time_period': '时间段',
+  'culture': '文化背景',
+  'atmosphere': '氛围',
+  'plot_type': '情节类型',
+  'motivations': '动机列表',
+  'related_techniques': '相关技法',
+
+  // ── 企业/研究 Schema 遗漏补全 ──
+  'issue_date': '开票日期',
+  'due_date': '到期付款日',
+  'line_items': '明细项目',
+  'pricing': '定价',
+  'stage': '生命周期阶段',
+  'competitors': '竞品列表',
+}
+
+/** 根据 Schema 属性 key 获取中文标签 */
+export function getPropertyLabel(key: string): string {
+  return PROPERTY_LABELS[key] || key
 }
 
 // ── 实体类别颜色映射（每个 value 一个有区分度的颜色） ──
