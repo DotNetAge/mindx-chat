@@ -299,26 +299,32 @@ async function loadSessionsForAgent(agentName?: string) {
     }
 
     if (serverSessions.length > 0 && !sessionStore.activeSessionId) {
-      await selectSession(serverSessions[0].session_id)
+      // 按 last_activity_at 降序排列，确保 fallback 选择最近会话
+      const sorted = [...serverSessions].sort((a, b) => {
+        const aTime = a.last_activity_at || a.created_at || 0
+        const bTime = b.last_activity_at || b.created_at || 0
+        return String(bTime).localeCompare(String(aTime))
+      })
+      await selectSession(sorted[0].session_id)
     }
   } catch (err) {
     console.error('Failed to load sessions:', err)
   }
 }
 
-// fallbackLoadSessions: 当没有用户偏好或偏好失效时，使用第一个可用 agent 加载 sessions
+// fallbackLoadSessions: 当没有用户偏好或偏好失效时，尝试回退到 executive-assistant
 async function fallbackLoadSessions(agents: any[]) {
   if (agents.length === 0) {
     console.warn('[MindX] ⚠️ No agents available, cannot load sessions')
     return
   }
-  // 使用 connectionStore 的 primaryAgent getter逻辑：优先 active，否则取第一个
-  const primaryAgent = agents.find(a => a.active) || agents[0]
+  // 优先尝试 executive-assistant，不存在则取第一个 active agent
+  const primaryAgent = agents.find(a => a.name === 'executive-assistant') || agents.find(a => a.active) || agents[0]
   autoSelectedAgent = true
   console.log(`[MindX] 🔄 Fallback: selecting agent "${primaryAgent.name}"`)
-  connectionStore.setCurrentAgent(primaryAgent.name)
   connectionStore.setLastAgent(primaryAgent.name)
-  await loadSessionsForAgent(primaryAgent.name)
+  connectionStore.setCurrentAgent(primaryAgent.name)
+  // 不直接调用 loadSessionsForAgent —— 由 setCurrentAgent 触发的 watcher 处理
 }
 
 async function selectSession(sessionId: string) {
@@ -522,11 +528,9 @@ watch(() => connectionStore.state, async (newState, oldState) => {
         if (hasAgent) {
           autoSelectedAgent = true
           console.log(`[MindX] 🎯 Auto-selecting agent from preferences: "${userPreferences.value.lastAgent}"`)
-          connectionStore.setCurrentAgent(hasAgent.name)
           connectionStore.setLastAgent(hasAgent.name)
-
-          // 4. 加载 sessions 并自动选择会话（await 确保完成后再继续）
-          await loadSessionsForAgent(hasAgent.name)
+          connectionStore.setCurrentAgent(hasAgent.name)
+          // 不直接调用 loadSessionsForAgent —— 由 setCurrentAgent 触发的 watcher 处理
         } else {
           // last_agent 指向的 agent 不存在，fallback 到第一个可用 agent
           console.log(`[MindX] ⚠️ last_agent "${userPreferences.value.lastAgent}" not found, falling back to first available agent`)

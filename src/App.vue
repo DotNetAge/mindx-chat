@@ -24,43 +24,37 @@ const showModelPicker = ref(false)
 async function initializeAfterConnect() {
   if (!connectionStore.isConnected) return
 
+  // Agent/Session 自动选择由 Sidebar 中基于 user.config 的 watcher 处理
+  // 这里仅处理 Model 初始化
+  // 注意：fetchAgents 已在 Sidebar watcher 中调用，此处不再重复
+
+  // ========================================
+  // 🎯 Model 初始化：只从服务端 ~/.mindx.json 读取
+  // ❌ 不再从 Agent.model 读取
+  // ❌ 不再从 localStorage 缓存读取
+  // ========================================
+  console.log(`[MindX] 📋 Fetching user config from server (/home/mindx/.mindx/mindx.json)...`)
+
   try {
-    const agents = await connectionStore.fetchAgents()
-    if (agents.length === 0) return
+    const userConfig = await connectionStore.fetchUserConfig()
+    const modelFromConfig = userConfig.default_model || userConfig.last_model
 
-    // Agent/Session 自动选择由 Sidebar 中基于 user.config 的 watcher 处理
-    // 这里仅处理 Model 初始化
+    console.log(`[MindX] 📋 User config response:`)
+    console.log(`  - default_model: "${userConfig.default_model}"`)
+    console.log(`  - last_model: "${userConfig.last_model}"`)
+    console.log(`  - last_agent: "${userConfig.last_agent}"`)
+    console.log(`  - last_session_id: "${userConfig.last_session_id}"`)
+    console.log(`  - Selected model: "${modelFromConfig}"`)
 
-    // ========================================
-    // 🎯 Model 初始化：只从服务端 ~/.mindx.json 读取
-    // ❌ 不再从 Agent.model 读取
-    // ❌ 不再从 localStorage 缓存读取
-    // ========================================
-    console.log(`[MindX] 📋 Fetching user config from server (/home/mindx/.mindx/mindx.json)...`)
-
-    try {
-      const userConfig = await connectionStore.fetchUserConfig()
-      const modelFromConfig = userConfig.default_model || userConfig.last_model
-
-      console.log(`[MindX] 📋 User config response:`)
-      console.log(`  - default_model: "${userConfig.default_model}"`)
-      console.log(`  - last_model: "${userConfig.last_model}"`)
-      console.log(`  - last_agent: "${userConfig.last_agent}"`)
-      console.log(`  - last_session_id: "${userConfig.last_session_id}"`)
-      console.log(`  - Selected model: "${modelFromConfig}"`)
-
-      if (modelFromConfig) {
-        connectionStore.setCurrentModel(modelFromConfig)
-        console.log(`[MindX] ✅ Model set from server config: ${modelFromConfig}`)
-      } else {
-        console.warn(`[MindX] ❌ No model in server config — user will configure via header gear button`)
-      }
-    } catch (configErr) {
-      console.error(`[MindX] ❌ Failed to fetch user config:`, configErr)
-      console.warn(`[MindX] User can configure via header gear button`)
+    if (modelFromConfig) {
+      connectionStore.setCurrentModel(modelFromConfig)
+      console.log(`[MindX] ✅ Model set from server config: ${modelFromConfig}`)
+    } else {
+      console.warn(`[MindX] ❌ No model in server config — user will configure via header gear button`)
     }
-  } catch (e) {
-    console.error('[MindX] Initialization error:', e)
+  } catch (configErr) {
+    console.error(`[MindX] ❌ Failed to fetch user config:`, configErr)
+    console.warn(`[MindX] User can configure via header gear button`)
   }
 }
 
