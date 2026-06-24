@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElDialog, ElMessage, ElTag, ElButton, ElScrollbar, ElCollapse, ElCollapseItem } from 'element-plus'
+import { ElDialog, ElMessage, ElTag, ElButton, ElScrollbar, ElProgress } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
 import { filewatchRetryFailed, filewatchIgnoreFailed } from '../services/graphApi'
 import type { FailedFileRecord, CompletedFileRecord } from '../services/graphApi'
@@ -18,7 +19,6 @@ const emit = defineEmits<{
 }>()
 
 const retrying = ref<Record<string, boolean>>({})
-const completedOpen = ref<string[]>([])
 
 /** Flatten all directory index states from the filewatch status. */
 const dirStates = computed(() => {
@@ -75,6 +75,11 @@ const totalElapsedMs = computed(() => {
     total += s.total_elapsed_ms || 0
   }
   return total
+})
+
+/** Whether any directory is currently being indexed. */
+const isIndexing = computed(() => {
+  return dirStates.value.some(s => s.state === 'indexing')
 })
 
 /** Retry a single failed file. */
@@ -160,7 +165,26 @@ function formatTime(unix: number): string {
     <ElScrollbar max-height="500px">
       <!-- Overall summary -->
       <div class="summary-section">
-        <div class="summary-row">
+        <!-- Indexing in progress: show animated progress bar -->
+        <div v-if="isIndexing" class="summary-row indexing-active-row">
+          <span class="summary-label">{{ t('sidebar.indexing.progress') }}:</span>
+          <div class="progress-inline">
+            <el-icon class="is-loading index-spinner"><Loading /></el-icon>
+            <ElProgress
+              :percentage="totalProgress.percent"
+              :stroke-width="8"
+              :show-text="false"
+              color="#a78bfa"
+              style="width: 180px; flex-shrink: 0;"
+            />
+            <span class="progress-inline-text">
+              {{ totalProgress.indexed }} / {{ totalProgress.total }}
+              ({{ totalProgress.percent }}%)
+            </span>
+          </div>
+        </div>
+        <!-- Completed or failed: show static numbers -->
+        <div v-else class="summary-row">
           <span class="summary-label">{{ t('sidebar.indexing.progress') }}:</span>
           <span class="summary-value">
             {{ totalProgress.indexed }} / {{ totalProgress.total }}
@@ -177,7 +201,7 @@ function formatTime(unix: number): string {
           <span class="summary-label" style="margin-left: 16px">{{ t('kgViewer.relationships') || '关系' }}:</span>
           <span class="summary-value rel-count">{{ totalEntityStats.rels }}</span>
         </div>
-        <div class="summary-row" v-if="totalElapsedMs > 0">
+        <div class="summary-row" v-if="totalElapsedMs > 0 || !isIndexing">
           <span class="summary-label">{{ t('sidebar.indexing.totalElapsed') || '总耗时' }}:</span>
           <span class="summary-value elapsed-count">{{ formatElapsed(totalElapsedMs) }}</span>
         </div>
@@ -229,18 +253,20 @@ function formatTime(unix: number): string {
           </div>
         </div>
 
-        <!-- Completed files for this directory -->
+        <!-- Completed files for this directory (always visible, not collapsed) -->
         <div v-if="st.completed_files?.length" class="completed-section">
-          <ElCollapse v-model="completedOpen" accordion>
-            <ElCollapseItem :title="`${t('sidebar.indexing.completedFiles')} (${st.completed_files.length})`" :name="st.dir">
-              <div class="completed-item" v-for="cf in st.completed_files" :key="cf.path">
-                <span class="completed-path" :title="cf.path">{{ cf.path }}</span>
-                <span class="completed-meta">
-                  {{ cf.chunks }} {{ t('kgViewer.knowledgePoints') || '知识点' }}<template v-if="cf.elapsed_ms > 0"> · {{ formatElapsed(cf.elapsed_ms) }}</template>
-                </span>
-              </div>
-            </ElCollapseItem>
-          </ElCollapse>
+          <div class="completed-header">
+            <span>{{ t('sidebar.indexing.completedFiles') }}</span>
+            <ElTag type="success" size="small">{{ st.completed_files.length }}</ElTag>
+          </div>
+          <div class="completed-list">
+            <div class="completed-item" v-for="cf in st.completed_files" :key="cf.path">
+              <span class="completed-path" :title="cf.path">{{ cf.path }}</span>
+              <span class="completed-meta">
+                {{ cf.chunks }} {{ t('kgViewer.knowledgePoints') || '知识点' }}<template v-if="cf.elapsed_ms > 0"> · {{ formatElapsed(cf.elapsed_ms) }}</template>
+              </span>
+            </div>
+          </div>
         </div>
 
         <div v-if="st.error" class="dir-error">
@@ -282,6 +308,25 @@ function formatTime(unix: number): string {
 .summary-label {
   color: #94a3b8;
   min-width: 80px;
+}
+.indexing-active-row {
+  align-items: center !important;
+}
+.progress-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.index-spinner {
+  font-size: 16px;
+  color: #a78bfa;
+  flex-shrink: 0;
+}
+.progress-inline-text {
+  font-weight: 600;
+  color: #f1f5f9;
+  font-size: 13px;
+  white-space: nowrap;
 }
 .summary-value {
   font-weight: 600;
@@ -406,6 +451,19 @@ function formatTime(unix: number): string {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid rgba(55, 65, 81, 0.3);
+}
+.completed-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: #34d399;
+  margin-bottom: 6px;
+}
+.completed-list {
+  max-height: 200px;
+  overflow-y: auto;
 }
 .completed-item {
   display: flex;

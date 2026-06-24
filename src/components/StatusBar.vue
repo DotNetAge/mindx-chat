@@ -9,7 +9,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useFileExplorerStore } from '../stores/fileExplorerStore'
 import { useGraphStore } from '../stores/graphStore'
 import { getMindXClient } from '../services/websocket'
-import { FolderOpened, Plus, Document } from '@element-plus/icons-vue'
+import { FolderOpened, Plus, Document, Loading } from '@element-plus/icons-vue'
 import LogDrawer from './LogDrawer.vue'
 import IndexDetailsDialog from './IndexDetailsDialog.vue'
 
@@ -316,7 +316,10 @@ function handleOpenAbout() {
           <div class="progress-bar-fill" :style="{ width: indexProgress.percent + '%' }"></div>
         </div>
         <span class="progress-text">{{ indexProgress.indexed }}/{{ indexProgress.total }}</span>
-        <span v-if="indexingState.active" class="indexing-file">{{ indexingState.message }}</span>
+        <span v-if="indexingState.active" class="indexing-file">
+          <el-icon class="is-loading index-loading-icon"><Loading /></el-icon>
+          {{ indexingState.message }}
+        </span>
       </div>
       <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="graphStore.refreshFilewatchStatus()" />
     </div>
@@ -721,6 +724,13 @@ function handleOpenAbout() {
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.index-loading-icon {
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 /* ── Requirements Dialog ── */
