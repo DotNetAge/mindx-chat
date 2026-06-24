@@ -188,8 +188,10 @@
     "memoryTab": "记忆",
     "selectWorkspace": "请先选择一个工作目录",
     "noAgentSelected": "未选择 Agent，请先选择一个 Agent",
+    "duplicateDirWarning": "当前 Agent「{agent}」已在目录「{dir}」下创建过会话，请重新选择目录",
     "sessionRestored": "会话已恢复/创建",
     "sessionCreated": "会话创建成功",
+    "sessionCreateFailed": "会话创建失败",
     "pendingSend": "离线模式 - 消息已保存到本地",
     "store": { "timeout": { "serverNoResponse": "未收到服务器响应" } }
   },

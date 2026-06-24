@@ -2,16 +2,17 @@
 import { computed, onMounted, watch, ref, onUnmounted, inject } from 'vue'
 import type { Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElTooltip } from 'element-plus'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useChatStore } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useFileExplorerStore } from '../stores/fileExplorerStore'
 import { useGraphStore } from '../stores/graphStore'
 import { getMindXClient } from '../services/websocket'
-import { FolderOpened, Plus, Document, Loading } from '@element-plus/icons-vue'
+import { FolderOpened, Plus, Document, Loading, Monitor } from '@element-plus/icons-vue'
 import LogDrawer from './LogDrawer.vue'
 import IndexDetailsDialog from './IndexDetailsDialog.vue'
+import TerminalDrawer from './TerminalDrawer.vue'
 
 const { t } = useI18n()
 const connectionStore = useConnectionStore()
@@ -22,6 +23,8 @@ const graphStore = useGraphStore()
 
 const logDrawerRef = ref<InstanceType<typeof LogDrawer> | null>(null)
 function openLogDrawer() { logDrawerRef.value?.open() }
+
+const showTerminalDrawer = ref(false)
 
 const showSetupDialog = inject<Ref<boolean>>('showSetupDialog')!
 const showEntityTags = inject<Ref<boolean>>('showEntityTags')!
@@ -156,8 +159,12 @@ watch(() => graphStore.visible, (visible) => {
 })
 
 const activeProjectDir = computed(() => {
+  // Priority: session's project_dir > first watched directory from filewatch
   const active = sessionStore.sessions.find(s => s.session_id === sessionStore.activeSessionId)
-  return active?.project_dir || ''
+  if (active?.project_dir) return active.project_dir
+  const watched = graphStore.filewatchStatus?.watched
+  if (watched && watched.length > 0) return watched[0]
+  return ''
 })
 
 const updateLabel = computed(() => {
@@ -256,98 +263,118 @@ function handleOpenAbout() {
     <div class="status-left">
       <span class="status-dot" :style="{ background: statusColor }"></span>
       <span class="status-text">{{ statusLabel }}</span>
-      <button
-        v-if="!connectionStore.isConnected"
-        class="action-btn connect-btn"
-        @click="handleOpenConnection"
-        :title="t('sidebar.connect')"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
-        </svg>
-      </button>
-      <button
-        v-else
-        class="action-btn disconnect-btn"
-        @click="handleDisconnect"
-        :title="t('sidebar.disconnect')"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-        </svg>
-      </button>
+      <ElTooltip v-if="!connectionStore.isConnected" :content="t('sidebar.connect')" placement="top" :show-after="400">
+        <button
+          class="action-btn connect-btn"
+          @click="handleOpenConnection"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+          </svg>
+        </button>
+      </ElTooltip>
+      <ElTooltip v-else :content="t('sidebar.disconnect')" placement="top" :show-after="400">
+        <button
+          class="action-btn disconnect-btn"
+          @click="handleDisconnect"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+        </button>
+      </ElTooltip>
+
+      <!-- 工作目录 -->
+      <div class="project-dir-section" v-if="activeProjectDir && !indexingState.active">
+        <ElTooltip content="打开工作目录" placement="top" :show-after="400">
+          <button
+            class="dir-label-btn"
+            @click="handleOpenProjectDir"
+          >
+            <el-icon :size="13"><FolderOpened /></el-icon>
+            <span class="dir-label">工作目录</span>
+          </button>
+        </ElTooltip>
+        <ElTooltip :content="activeProjectDir" placement="top" :show-after="500">
+          <span class="dir-path">{{ activeProjectDir }}</span>
+        </ElTooltip>
+        <ElTooltip :content="t('sidebar.addToChat')" placement="top" :show-after="400">
+          <button
+            class="action-btn add-btn"
+            @click="handleToggleFileBrowser"
+          >
+            <el-icon :size="13"><Plus /></el-icon>
+          </button>
+        </ElTooltip>
+      </div>
 
       <!-- Auto Index Status -->
-      <button
-        class="auto-index-indicator"
-        :title="autoIndexTitle"
-        @click="handleToggleAutoIndex"
-        :disabled="toggling"
-      >
-        <span class="auto-index-dot" :class="{ running: filewatchRunning }" :style="!filewatchAvailable ? { background: '#f59e0b' } : undefined"></span>
-        <span class="auto-index-label">{{ autoIndexLabel }}</span>
-      </button>
+      <ElTooltip :content="autoIndexTitle" placement="top" :show-after="400">
+        <button
+          class="auto-index-indicator"
+          @click="handleToggleAutoIndex"
+          :disabled="toggling"
+        >
+          <span class="auto-index-dot" :class="{ running: filewatchRunning }" :style="!filewatchAvailable ? { background: '#f59e0b' } : undefined"></span>
+          <span class="auto-index-label">{{ autoIndexLabel }}</span>
+        </button>
+      </ElTooltip>
 
-      <!-- Project Directory / Indexing Status -->
-      <div class="project-dir-section" v-if="activeProjectDir && !indexingState.active">
-        <button
-          class="action-btn dir-btn"
-          @click="handleOpenProjectDir"
-          :title="t('sidebar.browseFiles')"
+      <!-- Indexing Progress Bar -->
+      <ElTooltip :content="t('sidebar.indexing.clickToViewDetails')" placement="top" :show-after="400">
+        <div
+          class="indexing-progress"
+          v-if="filewatchAvailable || indexingState.active || indexProgress.total > 0 || indexProgress.indexed > 0"
+          @click="showIndexDialog = true"
         >
-          <el-icon :size="13"><FolderOpened /></el-icon>
-        </button>
-        <span class="dir-path" :title="activeProjectDir">{{ activeProjectDir }}</span>
-        <button
-          class="action-btn add-btn"
-          @click="handleToggleFileBrowser"
-          :title="t('sidebar.addToChat')"
-        >
-          <el-icon :size="13"><Plus /></el-icon>
-        </button>
-      </div>
-      <!-- Indexing Progress Bar — always visible when service is available (it's the only entry point to IndexDetailsDialog) -->
-      <div class="indexing-progress" v-if="filewatchAvailable || indexingState.active || indexProgress.total > 0 || indexProgress.indexed > 0"
-        @click="showIndexDialog = true"
-        style="cursor: pointer;"
-        :title="t('sidebar.indexing.clickToViewDetails')"
-      >
-        <div class="progress-bar-track">
-          <div class="progress-bar-fill" :style="{ width: indexProgress.percent + '%' }"></div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" :style="{ width: indexProgress.percent + '%' }"></div>
+          </div>
+          <span class="progress-text">{{ indexProgress.indexed }}/{{ indexProgress.total }}</span>
+          <span v-if="indexingState.active" class="indexing-file">
+            <el-icon class="is-loading index-loading-icon"><Loading /></el-icon>
+            {{ indexingState.message }}
+          </span>
         </div>
-        <span class="progress-text">{{ indexProgress.indexed }}/{{ indexProgress.total }}</span>
-        <span v-if="indexingState.active" class="indexing-file">
-          <el-icon class="is-loading index-loading-icon"><Loading /></el-icon>
-          {{ indexingState.message }}
-        </span>
-      </div>
+      </ElTooltip>
       <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="graphStore.refreshFilewatchStatus()" />
     </div>
 
     <div class="status-center">
-      <button class="stat-block" @click="handleOpenTokenReport" :title="t('tokenUsage.viewDetails')">
-        <span class="stat-label">{{ t('tokenUsage.footerSessions') }}</span>
-        <span class="stat-value session">{{ sessionTokens }}</span>
-        <span class="stat-sep">·</span>
-        <span class="stat-value cost session">{{ sessionCost }}</span>
-        <span class="stat-divider"></span>
-        <span class="stat-label">{{ t('tokenUsage.footerTotal') }}</span>
-        <span class="stat-value total">{{ totalTokens }}</span>
-        <span class="stat-sep">·</span>
-        <span class="stat-value cost total">{{ totalCost }}</span>
-        <span class="stat-divider"></span>
-        <span class="stat-value conversations">{{ totalConversations }}</span>
-      </button>
+      <ElTooltip :content="t('tokenUsage.viewDetails')" placement="top" :show-after="400">
+        <button class="stat-block" @click="handleOpenTokenReport">
+          <span class="stat-label">{{ t('tokenUsage.footerSessions') }}</span>
+          <span class="stat-value session">{{ sessionTokens }}</span>
+          <span class="stat-sep">·</span>
+          <span class="stat-value cost session">{{ sessionCost }}</span>
+          <span class="stat-divider"></span>
+          <span class="stat-label">{{ t('tokenUsage.footerTotal') }}</span>
+          <span class="stat-value total">{{ totalTokens }}</span>
+          <span class="stat-sep">·</span>
+          <span class="stat-value cost total">{{ totalCost }}</span>
+          <span class="stat-divider"></span>
+          <span class="stat-value conversations">{{ totalConversations }}</span>
+        </button>
+      </ElTooltip>
     </div>
 
     <div class="status-right">
-      <button
-        class="action-btn log-btn"
-        @click="openLogDrawer"
-        :title="t('chat.logTab')"
-      >
-        <el-icon :size="13"><Document /></el-icon>
-      </button>
+      <ElTooltip content="Terminal" placement="top" :show-after="400">
+        <button
+          class="action-btn terminal-btn"
+          @click="showTerminalDrawer = true"
+        >
+          <el-icon :size="13"><Monitor /></el-icon>
+        </button>
+      </ElTooltip>
+      <ElTooltip :content="t('chat.logTab')" placement="top" :show-after="400">
+        <button
+          class="action-btn log-btn"
+          @click="openLogDrawer"
+        >
+          <el-icon :size="13"><Document /></el-icon>
+        </button>
+      </ElTooltip>
       <template v-if="connectionStore.updateState">
         <span class="update-indicator" :class="{ downloading: connectionStore.updateState === 'downloading' }">
           <svg class="update-spinner" v-if="connectionStore.updateState === 'downloading'" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -359,15 +386,17 @@ function handleOpenAbout() {
           <span class="update-label">{{ updateLabel }}</span>
         </span>
       </template>
-      <button
-        class="version-btn"
-        v-if="version"
-        @click="handleOpenAbout"
-        :title="t('sidebar.about.title')"
-      >{{ version }}</button>
+      <ElTooltip :content="t('sidebar.about.title')" placement="top" :show-after="400">
+        <button
+          class="version-btn"
+          v-if="version"
+          @click="handleOpenAbout"
+        >{{ version }}</button>
+      </ElTooltip>
     </div>
   </footer>
   <LogDrawer ref="logDrawerRef" />
+  <TerminalDrawer :visible="showTerminalDrawer" @update:visible="showTerminalDrawer = $event" :cwd="activeProjectDir" />
 
   <!-- Requirements Dialog -->
   <el-dialog
@@ -541,6 +570,33 @@ function handleOpenAbout() {
 .add-btn:hover {
   background: rgba(139, 92, 246, 0.15);
   color: #a78bfa;
+}
+
+.dir-label-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.dir-label-btn:hover {
+  background: rgba(55, 65, 81, 0.3);
+  border-color: rgba(55, 65, 81, 0.5);
+}
+
+.dir-label {
+  font-size: 10px;
+  color: var(--text-muted, #94a3b8);
+  flex-shrink: 0;
+  cursor: pointer;
 }
 
 .dir-path {

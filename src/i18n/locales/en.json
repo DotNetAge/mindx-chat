@@ -188,8 +188,10 @@
     "memoryTab": "Memory",
     "selectWorkspace": "Please select a working directory first",
     "noAgentSelected": "No Agent selected, please choose one first",
+    "duplicateDirWarning": "Agent \"{agent}\" already has a session for directory \"{dir}\", please choose a different directory",
     "sessionRestored": "Session restored/created",
     "sessionCreated": "Session created successfully",
+    "sessionCreateFailed": "Failed to create session",
     "pendingSend": "Offline mode - message saved locally",
     "store": { "timeout": { "serverNoResponse": "No response from server" } }
   },

@@ -306,6 +306,21 @@ async function loadSessionsForAgent(agentName?: string) {
   }
 }
 
+// fallbackLoadSessions: 当没有用户偏好或偏好失效时，使用第一个可用 agent 加载 sessions
+async function fallbackLoadSessions(agents: any[]) {
+  if (agents.length === 0) {
+    console.warn('[MindX] ⚠️ No agents available, cannot load sessions')
+    return
+  }
+  // 使用 connectionStore 的 primaryAgent getter逻辑：优先 active，否则取第一个
+  const primaryAgent = agents.find(a => a.active) || agents[0]
+  autoSelectedAgent = true
+  console.log(`[MindX] 🔄 Fallback: selecting agent "${primaryAgent.name}"`)
+  connectionStore.setCurrentAgent(primaryAgent.name)
+  connectionStore.setLastAgent(primaryAgent.name)
+  await loadSessionsForAgent(primaryAgent.name)
+}
+
 async function selectSession(sessionId: string) {
   sessionStore.setActiveSession(sessionId)
   connectionStore.setLastSession(sessionId)
@@ -512,7 +527,15 @@ watch(() => connectionStore.state, async (newState, oldState) => {
 
           // 4. 加载 sessions 并自动选择会话（await 确保完成后再继续）
           await loadSessionsForAgent(hasAgent.name)
+        } else {
+          // last_agent 指向的 agent 不存在，fallback 到第一个可用 agent
+          console.log(`[MindX] ⚠️ last_agent "${userPreferences.value.lastAgent}" not found, falling back to first available agent`)
+          await fallbackLoadSessions(agents)
         }
+      } else if (!autoSelectedAgent) {
+        // 无用户偏好时，使用第一个可用 agent 加载 session
+        console.log(`[MindX] 📋 No user preference, using first available agent`)
+        await fallbackLoadSessions(agents)
       }
 
       console.log(`[MindX] ✅ Loaded ${agents.length} agents and ${models.length} models`)
@@ -521,6 +544,18 @@ watch(() => connectionStore.state, async (newState, oldState) => {
       connectionStore.setServerError(`${t('common.error')}: ${err}`)
     }
   }
+})
+
+// 监听 Agent 切换（覆盖所有切换路径：AgentSelectorDialog 双击/按钮等）
+// 守卫条件 `isLoadedFromServer` 已被移除：如果初始 loadSessionsForAgent
+// 因任何时序问题未完成 syncServerSessions，该守卫会永久阻止后续切换。
+// loadSessionsForAgent 本身就是幂等的（syncServerSessions 是覆盖操作），
+// 即使初始加载期间触发一次冗余调用也无害。
+watch(() => connectionStore.currentAgentName, async (newAgent, oldAgent) => {
+  if (!newAgent || newAgent === oldAgent) return
+  if (!connectionStore.isConnected) return
+  console.log(`[MindX] 🔄 Agent switched: "${oldAgent}" → "${newAgent}", reloading sessions...`)
+  await loadSessionsForAgent(newAgent)
 })
 
 watch(() => connectionStore.showConnectionDialog, (val) => {

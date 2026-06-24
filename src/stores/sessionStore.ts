@@ -73,6 +73,11 @@ export const useSessionStore = defineStore('session', {
     },
 
     addSession(session: Session) {
+      const existing = this.sessions.find(s => s.session_id === session.session_id)
+      if (existing) {
+        Object.assign(existing, session)
+        return
+      }
       this.sessions.unshift(session)
     },
 

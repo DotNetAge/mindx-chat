@@ -74,11 +74,22 @@ async function handleDirectoryConfirm() {
     return
   }
 
+  // 设计规则：同一个 Agent 下每个会话对应唯一目录，如果当前 Agent 已有此目录的会话则阻止创建
+  const normalizedSelected = selectedDirectory.value.replace(/\/+$/, '')
+  const existingSession = sessionStore.sessions.find(
+    s => s.agent_name === setupAgentName.value &&
+         s.project_dir &&
+         s.project_dir.replace(/\/+$/, '') === normalizedSelected
+  )
+  if (existingSession) {
+    ElMessage.warning({
+      message: t('chat.duplicateDirWarning', { agent: setupAgentName.value, dir: normalizedSelected }),
+      duration: 5000
+    })
+    return
+  }
+
   try {
-    // Always call createSession via RPC so the server can ensure the
-    // session's project_dir is registered in the file watchlist.
-    // The server handles dedup: if a session for the same agent+dir
-    // already exists, it returns the existing one and adds the watch.
     const result = await connectionStore.createSession(setupAgentName.value, selectedDirectory.value)
     const sessionId = result.session_id
     console.log(`[MindX] Using session ${sessionId} for agent: ${setupAgentName.value} with dir: ${selectedDirectory.value}`)
@@ -106,9 +117,11 @@ async function handleDirectoryConfirm() {
 
     showSetupDialog.value = false
     pendingSetup.value = false
-    ElMessage.success({ message: t(existingSession ? 'chat.sessionRestored' : 'chat.sessionCreated'), duration: 2000 })
+    ElMessage.success({ message: t('chat.sessionCreated'), duration: 2000 })
   } catch (e) {
     console.error('[MindX] Failed to setup session:', e)
+    const msg = e?.message || t('chat.sessionCreateFailed')
+    ElMessage.error({ message: msg, duration: 5000 })
   }
 }
 

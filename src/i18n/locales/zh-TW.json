@@ -170,8 +170,10 @@
     "memoryTab": "記憶體",
     "selectWorkspace": "請先選擇一個工作目錄",
     "noAgentSelected": "未選擇 Agent，請先選擇一個 Agent",
+    "duplicateDirWarning": "當前 Agent「{agent}」已在目錄「{dir}」下建立過會話，請重新選擇目錄",
     "sessionRestored": "會話已恢復/建立",
     "sessionCreated": "會話建立成功",
+    "sessionCreateFailed": "會話建立失敗",
     "pendingSend": "離線模式 - 訊息已儲存至本機",
     "store": {
       "timeout": {
