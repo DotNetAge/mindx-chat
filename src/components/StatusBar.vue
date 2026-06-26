@@ -24,7 +24,10 @@ const graphStore = useGraphStore()
 const logDrawerRef = ref<InstanceType<typeof LogDrawer> | null>(null)
 function openLogDrawer() { logDrawerRef.value?.open() }
 
-const showTerminalDrawer = ref(false)
+const showTerminalDrawer = computed({
+  get: () => connectionStore.showTerminalDrawer,
+  set: (val: boolean) => { connectionStore.showTerminalDrawer = val }
+})
 
 const showSetupDialog = inject<Ref<boolean>>('showSetupDialog')!
 const showEntityTags = inject<Ref<boolean>>('showEntityTags')!

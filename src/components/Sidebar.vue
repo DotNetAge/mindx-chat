@@ -132,12 +132,36 @@ async function checkForUpdates() {
 }
 
 async function applyUpdate() {
+  if (!updateInfo.value) return
+
+  const source = updateInfo.value.install_source
+  const isMac = navigator.platform.toUpperCase().includes('MAC')
+
+  // Determine the update command based on install source
+  let cmd: string | null = null
+  if (source === 'homebrew') {
+    cmd = 'brew upgrade mindx'
+  } else if (source === 'snap') {
+    cmd = 'sudo snap refresh mindx'
+  } else if (source === 'system' && isMac) {
+    cmd = 'brew upgrade mindx'
+  } else if (source === 'system' && !isMac) {
+    cmd = 'sudo apt update && sudo apt install -y mindx'
+  }
+
+  if (cmd) {
+    // Package-managed: auto-run command in terminal drawer
+    showAbout.value = false
+    connectionStore.setPendingTerminalCommand(cmd)
+    return
+  }
+
+  // Manual install: use the existing backend download-and-install flow
   applyingUpdate.value = true
   try {
     const client = getMindXClient()
     if (client) {
       await client.call('server.apply_update', {})
-      // 安装成功：关闭对话框、清除更新信息、显示通知
       showAbout.value = false
       updateInfo.value = null
       updateRelease.value = null

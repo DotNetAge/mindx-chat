@@ -19,7 +19,7 @@ export interface ChatMessage {
   eventData?: any
   metadata?: Record<string, any>
   sessionId: string
-  agentId?: string
+  agentName?: string
 }
 
 export interface ExecutionStats {
@@ -70,7 +70,7 @@ export const useChatStore = defineStore('chat', {
     pendingInputText: '' as string,
 
     // 追踪每个 session 当前正在产生事件的 agent，用于标记消息来源
-    sessionCurrentAgentId: {} as Record<string, string>,
+    sessionCurrentAgentName: {} as Record<string, string>,
 
     // File modification tracking
     pendingFileModifications: [] as Array<{
@@ -115,9 +115,9 @@ export const useChatStore = defineStore('chat', {
   },
 
   actions: {
-    setSessionCurrentAgent(sessionId: string, agentId?: string) {
-      if (agentId) {
-        this.sessionCurrentAgentId[sessionId] = agentId
+    setSessionCurrentAgent(sessionId: string, agentName?: string) {
+      if (agentName) {
+        this.sessionCurrentAgentName[sessionId] = agentName
       }
     },
 
@@ -128,7 +128,7 @@ export const useChatStore = defineStore('chat', {
 
       const newMessage: ChatMessage = {
         ...message,
-        agentId: message.agentId || this.sessionCurrentAgentId[sessionId],
+        agentName: message.agentName || this.sessionCurrentAgentName[sessionId],
         id: `${message.role}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         timestamp: new Date().toISOString(),
         sessionId

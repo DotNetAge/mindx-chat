@@ -27,6 +27,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { getMindXClient } from '../services/websocket'
+import { useConnectionStore } from '../stores/connectionStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useGraphStore } from '../stores/graphStore'
 
@@ -39,6 +40,7 @@ const emit = defineEmits<{
   'update:visible': [value: boolean]
 }>()
 
+const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
 const graphStore = useGraphStore()
 
@@ -181,6 +183,14 @@ async function initTerminal() {
         connected.value = false
       }
     })
+
+    // Auto-execute pending command if any
+    const cmd = connectionStore.pendingTerminalCommand
+    if (cmd) {
+      connectionStore.pendingTerminalCommand = null
+      // Wait for shell prompt to appear, then send command + Enter (\r)
+      setTimeout(() => sendInput(cmd + '\r'), 500)
+    }
   } catch (err) {
     writeLine(`\x1b[31m[Terminal] Failed to start: ${err}\x1b[0m`)
   }

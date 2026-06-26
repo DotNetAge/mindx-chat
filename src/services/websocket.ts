@@ -262,7 +262,6 @@ class MindXWebSocketClient {
     const envelope = paramsObj as {
       type?: string;
       session_id?: string;
-      agent_id?: string;
       title?: string;
       data?: any;
       meta?: Record<string, any>;
@@ -271,7 +270,7 @@ class MindXWebSocketClient {
     const eventEnvelope = {
       type: envelope.type || method,
       session_id: envelope.session_id,
-      agent_id: envelope.agent_id,
+      agent_name: envelope.meta?.agent_name,
       title: envelope.title,
       data: envelope.data,
       meta: envelope.meta

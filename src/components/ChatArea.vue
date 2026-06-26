@@ -205,14 +205,14 @@ const currentAgentDisplayName = computed(() => {
   return localeMetaValue(agent.meta, 'name', agent.name)
 })
 
-function subAgentDisplayName(agentId: string): string {
-  const agent = connectionStore.agents.find(a => a.name === agentId)
-  if (!agent) return agentId
+function subAgentDisplayName(agentName: string): string {
+  const agent = connectionStore.agents.find(a => a.name === agentName)
+  if (!agent) return agentName
   return localeMetaValue(agent.meta, 'name', agent.name)
 }
 
 interface MessageGroup {
-  agentId: string
+  agentName: string
   isSubAgent: boolean
   messages: ChatMessage[]
 }
@@ -224,11 +224,11 @@ const messageGroups = computed<MessageGroup[]>(() => {
   let current: MessageGroup | null = null
 
   for (const msg of messages) {
-    const agentId = msg.agentId || currentName
-    const isSubAgent = agentId !== currentName
+    const agentName = msg.agentName || currentName
+    const isSubAgent = agentName !== currentName
 
-    if (!current || current.agentId !== agentId) {
-      current = { agentId, isSubAgent, messages: [] }
+    if (!current || current.agentName !== agentName) {
+      current = { agentName, isSubAgent, messages: [] }
       groups.push(current)
     }
     current.messages.push(msg)
@@ -552,9 +552,9 @@ function handleDismiss(messageId: string) {
       <div class="messages-container" v-if="chatStore.currentMessages.length > 0">
         <template v-for="group in messageGroups">
           <!-- SubAgent group: nested container with agent header -->
-          <div v-if="group.isSubAgent" :key="group.agentId + 'sub'" class="subagent-group">
+          <div v-if="group.isSubAgent" :key="group.agentName + 'sub'" class="subagent-group">
             <div class="subagent-group-header">
-              <span class="subagent-agent-badge">{{ subAgentDisplayName(group.agentId) }}</span>
+              <span class="subagent-agent-badge">{{ subAgentDisplayName(group.agentName) }}</span>
               <span class="subagent-agent-meta">sub-agent</span>
             </div>
             <transition-group name="message-list" tag="div" class="subagent-messages">
@@ -576,7 +576,7 @@ function handleDismiss(messageId: string) {
             </transition-group>
           </div>
           <!-- Main agent group: flat rendering -->
-          <transition-group v-else :key="group.agentId + 'main'" name="message-list" tag="div" class="main-messages">
+          <transition-group v-else :key="group.agentName + 'main'" name="message-list" tag="div" class="main-messages">
             <div
               v-for="message in group.messages"
               :key="message.id"
