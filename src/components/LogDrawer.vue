@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConnectionStore } from '../stores/connectionStore'
+import NestedFields from './NestedFields.vue'
 
 const connectionStore = useConnectionStore()
 const { t } = useI18n()
@@ -44,12 +45,102 @@ const COUNT_REFRESH_MS = 15000 // 15 秒
 
 // 关键字过滤（客户端，仅过滤已加载的 lines）
 const filter = ref('')
+const expandedRows = ref(new Set<number>())
+function toggleRow(idx: number) {
+  const s = expandedRows.value
+  if (s.has(idx)) s.delete(idx); else s.add(idx)
+  expandedRows.value = new Set(s) // trigger reactivity
+}
 function applyFilter(): string[] {
   const q = filter.value.trim().toLowerCase()
   if (!q) return lines.value
   return lines.value.filter((l) => l.toLowerCase().includes(q))
 }
 function clearFilter() { filter.value = '' }
+
+// 结构化日志行
+interface LogFieldEntry {
+  key: string
+  value: string
+  isObject: boolean
+  children: LogFieldEntry[]
+  preview: string // collapsed preview like {method, url, ...}
+}
+
+interface JsonLogLine {
+  type: 'json'
+  raw: string
+  level: string
+  timestamp: string
+  message: string
+  flatFields: LogFieldEntry[]
+  objectFields: LogFieldEntry[]
+}
+
+interface TextLogLine {
+  type: 'text'
+  raw: string
+}
+
+type DisplayLine = JsonLogLine | TextLogLine
+
+function parseFields(obj: Record<string, any>): { flat: LogFieldEntry[]; objects: LogFieldEntry[] } {
+  const flat: LogFieldEntry[] = []
+  const objects: LogFieldEntry[] = []
+  for (const [k, v] of Object.entries(obj)) {
+    if (SYSTEM_FIELDS.has(k)) continue
+    if (typeof v === 'object' && v !== null) {
+      const childObj = v as Record<string, any>
+      const childResult = parseFields(childObj)
+      const allChildren = [...childResult.flat, ...childResult.objects]
+      const keys = Object.keys(childObj)
+      objects.push({
+        key: k,
+        value: '',
+        isObject: true,
+        children: allChildren,
+        preview: `{${keys.slice(0, 5).join(', ')}${keys.length > 5 ? ', ...' : ''}}`,
+      })
+    } else {
+      flat.push({ key: k, value: typeof v === 'string' ? v : JSON.stringify(v), isObject: false, children: [], preview: '' })
+    }
+  }
+  return { flat, objects }
+}
+
+function formatTimestamp(ts: string): string {
+  if (!ts) return ''
+  // 去掉毫秒和时区部分，保留到秒
+  const cleaned = ts.replace(/\.\d{3}.*$/, '').replace('T', ' ')
+  return cleaned
+}
+
+const SYSTEM_FIELDS = new Set(['level', 'ts', 'msg', 'logger', 'caller'])
+
+const displayLines = computed<DisplayLine[]>(() => {
+  const items = applyFilter()
+  return items.map(line => {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const obj = JSON.parse(trimmed)
+        if (typeof obj === 'object' && obj !== null) {
+          const { flat, objects } = parseFields(obj)
+          return {
+            type: 'json',
+            raw: line,
+            level: obj.level ?? '',
+            timestamp: formatTimestamp(obj.ts ?? ''),
+            message: obj.msg ?? '',
+            flatFields: flat,
+            objectFields: objects,
+          } as JsonLogLine
+        }
+      } catch { /* not valid JSON, fall through */ }
+    }
+    return { raw: line, type: 'text' } as TextLogLine
+  })
+})
 
 async function loadPage(offset: number): Promise<{ lines: string[]; total: number; returned: number; offset: number; has_more: boolean; path: string; stream: LogStream }> {
   console.log(`[LogDrawer] 📥 loadPage(offset=${offset}, limit=${PAGE_SIZE}, stream=${currentStream.value})`)
@@ -343,8 +434,37 @@ defineExpose({ visible, open, close })
 
           <!-- 加载中 -->
           <div v-if="loading && !lines.length" class="terminal-loading">{{ t('common.loading') }}...</div>
-          <pre v-else-if="!error" class="terminal-content"><template v-for="(line, idx) in lines" :key="idx">{{ line }}
-</template></pre>
+          <div v-else-if="!error" class="terminal-body-inner">
+            <div v-for="(item, idx) in displayLines" :key="idx" class="log-line-wrapper">
+              <div v-if="item.type === 'json'" class="json-log-entry">
+                <div class="log-summary" :class="{ expanded: expandedRows.has(idx) }" @click="toggleRow(idx)">
+                  <span class="expand-icon">{{ expandedRows.has(idx) ? '▾' : '▸' }}</span>
+                  <span class="log-level" :class="'log-level--' + item.level">{{ item.level }}</span>
+                  <span class="log-time">{{ item.timestamp }}</span>
+                  <span class="log-msg">{{ item.message }}</span>
+                </div>
+                <el-descriptions
+                  v-if="expandedRows.has(idx) && item.flatFields.length"
+                  :column="1"
+                  size="small"
+                  border
+                  class="log-descriptions"
+                >
+                  <el-descriptions-item
+                    v-for="(f, fi) in item.flatFields"
+                    :key="fi"
+                    :label="f.key"
+                  >{{ f.value }}</el-descriptions-item>
+                </el-descriptions>
+                <NestedFields
+                  v-if="expandedRows.has(idx) && item.objectFields.length"
+                  :fields="item.objectFields"
+                  class="log-nested-fields"
+                />
+              </div>
+              <div v-else class="plain-log-line">{{ item.raw }}</div>
+            </div>
+          </div>
           <div v-else class="terminal-error">{{ error }}</div>
         </div>
       </div>
@@ -512,8 +632,130 @@ defineExpose({ visible, open, close })
   color: #c9d1d9;
   background: #0d1117;
 }
-.terminal-content {
-  margin: 0; white-space: pre-wrap; word-break: break-all;
+.terminal-body-inner { white-space: pre-wrap; word-break: break-all; }
+
+.log-line-wrapper + .log-line-wrapper {
+  margin-top: 1px;
+}
+
+.plain-log-line {
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  min-height: 18.6px;
+}
+
+/* 结构化日志行 */
+.json-log-entry {
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.log-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: nowrap;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin: 0 -4px;
+  transition: background 0.15s;
+}
+.log-summary:hover {
+  background: #161b22;
+}
+.log-summary.expanded {
+  background: #161b22;
+}
+.expand-icon {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  color: #484f58;
+  font-size: 10px;
+  line-height: 18px;
+  transition: color 0.15s;
+}
+.log-summary:hover .expand-icon {
+  color: #8b949e;
+}
+.log-level {
+  flex-shrink: 0;
+  display: inline-block;
+  min-width: 40px;
+  padding: 0 6px;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+/* level 颜色 */
+.log-level--debug    { color: #d4762c; background: #3d2600; }
+.log-level--info     { color: #58a6ff; background: #0c2d6b; }
+.log-level--warn     { color: #d29922; background: #3d2e00; }
+.log-level--error    { color: #f85149; background: #3d1113; }
+.log-level--dpanic   { color: #f85149; background: #3d1113; }
+.log-level--panic    { color: #f85149; background: #3d1113; }
+.log-level--fatal    { color: #f85149; background: #3d1113; }
+/* 时间戳 */
+.log-time {
+  flex-shrink: 0;
+  color: #484f58;
+  font-size: 11px;
+  font-feature-settings: "tnum";
+}
+/* 消息 */
+.log-msg {
+  flex: 1;
+  color: #c9d1d9;
+  word-break: break-word;
+}
+/* Descriptions 组件在日志中的紧凑深色样式 */
+.log-descriptions {
+  margin-top: 4px;
+}
+.log-descriptions :deep(.el-descriptions__header) {
+  display: none;
+}
+.log-descriptions :deep(.el-descriptions__body) {
+  background: transparent;
+}
+/* 表格：无边距、深色背景 */
+.log-descriptions :deep(.el-descriptions__table) {
+  border-collapse: collapse;
+}
+.log-descriptions :deep(.el-descriptions__table.is-bordered) {
+  border-color: #30363d;
+}
+.log-descriptions :deep(.el-descriptions__cell) {
+  padding: 1px 8px !important;
+  font-size: 12px;
+  line-height: 1.6;
+}
+/* label 列 */
+.log-descriptions :deep(.el-descriptions__cell.is-bordered-label) {
+  color: #79c0ff;
+  background: #161b22 !important;
+  border-color: #30363d;
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* value 列 */
+.log-descriptions :deep(.el-descriptions__cell.is-bordered-content) {
+  color: #c9d1d9;
+  background: transparent !important;
+  border-color: #30363d;
+  word-break: break-all;
+}
+
+/* 嵌套对象字段区域 */
+.log-nested-fields {
+  margin-top: 6px;
 }
 
 /* 加载指示器 */
