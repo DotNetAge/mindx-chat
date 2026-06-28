@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="drawer-up" @after-enter="onAfterEnter">
-      <div v-if="visible" class="terminal-drawer">
+      <div v-if="visible" class="terminal-drawer" :style="drawerStyle">
         <!-- Header toolbar -->
         <div class="drawer-toolbar">
           <span class="toolbar-title">Terminal</span>
@@ -9,6 +9,11 @@
           <el-tag v-if="connected" type="success" size="small" effect="dark" round>Connected</el-tag>
           <el-tag v-else type="danger" size="small" effect="dark" round>Disconnected</el-tag>
           <div class="toolbar-actions">
+            <button
+              class="toolbar-btn fullscreen-btn"
+              @click="isFullscreen = !isFullscreen"
+              :title="isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'"
+            >{{ isFullscreen ? '⤡' : '⤢' }}</button>
             <button class="toolbar-btn" @click="handleClose" title="Close">✕</button>
           </div>
         </div>
@@ -59,12 +64,22 @@ const resolvedCwd = computed(() => {
 })
 
 const terminalContainerRef = ref<HTMLElement | null>(null)
+const isFullscreen = ref(false)
+
+const drawerStyle = computed(() => ({
+  height: isFullscreen.value ? '100vh' : '55vh',
+}))
 
 let term: Terminal | null = null
 let fitAddon: FitAddon | null = null
 let sessionId = ''
 let outputUnregister: (() => void) | null = null
 let exitUnregister: (() => void) | null = null
+
+// Persist session across open/close cycles (module-level, survives component lifecycle)
+let savedSessionId = ''
+let savedCwd = ''
+let savedConnected = false
 
 const connected = ref(false)
 let resizeObserver: ResizeObserver | null = null
@@ -73,10 +88,34 @@ let fitTimers: ReturnType<typeof setTimeout>[] = []
 // ── Lifecycle ──
 
 watch(() => props.visible, async (val) => {
-  if (!val) return
+  if (!val) {
+    // Closing drawer: save session state, dispose xterm (DOM is about to be removed)
+    // but DO NOT kill the backend PTY session
+    if (sessionId) {
+      savedSessionId = sessionId
+      savedCwd = resolvedCwd.value
+      savedConnected = connected.value
+    }
+    return
+  }
   await nextTick()
   // Small delay to let Transition render the DOM at full size
-  setTimeout(() => initTerminal(), 50)
+  setTimeout(() => {
+    // Reuse existing session if same project dir
+    if (savedSessionId && savedCwd === resolvedCwd.value) {
+      restoreTerminal()
+    } else {
+      // Different dir or no saved session: start fresh
+      if (savedSessionId && savedCwd !== resolvedCwd.value) {
+        // Kill the old session on backend since dir changed
+        killSession(savedSessionId)
+      }
+      savedSessionId = ''
+      savedCwd = ''
+      savedConnected = false
+      initTerminal()
+    }
+  }, 50)
 })
 
 onBeforeUnmount(() => {
@@ -214,6 +253,95 @@ function onWindowResize() {
   fitAddon?.fit()
 }
 
+/**
+ * Restore a previously saved terminal session without starting a new PTY on backend.
+ */
+function restoreTerminal() {
+  cleanup()
+  const container = terminalContainerRef.value
+  if (!container || !savedSessionId) return
+
+  // Re-use the saved session
+  sessionId = savedSessionId
+  connected.value = savedConnected
+
+  // Create fresh xterm instance
+  term = new Terminal({
+    cursorBlink: true,
+    cursorStyle: 'bar',
+    fontSize: 14,
+    lineHeight: 1.2,
+    fontFamily: '"SF Mono", "Menlo", "Monaco", "Inconsolata", "Fira Code", "Cascadia Code", "JetBrains Mono", "Source Code Pro", "Roboto Mono", "Noto Sans Mono CJK SC", "Apple Color Emoji", "Segoe UI Emoji", monospace',
+    theme: {
+      background: '#0d1117',
+      foreground: '#c9d1d9',
+      cursor: '#58a6ff',
+      cursorAccent: '#0d1117',
+      selectionBackground: '#264f78',
+      selectionForeground: '#ffffff',
+      black: '#484f58',
+      red: '#f85149',
+      green: '#3fb950',
+      yellow: '#d29922',
+      blue: '#58a6ff',
+      magenta: '#bc8cff',
+      cyan: '#39c5cf',
+      white: '#b1bac4',
+      brightBlack: '#6e7681',
+      brightRed: '#ffa198',
+      brightGreen: '#56d364',
+      brightYellow: '#e3b341',
+      brightBlue: '#79c0ff',
+      brightMagenta: '#d2a8ff',
+      brightCyan: '#56d4dd',
+      brightWhite: '#f0f6fc',
+    },
+    scrollback: 5000,
+    convertEol: true,
+    allowProposedApi: true,
+    allowTransparency: true,
+  })
+
+  fitAddon = new FitAddon()
+  term.loadAddon(fitAddon)
+  term.open(container)
+
+  // Re-setup resize observer
+  let fitRaf = 0
+  resizeObserver = new ResizeObserver(() => {
+    cancelAnimationFrame(fitRaf)
+    fitRaf = requestAnimationFrame(() => fitAddon?.fit())
+  })
+  resizeObserver.observe(container)
+  window.addEventListener('resize', onWindowResize)
+  scheduleDelayedFits()
+
+  // Re-wire user input
+  term.onData((data) => {
+    sendInput(data)
+  })
+  term.onResize(({ cols, rows }) => {
+    resizeTerminal(cols, rows)
+  })
+
+  // Re-register event listeners for the saved session
+  const client = getMindXClient()
+  if (client) {
+    outputUnregister = client.on('terminal.output', (envelope) => {
+      if (envelope.session_id === sessionId && envelope.data) {
+        term?.write(envelope.data)
+      }
+    })
+    exitUnregister = client.on('terminal.exit', (envelope) => {
+      if (envelope.session_id === sessionId) {
+        const code = envelope.meta?.exit_code ?? 0
+        term?.write(`\r\n\x1b[90m[Process exited with code ${code}]\x1b[0m\r\n`)
+        connected.value = false
+      }
+    })
+  }
+}
+
 function cleanup() {
   window.removeEventListener('resize', onWindowResize)
 
@@ -241,8 +369,34 @@ function cleanup() {
 }
 
 function handleClose() {
-  cleanup()
+  // Save session state and dispose xterm, but keep backend PTY alive
+  if (sessionId) {
+    savedSessionId = sessionId
+    savedCwd = resolvedCwd.value
+    savedConnected = connected.value
+  }
+  disposeXterm()
   emit('update:visible', false)
+}
+
+/** Dispose only the xterm UI instance, keeping the backend session alive */
+function disposeXterm() {
+  window.removeEventListener('resize', onWindowResize)
+  fitTimers.forEach(clearTimeout)
+  fitTimers = []
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+  outputUnregister?.call(this)
+  outputUnregister = null
+  exitUnregister?.call(this)
+  exitUnregister = null
+  term?.dispose()
+  term = null
+  fitAddon = null
+  connected.value = false
+  sessionId = ''  // cleared here; savedSessionId retains it for restore
 }
 
 // ── RPC Helpers ──
@@ -259,10 +413,11 @@ function resizeTerminal(cols: number, rows: number) {
   client?.call('terminal.resize', { session_id: sessionId, rows, cols, x: 0, y: 0 }).catch(() => {})
 }
 
-function killSession() {
-  if (!sessionId) return
+function killSession(sid?: string) {
+  const targetId = sid ?? sessionId
+  if (!targetId) return
   const client = getMindXClient()
-  client?.call('terminal.kill', { session_id: sessionId }).catch(() => {})
+  client?.call('terminal.kill', { session_id: targetId }).catch(() => {})
 }
 
 function writeLine(text: string) {
@@ -279,7 +434,7 @@ function writeLine(text: string) {
   right: 0;
   bottom: 0;
   height: 55vh;
-  z-index: 9000;
+  z-index: 99999;
   display: flex;
   flex-direction: column;
   background: #0d1117;
@@ -288,6 +443,7 @@ function writeLine(text: string) {
   /* Ensure full viewport width */
   box-sizing: border-box;
   width: 100vw;
+  transition: height 0.25s ease;
 }
 
 /* ===== Toolbar ===== */
@@ -338,6 +494,13 @@ function writeLine(text: string) {
 .toolbar-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #e6edf3;
+}
+.fullscreen-btn {
+  font-size: 18px;
+  margin-right: 4px;
+}
+.fullscreen-btn:hover {
+  color: #58a6ff;
 }
 
 /* ===== Terminal Container ===== */

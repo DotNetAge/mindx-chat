@@ -51,9 +51,9 @@ function handleEntityClick(entityIds: string[]) {
 
     <!-- Tree -->
     <div v-else class="tree-container">
-      <template v-for="node in tree">
+      <template v-for="node in tree" :key="node.result.id">
         <!-- ── 单层树节点 ── -->
-        <div :key="node.result.id" class="tree-node-row" :class="{ ghost: node.ghost }">
+        <div class="tree-node-row" :class="{ ghost: node.ghost }">
           <!-- [+]/[−] -->
           <button
             v-if="node.hasChildren"
@@ -142,6 +142,7 @@ function handleEntityClick(entityIds: string[]) {
           </div>
         </div>
       </template>
+    </template>
     </div>
   </div>
 </template>

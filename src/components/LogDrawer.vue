@@ -370,7 +370,7 @@ defineExpose({ visible, open, close })
               v-for="opt in STREAM_OPTIONS"
               :key="opt.value"
               class="stream-tab"
-              :class="{ active: currentStream === opt.value }"
+              :class="{ active: currentStream === opt.value, 'tab-error': opt.value === 'error' }"
               :title="opt.title"
               role="tab"
               :aria-selected="currentStream === opt.value"
@@ -542,6 +542,10 @@ defineExpose({ visible, open, close })
   background: #21262d;
   color: #c9d1d9;
   box-shadow: 0 0 0 1px #30363d;
+}
+.stream-tab.tab-error,
+.stream-tab.tab-error.active {
+  color: #f85149;
 }
 .tab-badge {
   display: inline-block;

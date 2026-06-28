@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import {
   Close, Folder, Document,
   RefreshRight, Setting, Edit, Reading, Link,
-  Plus, Delete
+  Plus, Delete, Monitor
 } from '@element-plus/icons-vue'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useFileExplorerStore } from '../stores/fileExplorerStore'
@@ -404,6 +404,9 @@ function handleClose() {
             </h1>
           </div>
           <div class="fv-header-right">
+            <button class="action-btn" @click="connectionStore.showTerminalDrawer = true" title="Terminal">
+              <el-icon><Monitor /></el-icon>
+            </button>
             <button class="close-btn" @click="handleClose" :title="t('common.close')">
               <el-icon><Close /></el-icon>
             </button>
@@ -715,6 +718,19 @@ function handleClose() {
 .close-btn:hover {
   color: #f87171;
   background: rgba(239, 68, 68, 0.12);
+}
+.action-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 8px; cursor: pointer;
+  transition: all .15s;
+}
+.action-btn:hover {
+  color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.08);
 }
 
 /* ─── Body ─── */
