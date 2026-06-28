@@ -30,7 +30,15 @@ const showDetail = ref(false)
 const isFailed = computed(() => props.status === 'failed')
 const isDone = computed(() => props.status === 'done' || props.status === 'failed')
 
-const toolName = computed(() => props.start?.tool_name || props.end?.tool_name || props.title || t('tool.tool'))
+// 显示名：先查 i18n 翻译（tool.execNames.xxx），找不到则用原始工具名
+const toolName = computed(() => {
+  const raw = props.start?.tool_name || props.end?.tool_name || props.title
+  if (!raw) return t('tool.tool')
+  const key = `tool.execNames.${raw}`
+  const translated = t(key)
+  // vue-i18n 找不到 key 时会原样返回 key 字符串，此时回退到原始名
+  return translated !== key ? translated : raw
+})
 
 // ===== 计时器：执行中实时计时，完成后显示服务端 duration_ms =====
 const startTime = ref<number>(0)
