@@ -15,6 +15,15 @@ const props = defineProps<{
   onNodeClick?: (nodeId: string) => void
 }>()
 
+// ── 检查节点是否可展开（有出边） ──
+const expandableNodeIds = computed(() => {
+  const ids = new Set<string>()
+  for (const e of store.edges) {
+    ids.add(e.from_node_id)
+  }
+  return ids
+})
+
 // ── Graph data ──────────────────────────────────────────────────────────
 const graphData = computed<RGJsonData>(() => {
   const multiHopNodes = store.multiHopResult
@@ -35,6 +44,7 @@ const nodes = store.filteredNodes.map(n => {
     const baseColor = getNodeColor(n)
     const degree = degreeMap.get(n.id) || 1
     const radius = Math.max(6, Math.min(20, 4 + Math.sqrt(degree) * 3))
+    const isExpandable = expandableNodeIds.value.has(n.id)
     return {
       id: n.id,
       text: getChineseLabel(n.properties.name) || n.id,
@@ -52,6 +62,9 @@ const nodes = store.filteredNodes.map(n => {
         hopLevel,
         baseColor,
         radius,
+        isExpandable,
+        isExpanded: store.isGraphNodeExpanded(n.id),
+        labels: n.labels,
       },
     }
   })
@@ -115,6 +128,10 @@ const options = computed(() => ({
 }))
 
 function handleNodeClick(node: any, _e: any) {
+  // 可展开的节点：单击切换展开/折叠
+  if (node.data?.isExpandable) {
+    store.toggleGraphNodeExpand(node.id)
+  }
   props.onNodeClick?.(node.id)
 }
 
@@ -174,9 +191,10 @@ watch(() => [store.filteredNodes, store.filteredEdges], async () => {
       :on-node-expand="handleNodeClick"
     >
       <template #node="{node}">
-        <div class="custom-node" :class="{ highlighted: node.data?.isHighlighted }">
+        <div class="custom-node" :class="{ highlighted: node.data?.isHighlighted, expandable: node.data?.isExpandable }" @dblclick="store.toggleGraphNodeExpand(node.id)">
           <span
             class="node-dot"
+            :class="{ expanded: node.data?.isExpanded }"
             :style="{
               background: node.color,
               width: node.data?.radius * 2 + 'px',
@@ -184,6 +202,12 @@ watch(() => [store.filteredNodes, store.filteredEdges], async () => {
             }"
           ></span>
           <span class="node-label" :class="{ highlighted: node.data?.isHighlighted }" :style="{ fontSize: node.fontSize + 'px' }">{{ node.text }}</span>
+          <!-- Expand/collapse indicator -->
+          <span v-if="node.data?.isExpandable" class="expand-indicator" :class="{ expanded: node.data?.isExpanded }">
+            <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
+              <path d="M3.5 0v3.5H0v1h3.5V8h1V4.5H8v-1H4.5V0z" />
+            </svg>
+          </span>
         </div>
       </template>
     </RelationGraph>
@@ -273,6 +297,40 @@ watch(() => [store.filteredNodes, store.filteredEdges], async () => {
 }
 .node-label.highlighted {
   color: #fbbf24 !important;
+}
+.custom-node.expandable {
+  cursor: pointer;
+}
+.custom-node.expandable:hover .node-dot {
+  box-shadow: 0 0 8px 2px rgba(6,182,212,.4);
+}
+.node-dot.expanded {
+  box-shadow: 0 0 8px 2px rgba(139,92,246,.5);
+}
+.expand-indicator {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(30,41,59,.85);
+  border: 1px solid rgba(148,163,184,.3);
+  border-radius: 50%;
+  color: #94a3b8;
+  transition: all .15s;
+  opacity: 0;
+}
+.custom-node:hover .expand-indicator {
+  opacity: 1;
+}
+.expand-indicator.expanded {
+  opacity: 1;
+  background: rgba(139,92,246,.2);
+  border-color: #8b5cf6;
+  color: #a78bfa;
 }
 
 /* ── Edge label dark theme ── */

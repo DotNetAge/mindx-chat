@@ -41,6 +41,20 @@ const activeMainTab = () => {
             <h1 class="gv-title">{{ t('kgViewer.title') }}</h1>
           </div>
           <div class="gv-header-right">
+            <!-- 重置力导图折叠状态 -->
+            <button
+              v-if="store.graphProgressiveEnabled"
+              class="reset-btn"
+              :title="t('kgViewer.collapseAll')"
+              @click="store.resetGraphVisibility()"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <line x1="9" y1="12" x2="15" y2="12"/>
+                <line x1="12" y1="9" x2="12" y2="15"/>
+              </svg>
+              <span class="reset-label">Collapse</span>
+            </button>
             <button class="close-btn" @click="handleBack" :title="t('common.close')">
               <el-icon><Close /></el-icon>
             </button>
@@ -143,6 +157,25 @@ const activeMainTab = () => {
 .close-btn:hover {
   color: #f87171;
   background: rgba(239, 68, 68, 0.12);
+}
+.reset-btn {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 10px;
+  font-size: 11px; font-weight: 600;
+  color: var(--text-secondary);
+  background: rgba(139,92,246,.1);
+  border: 1px solid rgba(139,92,246,.2);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.reset-btn:hover {
+  color: #a78bfa;
+  background: rgba(139,92,246,.2);
+  border-color: rgba(139,92,246,.35);
+}
+.reset-label {
+  white-space: nowrap;
 }
 .gv-title {
   font-size: 16px; font-weight: 700; color: var(--text-primary);

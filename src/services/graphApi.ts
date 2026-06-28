@@ -70,6 +70,10 @@ export interface SearchResult {
   summary?: string
   source_file?: string
   entity_ids?: string[]
+  // ── 分层 RAG 字段 ──
+  level?: number          // 语义层级深度（0=文档摘要, 1=章/类, 2=节/方法...）
+  parent_id?: string      // 父 chunk 的 SHA
+  chunk_type?: string     // root | segment | region
 }
 
 // ── File index state types ──
@@ -324,6 +328,10 @@ export async function kbSearch(query: string, limit = 10, minScore = 0): Promise
       summary: meta.summary || '',
       source_file: meta.source_file || '',
       entity_ids: Array.isArray(meta.entity_ids) ? meta.entity_ids : (meta.entity_names as string[] || []),
+      // ── 分层 RAG ──
+      level: typeof meta.level === 'number' ? meta.level : undefined,
+      parent_id: typeof meta.parent_id === 'string' && meta.parent_id ? meta.parent_id : undefined,
+      chunk_type: typeof meta.chunk_type === 'string' ? meta.chunk_type : undefined,
     }
   })
 }

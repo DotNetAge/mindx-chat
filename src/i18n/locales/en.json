@@ -231,7 +231,35 @@
     "readRange": "Read Range",
     "moreAvailable": "More available",
     "hideRawJson": "Hide Raw JSON",
-    "viewRawJson": "View Raw JSON"
+    "viewRawJson": "View Raw JSON",
+    "execNames": {
+      "Grep": "Full Text Search",
+      "Glob": "Search Files",
+      "Read": "Read File",
+      "Write": "Write File",
+      "Edit": "Edit File",
+      "Bash": "Execute Shell Command",
+      "RunScript": "Execute Script",
+      "WebSearch": "Search the Web",
+      "WebFetch": "Fetch Web Page",
+      "AskUser": "Ask",
+      "AskPermission": "Request Authorization",
+      "Ls": "Browse Directory",
+      "CollectResults": "Collect Results",
+      "TaskCreate": "Create Task",
+      "TaskList": "List Tasks",
+      "TaskGet": "Get Task",
+      "TaskUpdate": "Update Task",
+      "SubAgent": "Dispatch Work",
+      "TeamCreate": "Create Team",
+      "TeamDelete": "Delete Team",
+      "TeamList": "List Teams",
+      "TeamGetTasks": "Get Team Tasks",
+      "AgentTalk": "Whisper",
+      "LocalSearch": "Search Knowledge Base",
+      "Sleep": "Wait",
+      "Skill": "Activate Skill"
+    }
   },
   "diff": { "added": "Added", "modified": "Modified" },
   "form": {
@@ -654,7 +682,8 @@
       "INVOLVES": "Involves",
       "Semantic": "Semantic",
       "SEMANTIC": "Semantic"
-    }
+    },
+    "collapseAll": "Collapse All"
   },
   "ruleEditor": {
     "title": "Rules Editor",

@@ -12,6 +12,7 @@ import { filewatchRemove } from '../services/graphApi'
 import type { DirIndexState } from '../services/graphApi'
 import { useMarkdown } from '../composables/useMarkdown'
 import { getChineseLabel, getEntityColor } from '../types/entityCategories'
+import TreeSearchPanel from './TreeSearchPanel.vue'
 
 const { t } = useI18n()
 const store = useGraphStore()
@@ -461,63 +462,13 @@ watch(() => store.defaultChunks, (chunks) => {
       </template>
 
       <!-- ═══════════════ Search Results (fallback when no tab active) ═══════════════ -->
-      <template v-else-if="store.searchResults.length > 0 || store.searchLoading">
+      <template v-else-if="store.searchResults.length > 0 || store.searchLoading || store.searchTree.length > 0">
         <div class="search-results-section">
           <h4 class="section-title">{{ t('kgViewer.searchResults') }} ({{ store.searchResults.length }})</h4>
-
-          <!-- Loading skeleton -->
-          <div v-if="store.searchLoading" class="search-skeleton">
-            <div v-for="i in 3" :key="i" class="skeleton-item"></div>
-          </div>
-
-          <!-- Result items -->
-          <div v-else class="search-results">
-            <div
-              v-for="r in store.searchResults"
-              :key="r.id"
-              class="chunk-card search-result-card"
-            >
-              <!-- Confidence badge -->
-              <div class="confidence-badge" :class="confidenceClass(r.score)">
-                置信度：{{ (r.score * 100).toFixed(0) }}%
-              </div>
-
-              <!-- ── Title: summary (from metadata) ── -->
-              <div
-                v-if="r.summary"
-                class="chunk-title"
-                :title="r.summary"
-                @click="toggleChunkExpand(r.id)"
-              >
-                {{ r.summary }}
-              </div>
-
-              <!-- ── Content (expanded, markdown rendered) ── -->
-              <div
-                v-if="isChunkExpanded(r.id)"
-                class="chunk-content"
-                :class="{ 'has-entities': r.entity_ids?.length }"
-                :title="r.entity_ids?.length ? '点击关联知识节点' : ''"
-                @click="r.entity_ids?.length && onChunkContentClick(r.entity_ids)"
-                v-html="renderMd(r.content)"
-              ></div>
-
-              <!-- ── Separator ── -->
-              <div v-if="r.source_file || (r.tags && r.tags.length)" class="chunk-separator"></div>
-
-              <!-- ── Footer: tags + source file ── -->
-              <div class="chunk-footer">
-                <div v-if="r.tags && r.tags.length" class="chunk-tags">
-                  <span v-for="tag in r.tags.slice(0, 5)" :key="tag" class="chunk-tag">{{ tag }}</span>
-                  <span v-if="r.tags.length > 5" class="chunk-tag-more">+{{ r.tags.length - 5 }}</span>
-                </div>
-                <div v-if="r.source_file" class="chunk-file" :title="r.source_file" @click="store.openFile(r.source_file)">
-                  <el-icon :size="11"><Document /></el-icon>
-                  <span>{{ typeof r.source_file === 'string' ? r.source_file.split('/').pop() : '' }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <TreeSearchPanel
+            :tree="store.searchTree"
+            :loading="store.searchLoading"
+          />
         </div>
 
         <!-- ── Related Graph Paths ── -->

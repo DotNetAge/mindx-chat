@@ -1,8 +1,10 @@
 import { defineStore } from 'pinia'
 import * as api from '../services/graphApi'
+import { buildSearchTree, type TreeNode } from '../utils/treeBuilder'
 
 // Re-export types for convenience
 export type { GraphNode, GraphEdge, LabelCount, RelationTypeCount, DocChunk, SearchResult, FileStateResult, FilewatchStatus, MultiHopResult, HopNode, HopEdge } from '../services/graphApi'
+export type { TreeNode } from '../utils/treeBuilder'
 
 // ── Category color mapping (aligned with theme CSS vars) ──
 export const CATEGORY_COLORS: Record<string, string> = {
@@ -56,6 +58,10 @@ export interface GraphViewerState {
   // Semantic search
   searchResults: api.SearchResult[]
   searchLoading: boolean
+  /** 树状搜索结果 */
+  searchTree: TreeNode[]
+  /** 已展开的 chunk ID */
+  expandedChunkIds: Set<string>
 
   // Default chunk list (paginated from indexer, 20 per page)
   defaultChunks: api.SearchResult[]
@@ -78,6 +84,12 @@ export interface GraphViewerState {
   // Chunk node highlighting & filtering
   highlightedNodeIds: Set<string>
   chunkNodeIds: Set<string>
+
+  // Graph progressive loading
+  /** 当前在力导图中可见的节点 ID */
+  graphVisibleNodeIds: Set<string>
+  /** 是否启用力导图渐进加载模式 */
+  graphProgressiveEnabled: boolean
 
   // Node detail drawer chunks
   detailChunks: api.SearchResult[]
@@ -112,6 +124,8 @@ export const useGraphStore = defineStore('graph', {
     searchQuery: '',
     searchResults: [],
     searchLoading: false,
+    searchTree: [],
+    expandedChunkIds: new Set(),
     defaultChunks: [],
     defaultChunksLoading: false,
     chunkPage: 1,
@@ -120,13 +134,15 @@ export const useGraphStore = defineStore('graph', {
     mainTabs: [{ id: 'graph', type: 'graph', label: '图谱', closable: false }],
     activeMainTabId: 'graph',
     multiHopResult: null,
-      multiHopLoading: false,
-      multiHopRootId: null,
-      highlightedNodeIds: new Set(),
-      chunkNodeIds: new Set(),
-      detailChunks: [],
-      detailLoading: false,
-      showOrphanNodes: false,
+    multiHopLoading: false,
+    multiHopRootId: null,
+    highlightedNodeIds: new Set(),
+    chunkNodeIds: new Set(),
+    graphVisibleNodeIds: new Set(),
+    graphProgressiveEnabled: false,
+    detailChunks: [],
+    detailLoading: false,
+    showOrphanNodes: false,
     filewatchStatus: null,
     fileStates: null,
     fileStatesLoading: false,
@@ -187,6 +203,11 @@ export const useGraphStore = defineStore('graph', {
         result = result.filter(n => state.chunkNodeIds.has(n.id))
       }
 
+      // 力导图渐进加载：只显示可见节点
+      if (state.graphProgressiveEnabled && state.graphVisibleNodeIds.size > 0) {
+        result = result.filter(n => state.graphVisibleNodeIds.has(n.id))
+      }
+
       return result
     },
 
@@ -234,6 +255,8 @@ export const useGraphStore = defineStore('graph', {
       this.selectedLabels = []
       this.searchQuery = ''
       this.searchResults = []
+      this.searchTree = []
+      this.expandedChunkIds.clear()
       this.defaultChunks = []
       this.detailChunks = []
       this.showOrphanNodes = false
@@ -245,6 +268,8 @@ export const useGraphStore = defineStore('graph', {
       this.mainTabs = [{ id: 'graph', type: 'graph', label: '图谱', closable: false }]
       this.activeMainTabId = 'graph'
       this.error = null
+      this.graphVisibleNodeIds.clear()
+      this.graphProgressiveEnabled = false
     },
 
     selectNode(nodeId: string | null) {
@@ -359,11 +384,60 @@ export const useGraphStore = defineStore('graph', {
           console.warn('[GraphStore] discoverDocs failed:', e)
           this.docs = []
         }
+        this.seedGraphVisibility()
       } catch (e: any) {
         this.error = e.message || String(e)
       } finally {
         this.loading = false
       }
+    },
+
+    /* ── 力导图渐进加载 ──────────────────────────────── */
+
+    /** 种子化可见节点：仅显示 Region + Document */
+    seedGraphVisibility() {
+      if (this.nodes.length === 0) return
+      const visible = new Set<string>()
+      for (const n of this.nodes) {
+        if (n.labels.includes('Region') || n.labels.includes('Document')) {
+          visible.add(n.id)
+        }
+      }
+      this.graphVisibleNodeIds = visible
+      this.graphProgressiveEnabled = true
+      console.log(`[GraphStore] visibility seeded: ${visible.size} nodes`)
+    },
+
+    /** 展开节点：将其直接子节点加入可见集 */
+    toggleGraphNodeExpand(nodeId: string) {
+      const expanded = this.isGraphNodeExpanded(nodeId)
+      const childIds = new Set<string>()
+      for (const e of this.edges) {
+        if (e.from_node_id === nodeId) childIds.add(e.to_node_id)
+      }
+      if (childIds.size === 0) return
+      const next = new Set(this.graphVisibleNodeIds)
+      if (expanded) {
+        childIds.forEach(id => next.delete(id))
+      } else {
+        childIds.forEach(id => next.add(id))
+      }
+      this.graphVisibleNodeIds = next
+    },
+
+    /** 判断节点是否已展开（子节点可见） */
+    isGraphNodeExpanded(nodeId: string): boolean {
+      for (const e of this.edges) {
+        if (e.from_node_id === nodeId && this.graphVisibleNodeIds.has(e.to_node_id)) return true
+      }
+      return false
+    },
+
+    /** 重置力导图可见性（回到初始态） */
+    resetGraphVisibility() {
+      this.graphProgressiveEnabled = false
+      this.graphVisibleNodeIds.clear()
+      this.seedGraphVisibility()
     },
 
     /** Load neighbors for a node and highlight them on canvas */
@@ -404,9 +478,15 @@ export const useGraphStore = defineStore('graph', {
       try {
         this.searchResults = await api.kbSearch(query, 10)
         console.log('[GraphStore] kbSearch results:', JSON.stringify(this.searchResults))
+        // 构建搜索树 + 自动展开 Level 0 根节点
+        const tree = buildSearchTree(this.searchResults)
+        this.searchTree = tree
+        // 自动展开所有 Level 0 节点
+        this.expandedChunkIds = new Set(tree.filter(n => (n.result.level ?? 0) === 0).map(n => n.result.id))
       } catch (e: any) {
         console.warn('[GraphStore] KB search failed:', e)
         this.searchResults = []
+        this.searchTree = []
       } finally {
         this.searchLoading = false
       }
@@ -414,7 +494,25 @@ export const useGraphStore = defineStore('graph', {
 
     clearSearch() {
       this.searchResults = []
+      this.searchTree = []
+      this.expandedChunkIds.clear()
       this.searchLoading = false
+    },
+
+    /** 切换搜索树节点的展开/折叠状态 */
+    toggleTreeNode(chunkId: string) {
+      if (this.expandedChunkIds.has(chunkId)) {
+        this.expandedChunkIds.delete(chunkId)
+      } else {
+        this.expandedChunkIds.add(chunkId)
+      }
+      // 触发响应式更新
+      this.expandedChunkIds = new Set(this.expandedChunkIds)
+    },
+
+    /** 递归判断节点是否已展开 */
+    isTreeNodeExpanded(chunkId: string): boolean {
+      return this.expandedChunkIds.has(chunkId)
     },
 
     // ── Node detail drawer ──

@@ -232,7 +232,35 @@
     "moreAvailable": "还有更多",
     "hideRawJson": "隐藏原始 JSON",
     "viewRawJson": "查看原始 JSON",
-    "totalLinesLabel": "总 {n} 行"
+    "totalLinesLabel": "总 {n} 行",
+    "execNames": {
+      "Grep": "全文搜索",
+      "Glob": "搜索文件",
+      "Read": "读取文件",
+      "Write": "写入文件",
+      "Edit": "编辑文件",
+      "Bash": "执行 Shell 命令",
+      "RunScript": "执行脚本",
+      "WebSearch": "搜索互联网",
+      "WebFetch": "抓取网页",
+      "AskUser": "询问",
+      "AskPermission": "请求授权",
+      "Ls": "浏览目录",
+      "CollectResults": "收集结果",
+      "TaskCreate": "创建任务",
+      "TaskList": "列出任务",
+      "TaskGet": "获取任务",
+      "TaskUpdate": "更新任务",
+      "SubAgent": "分发工作",
+      "TeamCreate": "创建团队",
+      "TeamDelete": "删除团队",
+      "TeamList": "列出团队",
+      "TeamGetTasks": "获取团队任务",
+      "AgentTalk": "悄悄话",
+      "LocalSearch": "搜索知识库",
+      "Sleep": "等待",
+      "Skill": "激活技能"
+    }
   },
   "diff": { "added": "新增", "modified": "修改" },
   "form": {
@@ -654,7 +682,8 @@
       "INVOLVES": "涉及",
       "Semantic": "语义",
       "SEMANTIC": "语义"
-    }
+    },
+    "collapseAll": "全部折叠"
   },
   "ruleEditor": {
     "title": "规则编辑器",

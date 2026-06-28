@@ -225,12 +225,37 @@
     "hideRawJson": "隱藏原始 JSON",
     "viewRawJson": "檢視原始 JSON",
     "totalLinesLabel": "總共 {n} 行",
-    "tool": "工具"
+    "tool": "工具",
+    "execNames": {
+      "Grep": "全文搜索",
+      "Glob": "搜尋檔案",
+      "Read": "讀取檔案",
+      "Write": "寫入檔案",
+      "Edit": "編輯檔案",
+      "Bash": "執行 Shell 命令",
+      "RunScript": "執行腳本",
+      "WebSearch": "搜尋網際網路",
+      "WebFetch": "抓取網頁",
+      "AskUser": "詢問",
+      "AskPermission": "請求授權",
+      "Ls": "瀏覽目錄",
+      "CollectResults": "收集結果",
+      "TaskCreate": "建立任務",
+      "TaskList": "列出任務",
+      "TaskGet": "取得任務",
+      "TaskUpdate": "更新任務",
+      "SubAgent": "分發工作",
+      "TeamCreate": "建立團隊",
+      "TeamDelete": "刪除團隊",
+      "TeamList": "列出團隊",
+      "TeamGetTasks": "取得團隊任務",
+      "AgentTalk": "悄悄話",
+      "LocalSearch": "搜尋知識庫",
+      "Sleep": "等待",
+      "Skill": "激活技能"
+    }
   },
-  "diff": {
-    "added": "新增",
-    "modified": "修改"
-  },
+  "diff": { "added": "新增", "modified": "修改" },
   "form": {
     "title": "需要釐清",
     "pleaseSelect": "請選擇",
@@ -680,7 +705,8 @@
       "INVOLVES": "涉及",
       "Semantic": "語義",
       "SEMANTIC": "語義"
-    }
+    },
+    "collapseAll": "全部折叠"
   },
   "entityTags": {
     "button": "知识标签",
@@ -893,18 +919,18 @@
       "WebSearch": "网页搜索",
       "WebFetch": "网页抓取",
       "AskUser": "询问用户",
-      "Ls": "目录列表",
-      "CollectResults": "收集结果",
-      "TaskCreate": "创建任务",
-      "TaskList": "任务列表",
-      "TaskGet": "获取任务",
-      "TaskUpdate": "更新任务",
-      "SubAgent": "工作分发",
-      "TeamCreate": "创建团队",
-      "TeamDelete": "删除团队",
-      "TeamList": "团队列表",
-      "TeamGetTasks": "团队任务",
-      "AgentTalk": "Agent 对话"
+      "Ls": "目錄列表",
+      "CollectResults": "收集結果",
+      "TaskCreate": "建立任務",
+      "TaskList": "任務列表",
+      "TaskGet": "取得任務",
+      "TaskUpdate": "更新任務",
+      "SubAgent": "工作分發",
+      "TeamCreate": "建立團隊",
+      "TeamDelete": "刪除團隊",
+      "TeamList": "團隊列表",
+      "TeamGetTasks": "團隊任務",
+      "AgentTalk": "Agent 對話"
     },
     "toolDescs": {
       "Grep": "具有强大而且高速的全文搜索能力",
