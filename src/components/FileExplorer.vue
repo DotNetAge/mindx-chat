@@ -16,8 +16,21 @@ import CodemirrorEditor from './CodemirrorEditor.vue'
 const { t } = useI18n()
 const connectionStore = useConnectionStore()
 const store = useFileExplorerStore()
-const { md } = useMarkdown()
+const { md, renderMermaidInRoot } = useMarkdown()
 const editorPrefs = useEditorPreferences()
+
+// ── Markdown 预览（Mermaid）──
+const mdPreviewRef = ref<HTMLElement | null>(null)
+watch(
+  () => store.activeTab?.content,
+  async () => {
+    await nextTick()
+    if (mdPreviewRef.value) {
+      await renderMermaidInRoot(mdPreviewRef.value)
+    }
+  },
+  { flush: 'post' }
+)
 
 const emit = defineEmits(['close'])
 
@@ -609,6 +622,7 @@ function handleClose() {
                   </div>
                   <div class="md-split-divider"></div>
                   <div class="md-split-preview markdown-body"
+                    ref="mdPreviewRef"
                     v-html="md.render(store.activeTab.content)"
                   ></div>
                 </div>
@@ -954,23 +968,54 @@ function handleClose() {
   padding: 16px 20px;
   color: var(--text-primary);
   background: var(--bg-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Noto Sans SC", "PingFang SC", "Segoe UI Emoji", sans-serif;
+  font-size: 14px;
+  line-height: 1.7;
 }
 .md-split-preview :deep(h1), .md-split-preview :deep(h2),
 .md-split-preview :deep(h3), .md-split-preview :deep(h4) {
   margin: 16px 0 8px; color: var(--text-primary);
+  font-weight: 700;
 }
 .md-split-preview :deep(p) { margin: 8px 0; line-height: 1.7; }
-.md-split-preview :deep(code) { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+.md-split-preview :deep(code) {
+  font-family: "SF Mono", "Menlo", "Monaco", "Inconsolata", "JetBrains Mono", "Cascadia Code", "Noto Sans Mono CJK SC", monospace;
+  background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 4px; font-size: 13px;
+}
 .md-split-preview :deep(pre) { background: #0d1117; padding: 16px; border-radius: 8px; overflow-x: auto; }
 .md-split-preview :deep(pre code) { background: none; padding: 0; }
 .md-split-preview :deep(a) { color: #60a5fa; text-decoration: none; }
 .md-split-preview :deep(a:hover) { text-decoration: underline; }
+.md-split-preview :deep(a[href^="file://"]) {
+  display: inline-flex; align-items: center; gap: 3px;
+  color: #5eead4; font-weight: 600; font-size: 13px;
+  padding: 1px 6px; border-radius: 4px;
+  background: rgba(6,182,212,.08); border: 1px solid rgba(6,182,212,.15);
+  white-space: nowrap; transition: all .15s;
+}
+.md-split-preview :deep(a[href^="file://"]:hover) {
+  background: rgba(6,182,212,.15); border-color: rgba(6,182,212,.35);
+  color: #67e8f9; text-decoration: none;
+}
 .md-split-preview :deep(blockquote) {
   border-left: 3px solid #3b82f6; padding-left: 12px; margin: 8px 0; color: var(--text-muted); font-style: italic;
 }
 .md-split-preview :deep(ul), .md-split-preview :deep(ol) { padding-left: 20px; margin: 8px 0; }
 .md-split-preview :deep(li) { margin: 2px 0; }
 .md-split-preview :deep(img) { max-width: 100%; border-radius: 6px; }
+.md-split-preview :deep(table) { border-collapse: collapse; width: 100%; margin: 10px 0; }
+.md-split-preview :deep(th), .md-split-preview :deep(td) {
+  border: 1px solid rgba(55,65,81,.5); padding: 6px 10px; text-align: left;
+}
+.md-split-preview :deep(th) { background: rgba(6,182,212,.08); font-weight: 600; }
+.md-split-preview :deep(hr) { border: none; border-top: 1px solid rgba(55,65,81,.5); margin: 16px 0; }
+/* Mermaid */
+.md-split-preview :deep(.mermaid) {
+  background: #161b22; border: 1px solid rgba(6,182,212,.25);
+  border-radius: 8px; padding: 12px; margin: 10px 0;
+  overflow-x: auto; text-align: center; min-height: 60px;
+}
+.md-split-preview :deep(.mermaid svg) { max-width: 100%; height: auto; }
 
 /* Markdown 全屏（旧，保留向下兼容） */
 .markdown-preview {

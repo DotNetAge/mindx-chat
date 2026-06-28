@@ -230,8 +230,8 @@ watch(() => store.defaultChunks, (chunks) => {
       </button>
     </div>
 
-    <!-- ── Search bar ── -->
-    <div class="sidebar-search">
+    <!-- ── Search bar (only in documents tab) ── -->
+    <div v-if="store.activeTab === 'documents'" class="sidebar-search">
       <el-input
         v-model="searchInput"
         :placeholder="t('kgViewer.searchKnowledge')"
@@ -257,84 +257,114 @@ watch(() => store.defaultChunks, (chunks) => {
         </button>
       </div>
 
-      <!-- ═══════════════ Tab views (priority over search) ═══════════════ -->
+      <!-- ═══════════════ Tab views ═══════════════ -->
 
-      <!-- ── Tab: Documents (default chunks) ── -->
+      <!-- ── Tab: Documents ── -->
       <template v-else-if="store.activeTab === 'documents'">
-        <!-- Chunk filter indicator -->
-        <div v-if="store.chunkNodeIds.size > 0" class="chunk-filter-bar">
-          <el-icon style="color:var(--accent-cyan);font-size:14px;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></el-icon>
-          <span>图谱已筛选，<span class="chunk-filter-link" @click="store.clearHighlightedNodes()">点击清除</span></span>
-        </div>
-
-        <!-- Loading skeleton -->
-        <div v-if="store.defaultChunksLoading" class="search-skeleton" style="padding:8px 0;">
-          <div v-for="i in 3" :key="i" class="skeleton-item"></div>
-        </div>
-
-        <!-- Chunk items -->
-        <template v-else-if="store.defaultChunks.length > 0">
+        <!-- Search mode: show tree results -->
+        <template v-if="store.searchTree.length > 0 || store.searchLoading">
           <div class="search-results-section">
-            <h4 class="section-title">{{ t('kgViewer.defaultChunksTitle') }} ({{ store.defaultChunks.length }})</h4>
-            <div class="search-results">
-              <div v-for="r in store.defaultChunks" :key="r.id" class="chunk-card">
-                <!-- ── Title: summary (from metadata) ── -->
-                <div
-                  v-if="r.summary"
-                  class="chunk-title"
-                  :title="r.summary"
-                  @click="toggleChunkExpand(r.id)"
-                >
-                  {{ r.summary }}
-                </div>
+            <h4 class="section-title">{{ t('kgViewer.searchResults') }} ({{ store.searchResults.length }})</h4>
+            <TreeSearchPanel
+              :tree="store.searchTree"
+              :loading="store.searchLoading"
+            />
+          </div>
 
-                <!-- ── Content (expanded, markdown rendered) ── -->
-                <div
-                  v-if="isChunkExpanded(r.id)"
-                  class="chunk-content"
-                  :class="{ 'has-entities': r.entity_ids?.length }"
-                  :title="r.entity_ids?.length ? '点击关联知识节点' : ''"
-                  @click="r.entity_ids?.length && onChunkContentClick(r.entity_ids)"
-                  v-html="renderMd(r.content)"
-                ></div>
+          <!-- Related Graph Paths -->
+          <div v-if="store.multiHopResult && store.multiHopResult.nodes.length > 0" class="related-paths-section">
+            <h4 class="section-title">{{ t('kgViewer.relatedPaths') }} ({{ store.multiHopResult.nodes.length }})</h4>
+            <div class="path-list">
+              <div
+                v-for="hn in store.multiHopResult.nodes.slice(0, 10)"
+                :key="hn.node.id"
+                class="path-item"
+                :style="{ paddingLeft: (hn.hopLevel * 16 + 8) + 'px' }"
+              >
+                <span class="hop-badge" :class="'hop-' + hn.hopLevel">{{ hn.hopLevel }}{{ t('kgViewer.hops') }}</span>
+                <span class="path-node-name">{{ hn.node.properties?.name || hn.node.id }}</span>
+              </div>
+            </div>
+          </div>
+        </template>
 
-                <!-- ── Separator ── -->
-                <div v-if="r.source_file || (r.tags && r.tags.length)" class="chunk-separator"></div>
+        <!-- Default chunks mode -->
+        <template v-else>
+          <!-- Chunk filter indicator -->
+          <div v-if="store.chunkNodeIds.size > 0" class="chunk-filter-bar">
+            <el-icon style="color:var(--accent-cyan);font-size:14px;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></el-icon>
+            <span>图谱已筛选，<span class="chunk-filter-link" @click="store.clearHighlightedNodes()">点击清除</span></span>
+          </div>
 
-                <!-- ── Footer: tags + source file ── -->
-                <div class="chunk-footer">
-                  <!-- Tags -->
-                  <div v-if="r.tags && r.tags.length" class="chunk-tags">
-                    <span v-for="tag in r.tags.slice(0, 5)" :key="tag" class="chunk-tag">{{ tag }}</span>
-                    <span v-if="r.tags.length > 5" class="chunk-tag-more">+{{ r.tags.length - 5 }}</span>
+          <!-- Loading skeleton -->
+          <div v-if="store.defaultChunksLoading" class="search-skeleton" style="padding:8px 0;">
+            <div v-for="i in 3" :key="i" class="skeleton-item"></div>
+          </div>
+
+          <!-- Chunk items -->
+          <template v-else-if="store.defaultChunks.length > 0">
+            <div class="search-results-section">
+              <h4 class="section-title">{{ t('kgViewer.defaultChunksTitle') }} ({{ store.defaultChunks.length }})</h4>
+              <div class="search-results">
+                <div v-for="r in store.defaultChunks" :key="r.id" class="chunk-card">
+                  <!-- ── Title: summary (from metadata) ── -->
+                  <div
+                    v-if="r.summary"
+                    class="chunk-title"
+                    :title="r.summary"
+                    @click="toggleChunkExpand(r.id)"
+                  >
+                    {{ r.summary }}
                   </div>
 
-                  <!-- Source file -->
-                  <div v-if="r.source_file" class="chunk-file" :title="r.source_file" @click="store.openFile(r.source_file)">
-                    <el-icon :size="11"><Document /></el-icon>
-                    <span>{{ r.source_file.split('/').pop() }}</span>
+                  <!-- ── Content (expanded, markdown rendered) ── -->
+                  <div
+                    v-if="isChunkExpanded(r.id)"
+                    class="chunk-content"
+                    :class="{ 'has-entities': r.entity_ids?.length }"
+                    :title="r.entity_ids?.length ? '点击关联知识节点' : ''"
+                    @click="r.entity_ids?.length && onChunkContentClick(r.entity_ids)"
+                    v-html="renderMd(r.content)"
+                  ></div>
+
+                  <!-- ── Separator ── -->
+                  <div v-if="r.source_file || (r.tags && r.tags.length)" class="chunk-separator"></div>
+
+                  <!-- ── Footer: tags + source file ── -->
+                  <div class="chunk-footer">
+                    <!-- Tags -->
+                    <div v-if="r.tags && r.tags.length" class="chunk-tags">
+                      <span v-for="tag in r.tags.slice(0, 5)" :key="tag" class="chunk-tag">{{ tag }}</span>
+                      <span v-if="r.tags.length > 5" class="chunk-tag-more">+{{ r.tags.length - 5 }}</span>
+                    </div>
+
+                    <!-- Source file -->
+                    <div v-if="r.source_file" class="chunk-file" :title="r.source_file" @click="store.openFile(r.source_file)">
+                      <el-icon :size="11"><Document /></el-icon>
+                      <span>{{ r.source_file.split('/').pop() }}</span>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-          <!-- ── Paginator ── -->
-          <div v-if="store.chunkTotal > 20" class="chunk-paginator">
-            <el-pagination
-              size="small"
-              :current-page="store.chunkPage"
-              :page-size="20"
-              :total="store.chunkTotal"
-              :pager-count="5"
-              layout="prev, pager, next"
-              @current-change="onChunkPageChange"
-            />
+            <!-- ── Paginator ── -->
+            <div v-if="store.chunkTotal > 20" class="chunk-paginator">
+              <el-pagination
+                size="small"
+                :current-page="store.chunkPage"
+                :page-size="20"
+                :total="store.chunkTotal"
+                :pager-count="5"
+                layout="prev, pager, next"
+                @current-change="onChunkPageChange"
+              />
+            </div>
+          </template>
+
+          <div v-else class="sidebar-empty">
+            <span>{{ t('kgViewer.noDocuments') }}</span>
           </div>
         </template>
-
-        <div v-else class="sidebar-empty">
-          <span>{{ t('kgViewer.noDocuments') }}</span>
-        </div>
       </template>
 
       <!-- ── Tab: Entities ── -->
@@ -460,33 +490,6 @@ watch(() => store.defaultChunks, (chunks) => {
           </ul>
         </div>
       </template>
-
-      <!-- ═══════════════ Search Results (fallback when no tab active) ═══════════════ -->
-      <template v-else-if="store.searchResults.length > 0 || store.searchLoading || store.searchTree.length > 0">
-        <div class="search-results-section">
-          <h4 class="section-title">{{ t('kgViewer.searchResults') }} ({{ store.searchResults.length }})</h4>
-          <TreeSearchPanel
-            :tree="store.searchTree"
-            :loading="store.searchLoading"
-          />
-        </div>
-
-        <!-- ── Related Graph Paths ── -->
-        <div v-if="store.multiHopResult && store.multiHopResult.nodes.length > 0" class="related-paths-section">
-          <h4 class="section-title">{{ t('kgViewer.relatedPaths') }} ({{ store.multiHopResult.nodes.length }})</h4>
-          <div class="path-list">
-            <div
-              v-for="hn in store.multiHopResult.nodes.slice(0, 10)"
-              :key="hn.node.id"
-              class="path-item"
-              :style="{ paddingLeft: (hn.hopLevel * 16 + 8) + 'px' }"
-            >
-              <span class="hop-badge" :class="'hop-' + hn.hopLevel">{{ hn.hopLevel }}{{ t('kgViewer.hops') }}</span>
-              <span class="path-node-name">{{ hn.node.properties?.name || hn.node.id }}</span>
-            </div>
-          </div>
-        </div>
-      </template>
     </div>
 
     <!-- ── Footer: Clear filters ── -->
@@ -504,8 +507,8 @@ watch(() => store.defaultChunks, (chunks) => {
 
 <style scoped>
 .gv-sidebar {
-  width: 280px;
-  min-width: 280px;
+  width: 320px;
+  min-width: 320px;
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);

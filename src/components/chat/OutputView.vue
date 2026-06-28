@@ -90,12 +90,24 @@ const formattedContent = computed(() => {
 
 // 将文本中的文件/目录路径转换为 markdown 链接
 function preprocessPaths(text: string): string {
+  // 先替出已有 markdown 链接，避免破坏已有语法
+  const links: string[] = []
+  const stripped = text.replace(/\[([^\]]*)\]\(([^)]*)\)/g, (m) => {
+    links.push(m)
+    return `\x00MDLINK${links.length - 1}\x00`
+  })
+
   // Unix 绝对路径或 ~ 开头的路径
   const re = /(?:~|\/)(?:[^\s:;,!?)]+\/)*[^\s:;,!?)]+/g
-  return text.replace(re, (match) => {
+  const result = stripped.replace(re, (match) => {
+    // 排除 URL（以 // 开头或含有 ://）
+    if (match.startsWith('//') || match.includes('://')) return match
     const name = match.split('/').filter(Boolean).pop() || match
     return `[${name}](${match.startsWith('~') ? '' : 'file://'}${match})`
   })
+
+  // 恢复已有链接
+  return result.replace(/\x00MDLINK(\d+)\x00/g, (_, i) => links[Number(i)])
 }
 
 async function copyToClipboard() {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { RelationGraph } from 'relation-graph/vue3'
 import type { RGJsonData } from 'relation-graph/vue3'
 import { useI18n } from 'vue-i18n'
@@ -9,7 +9,7 @@ import { getChineseLabel, getEntityColor } from '../types/entityCategories'
 const { t } = useI18n()
 const store = useGraphStore()
 const graphRef = ref<any>(null)
-let dataVersion = 0 // Version guard against stale setJsonData races
+let renderVersion = 0 // Version guard against stale setJsonData races
 
 const props = defineProps<{
   onNodeClick?: (nodeId: string) => void
@@ -127,35 +127,56 @@ const options = computed(() => ({
   backgroundColor: 'transparent',
 }))
 
+function renderGraph(reLayout: boolean) {
+  if (!graphRef.value) return
+  const data = graphData.value
+  if (!data.nodes.length) return
+  const version = ++renderVersion
+  graphRef.value.setJsonData(data, reLayout).catch((e: any) => {
+    if (version === renderVersion) {
+      console.warn('[GraphCanvas] setJsonData error:', e)
+    }
+  })
+}
+
 function handleNodeClick(node: any, _e: any) {
-  // 可展开的节点：单击切换展开/折叠
   if (node.data?.isExpandable) {
+    // 可展开节点：只展开/折叠，不触发选中（也避免触发结构重绘）
     store.toggleGraphNodeExpand(node.id)
+    renderGraph(false)
+  } else {
+    // 不可展开节点：触发选中
+    props.onNodeClick?.(node.id)
   }
-  props.onNodeClick?.(node.id)
 }
 
 // ── Watchers ──────────────────────────────────────────────────────────────
 
-/** Structural change (node/edge set): full render with layout */
-watch(() => [store.filteredNodes, store.filteredEdges], async () => {
-  if (!graphRef.value) return
-  const data = graphData.value
-  if (!data.nodes.length) return
-  const version = ++dataVersion
-  try {
-    await graphRef.value.setJsonData(data, true)
-    if (version !== dataVersion) return
-  } catch (e) {
-    if (version === dataVersion) {
-      console.warn('[GraphCanvas] setJsonData error:', e)
-    }
-  }
+/**
+ * 所有影响 filtered 数据的变化（新数据、筛选、搜索等）都触发重绘。
+ * 不设 hasRendered 抑制——组件卸载重挂后仍能响应 loadAllData 的回调。
+ */
+watch(() => [
+  store.nodes,
+  store.edges,
+  store.selectedDocId,
+  store.selectedLabels,
+  store.searchQuery,
+  store.showOrphanNodes,
+  [...store.chunkNodeIds],
+], () => {
+  nextTick(() => {
+    if (!graphRef.value) return
+    renderGraph(true)
+  })
 }, { deep: true })
 
-// Note: Clicking a node only updates selectedNodeId in the store (for GraphDetailPanel).
-// We never call setJsonData on click — the library always re-layouts, which the user
-// experiences as an unwanted "full graph reload". Edges always use a uniform style.
+/** 挂载时如果已有数据则立即渲染 */
+onMounted(() => {
+  if (store.nodes.length) {
+    renderGraph(true)
+  }
+})
 </script>
 
 <template>
@@ -188,10 +209,9 @@ watch(() => [store.filteredNodes, store.filteredEdges], async () => {
       ref="graphRef"
       :options="options"
       :on-node-click="handleNodeClick"
-      :on-node-expand="handleNodeClick"
     >
       <template #node="{node}">
-        <div class="custom-node" :class="{ highlighted: node.data?.isHighlighted, expandable: node.data?.isExpandable }" @dblclick="store.toggleGraphNodeExpand(node.id)">
+        <div class="custom-node" :class="{ highlighted: node.data?.isHighlighted, expandable: node.data?.isExpandable, expanded: node.data?.isExpanded }">
           <span
             class="node-dot"
             :class="{ expanded: node.data?.isExpanded }"
@@ -202,12 +222,7 @@ watch(() => [store.filteredNodes, store.filteredEdges], async () => {
             }"
           ></span>
           <span class="node-label" :class="{ highlighted: node.data?.isHighlighted }" :style="{ fontSize: node.fontSize + 'px' }">{{ node.text }}</span>
-          <!-- Expand/collapse indicator -->
-          <span v-if="node.data?.isExpandable" class="expand-indicator" :class="{ expanded: node.data?.isExpanded }">
-            <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
-              <path d="M3.5 0v3.5H0v1h3.5V8h1V4.5H8v-1H4.5V0z" />
-            </svg>
-          </span>
+          <span v-if="node.data?.isExpandable" class="expand-badge">{{ node.data?.isExpanded ? '−' : '+' }}</span>
         </div>
       </template>
     </RelationGraph>
@@ -269,6 +284,7 @@ watch(() => [store.filteredNodes, store.filteredEdges], async () => {
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   position: relative;
+  cursor: pointer;
 }
 .node-dot {
   border-radius: 50%;
@@ -298,36 +314,37 @@ watch(() => [store.filteredNodes, store.filteredEdges], async () => {
 .node-label.highlighted {
   color: #fbbf24 !important;
 }
-.custom-node.expandable {
-  cursor: pointer;
-}
 .custom-node.expandable:hover .node-dot {
   box-shadow: 0 0 8px 2px rgba(6,182,212,.4);
+}
+.custom-node.expandable .node-dot {
+  cursor: pointer;
 }
 .node-dot.expanded {
   box-shadow: 0 0 8px 2px rgba(139,92,246,.5);
 }
-.expand-indicator {
+
+/* ── Expand/collapse badge ── */
+.expand-badge {
   position: absolute;
-  top: -4px;
+  bottom: -4px;
   right: -4px;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(30,41,59,.85);
-  border: 1px solid rgba(148,163,184,.3);
+  background: #1e293b;
+  border: 1.5px solid rgba(148,163,184,.4);
   border-radius: 50%;
   color: #94a3b8;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
   transition: all .15s;
-  opacity: 0;
 }
-.custom-node:hover .expand-indicator {
-  opacity: 1;
-}
-.expand-indicator.expanded {
-  opacity: 1;
+.custom-node.expanded .expand-badge {
   background: rgba(139,92,246,.2);
   border-color: #8b5cf6;
   color: #a78bfa;
