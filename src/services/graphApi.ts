@@ -25,9 +25,17 @@ export interface CypherResult {
 export interface DocChunk {
   id: string
   doc_id: string
+  parent_id?: string
+  mime_type?: string
   content: string
   metadata?: Record<string, any>
-  chunk_meta?: { index: number; position: number; length: number }
+  chunk_meta?: {
+    index: number
+    start_pos: number
+    end_pos: number
+    heading_level: number
+    heading_path?: string[]
+  }
 }
 
 export interface ChunksPage {
@@ -74,6 +82,13 @@ export interface SearchResult {
   level?: number          // 语义层级深度（0=文档摘要, 1=章/类, 2=节/方法...）
   parent_id?: string      // 父 chunk 的 SHA
   chunk_type?: string     // root | segment | region
+}
+
+/** Metadata filter condition for kb.chunks RPC */
+export interface FilterCondition {
+  key: string
+  type: 'exact' | 'prefix'
+  value: any
 }
 
 // ── File index state types ──
@@ -227,8 +242,8 @@ export async function listChunks(page = 1, pageSize = 200): Promise<ChunksPage> 
 }
 
 /** Paginated chunk list from knowledge base (GraphIndexer) */
-export async function listKBChunks(page = 1, pageSize = 200): Promise<ChunksPage> {
-  return call('kb.chunks', { page, page_size: pageSize })
+export async function listKBChunks(page = 1, pageSize = 200, filters?: FilterCondition[]): Promise<ChunksPage> {
+  return call('kb.chunks', { page, page_size: pageSize, filters })
 }
 
 /** 从服务端 Schema 定义获取每个实体类型的合法属性 key 列表 */
@@ -390,12 +405,12 @@ export async function listMemoryChunks(page = 1, pageSize = 10): Promise<{
 }
 
 /** List chunks from the knowledge base GraphIndexer (kb.chunks) — returns SearchResult[] */
-export async function listKBChunksAsSearchResults(page = 1, pageSize = 20): Promise<{
+export async function listKBChunksAsSearchResults(page = 1, pageSize = 20, filters?: FilterCondition[]): Promise<{
   chunks: SearchResult[]
   total: number
   has_more: boolean
 }> {
-  const result = await call<any>('kb.chunks', { page, page_size: pageSize })
+  const result = await call<any>('kb.chunks', { page, page_size: pageSize, filters })
   const chunks: SearchResult[] = (result.chunks ?? []).map((c: any) => {
     const meta = c.metadata || {}
     const tags: string[] = Array.isArray(meta.tags) ? meta.tags : []
@@ -407,10 +422,13 @@ export async function listKBChunksAsSearchResults(page = 1, pageSize = 20): Prom
       tags,
       score: 0,
       doc_id: c.doc_id || '',
+      parent_id: c.parent_id || meta.parent_id || '',
       source: meta.source_file || c.doc_id || '',
       summary: meta.summary || '',
       source_file: meta.source_file || '',
       entity_ids: entityIds,
+      level: typeof meta.level === 'number' ? meta.level : undefined,
+      chunk_type: meta.chunk_type || '',
     }
   })
   return { chunks, total: result.total ?? 0, has_more: result.has_more ?? false }
@@ -512,6 +530,11 @@ export async function loadMultiHop(
 export async function readFileContent(path: string): Promise<string> {
   const result = await call<{ content: string }>('fs.read', { path })
   return result.content
+}
+
+/** Write content to a file on local filesystem via daemon */
+export async function writeFileContent(path: string, content: string): Promise<void> {
+  await call('fs.write', { path, content })
 }
 
 /** Reveal a file in the native file manager (Finder/Explorer) */

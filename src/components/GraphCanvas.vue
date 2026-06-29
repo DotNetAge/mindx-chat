@@ -140,14 +140,13 @@ function renderGraph(reLayout: boolean) {
 }
 
 function handleNodeClick(node: any, _e: any) {
-  if (node.data?.isExpandable) {
-    // 可展开节点：只展开/折叠，不触发选中（也避免触发结构重绘）
-    store.toggleGraphNodeExpand(node.id)
-    renderGraph(false)
-  } else {
-    // 不可展开节点：触发选中
-    props.onNodeClick?.(node.id)
-  }
+  // 点击节点本身（非 +/- badge）统一触发右侧详情抽屉
+  props.onNodeClick?.(node.id)
+}
+
+function handleBadgeClick(nodeId: string) {
+  store.toggleGraphNodeExpand(nodeId)
+  renderGraph(false)
 }
 
 // ── Watchers ──────────────────────────────────────────────────────────────
@@ -222,7 +221,7 @@ onMounted(() => {
             }"
           ></span>
           <span class="node-label" :class="{ highlighted: node.data?.isHighlighted }" :style="{ fontSize: node.fontSize + 'px' }">{{ node.text }}</span>
-          <span v-if="node.data?.isExpandable" class="expand-badge">{{ node.data?.isExpanded ? '−' : '+' }}</span>
+          <span v-if="node.data?.isExpandable" class="expand-badge" @click.stop="handleBadgeClick(node.id)">{{ node.data?.isExpanded ? '−' : '+' }}</span>
         </div>
       </template>
     </RelationGraph>
@@ -341,7 +340,6 @@ onMounted(() => {
   font-size: 13px;
   font-weight: 700;
   line-height: 1;
-  pointer-events: none;
   transition: all .15s;
 }
 .custom-node.expanded .expand-badge {

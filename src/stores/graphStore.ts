@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import * as api from '../services/graphApi'
+import { useConnectionStore } from './connectionStore'
 import { buildSearchTree, type TreeNode } from '../utils/treeBuilder'
 
 // Re-export types for convenience
@@ -517,12 +518,28 @@ export const useGraphStore = defineStore('graph', {
 
     // ── Node detail drawer ──
 
-    /** Load chunks associated with an entity (node) by filtering all KB chunks by entity_id */
+    /** Load chunks associated with a node.
+     *
+     * Priority:
+     *  1. If the node has `source_chunk_ids`, match chunks by their ID directly.
+     *  2. Otherwise, fall back to filtering chunks by `entity_ids` (for Entity nodes).
+     */
     async loadNodeChunks(entityId: string) {
       this.detailLoading = true
       this.detailChunks = []
       try {
-        // Load up to 100 chunks from KB (GraphIndexer) to find matches for this entity
+        // 1. Prefer source_chunk_ids from the node (for Document/Region nodes)
+        const node = this.selectedNode
+        const sourceChunkIds =
+          (node?.properties as Record<string, any>)?.source_chunk_ids as string[] | undefined
+        if (sourceChunkIds && sourceChunkIds.length > 0) {
+          const result = await api.listKBChunksAsSearchResults(1, 100)
+          const filtered = result.chunks.filter(c => sourceChunkIds.includes(c.id))
+          this.detailChunks = filtered
+          return
+        }
+
+        // 2. Fallback: filter by entity_ids (for Entity nodes)
         const result = await api.listKBChunksAsSearchResults(1, 100)
         const filtered = result.chunks.filter(c =>
           c.entity_ids?.includes(entityId)
@@ -544,8 +561,17 @@ export const useGraphStore = defineStore('graph', {
       this.defaultChunksLoading = true
       this.chunkPage = page
       try {
+        // Build default filters: level=0 + source_file prefix matches project dir
+        const conn = useConnectionStore()
+        const filters: api.FilterCondition[] = [
+          { key: 'level', type: 'exact', value: 0 },
+        ]
+        if (conn.currentProjectDir) {
+          filters.push({ key: 'source_file', type: 'prefix', value: conn.currentProjectDir })
+        }
+
         // 调用 kb.chunks RPC 获取原始数据并打印完整结果
-        const rawResult = await api.listKBChunks(page, pageSize)
+        const rawResult = await api.listKBChunks(page, pageSize, filters)
         console.log('══════════════════════════════════════════')
         console.log('[GraphStore] kb.chunks 原始返回:')
         console.log('  total:     ', rawResult.total)
@@ -572,7 +598,7 @@ export const useGraphStore = defineStore('graph', {
         }
 
         // 转换为 SearchResult 格式并赋值
-        const result = await api.listKBChunksAsSearchResults(page, pageSize)
+        const result = await api.listKBChunksAsSearchResults(page, pageSize, filters)
         this.defaultChunks = result.chunks
         this.chunkTotal = result.total
         console.log('[GraphStore] ✅ defaultChunks 已赋值: count=', this.defaultChunks.length, 'total=', this.chunkTotal)

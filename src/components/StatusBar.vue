@@ -140,6 +140,13 @@ async function handleToggleAutoIndex() {
   }
 }
 
+/** Click on auto-index indicator: check conditions first, then open dialog. */
+async function handleAutoIndexClick() {
+  const allMet = await checkAndShowRequirements()
+  if (!allMet) return
+  showIndexDialog.value = true
+}
+
 onMounted(() => {
   if (connectionStore.isConnected) {
     graphStore.refreshFilewatchStatus()
@@ -315,7 +322,7 @@ function handleOpenAbout() {
       <ElTooltip :content="autoIndexTitle" placement="top" :show-after="400">
         <button
           class="auto-index-indicator"
-          @click="handleToggleAutoIndex"
+          @click="handleAutoIndexClick"
           :disabled="toggling"
         >
           <span class="auto-index-dot" :class="{ running: filewatchRunning }" :style="!filewatchAvailable ? { background: '#f59e0b' } : undefined"></span>
@@ -324,22 +331,19 @@ function handleOpenAbout() {
       </ElTooltip>
 
       <!-- Indexing Progress Bar -->
-      <ElTooltip :content="t('sidebar.indexing.clickToViewDetails')" placement="top" :show-after="400">
-        <div
-          class="indexing-progress"
-          v-if="filewatchAvailable || indexingState.active || indexProgress.total > 0 || indexProgress.indexed > 0"
-          @click="showIndexDialog = true"
-        >
-          <div class="progress-bar-track">
-            <div class="progress-bar-fill" :style="{ width: indexProgress.percent + '%' }"></div>
-          </div>
-          <span class="progress-text">{{ indexProgress.indexed }}/{{ indexProgress.total }}</span>
-          <span v-if="indexingState.active" class="indexing-file">
-            <el-icon class="is-loading index-loading-icon"><Loading /></el-icon>
-            {{ indexingState.message }}
-          </span>
+      <div
+        class="indexing-progress"
+        v-if="filewatchAvailable || indexingState.active || indexProgress.total > 0 || indexProgress.indexed > 0"
+      >
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" :style="{ width: indexProgress.percent + '%' }"></div>
         </div>
-      </ElTooltip>
+        <span class="progress-text">{{ indexProgress.indexed }}/{{ indexProgress.total }}</span>
+        <span v-if="indexingState.active" class="indexing-file">
+          <el-icon class="is-loading index-loading-icon"><Loading /></el-icon>
+          {{ indexingState.message }}
+        </span>
+      </div>
       <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="graphStore.refreshFilewatchStatus()" />
     </div>
 
