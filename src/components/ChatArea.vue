@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted, watch, computed, onErrorCaptured } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElInput } from 'element-plus'
 import { Setting } from '@element-plus/icons-vue'
@@ -77,6 +77,13 @@ const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const connectionStore = useConnectionStore()
 const { t, locale } = useI18n()
+
+// ── 错误边界：防止子组件渲染错误破坏 TransitionGroup 内部状态 ──
+onErrorCaptured((err) => {
+  console.warn('[ChatArea] Error captured:', err)
+  return false // 阻止错误继续传播
+})
+
 const messageInput = ref('')
 const messageInputRef = ref<InstanceType<typeof ElInput> | null>(null)
 const chatContainer = ref(null)

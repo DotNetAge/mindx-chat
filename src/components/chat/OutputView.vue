@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, useTemplateRef, nextTick } from 'vue'
-import { CopyDocument, Document, Download } from '@element-plus/icons-vue'
+import { CopyDocument, Document, Download, Link } from '@element-plus/icons-vue'
 import { useMarkdown } from '../../composables/useMarkdown'
 import { useI18n } from 'vue-i18n'
 
@@ -27,6 +27,10 @@ const props = defineProps({
     type: Number,
     default: 0
   },
+  tokensCache: {
+    type: Number,
+    default: 0
+  },
   duration: {
     type: Number,
     default: 0
@@ -38,6 +42,9 @@ const copySuccess = ref(false)
 const downloadSuccess = ref(false)
 const isSpeaking = ref(false)
 const isPaused = ref(false)
+const saveDialogVisible = ref(false)
+const saveFilename = ref('')
+const saveSuccess = ref(false)
 
 // 共享的 markdown-it + hljs + mermaid 实例（与 ToolExecView 共用同一份配置）
 const { md, renderMermaidInRoot } = useMarkdown()
@@ -88,7 +95,7 @@ const formattedContent = computed(() => {
   return md.render(preprocessPaths(props.content))
 })
 
-// 将文本中的文件/目录路径转换为 markdown 链接
+// 将文本中的 URL 转换为 markdown 链接
 function preprocessPaths(text: string): string {
   // 先替出已有 markdown 链接，避免破坏已有语法
   const links: string[] = []
@@ -97,13 +104,10 @@ function preprocessPaths(text: string): string {
     return `\x00MDLINK${links.length - 1}\x00`
   })
 
-  // Unix 绝对路径或 ~ 开头的路径
-  const re = /(?:~|\/)(?:[^\s:;,!?)]+\/)*[^\s:;,!?)]+/g
-  const result = stripped.replace(re, (match) => {
-    // 排除 URL（以 // 开头或含有 ://）
-    if (match.startsWith('//') || match.includes('://')) return match
-    const name = match.split('/').filter(Boolean).pop() || match
-    return `[${name}](${match.startsWith('~') ? '' : 'file://'}${match})`
+  // 匹配 http/https URL
+  const urlRe = /https?:\/\/[^\s<>"']+(?<![.,;:!?)\]])/g
+  const result = stripped.replace(urlRe, (match) => {
+    return `[${match}](${match})`
   })
 
   // 恢复已有链接
@@ -154,6 +158,33 @@ function downloadAsMarkdown() {
   }
 }
 
+function openSaveDialog() {
+  saveFilename.value = deriveDownloadFilename()
+  saveDialogVisible.value = true
+}
+
+async function saveToProject() {
+  if (!props.content || !saveFilename.value.trim()) return
+  const name = saveFilename.value.trim()
+  const finalName = name.endsWith('.md') ? name : `${name}.md`
+  const { useConnectionStore } = await import('../../stores/connectionStore')
+  const conn = useConnectionStore()
+  if (!conn.currentProjectDir) {
+    console.warn('[OutputView] no project dir set')
+    return
+  }
+  const fullPath = `${conn.currentProjectDir}/${finalName}`
+  try {
+    const { writeFileContent } = await import('../../services/graphApi')
+    await writeFileContent(fullPath, props.content)
+    saveDialogVisible.value = false
+    saveSuccess.value = true
+    setTimeout(() => { saveSuccess.value = false }, 2000)
+  } catch (e) {
+    console.warn('[OutputView] save failed:', e)
+  }
+}
+
 // ===== Mermaid 渲染 =====
 // OutputView 没有弹窗，content 变化时（消息流式到达）就需要扫描渲染
 const formattedRef = useTemplateRef<HTMLElement>('formatted')
@@ -175,13 +206,16 @@ watch(
     <pre v-else class="raw-content"><code>{{ content }}</code></pre>
 
     <div class="meta" v-if="tokensOut > 0 || duration">
-      <span v-if="tokensOut > 0" class="meta-item">{{ tokensOut }} tokens</span>
+      <span v-if="tokensIn > 0" class="meta-item">{{ t('outputView.tokensIn', { n: tokensIn }) }}</span>
+      <span v-if="tokensOut > 0" class="meta-item">{{ t('outputView.tokensOut', { n: tokensOut }) }}</span>
+      <span v-if="tokensCache > 0" class="meta-item">{{ t('outputView.tokensCache', { n: tokensCache }) }}</span>
+      <span v-if="tokensIn > 0 || tokensOut > 0" class="meta-item">{{ t('outputView.tokensTotal', { n: tokensIn + tokensOut - tokensCache }) }}</span>
       <span v-if="duration" class="meta-item">{{ duration }}ms</span>
     </div>
 
     <!-- 尾部工具栏（图标 only，default 样式） -->
     <div class="actions actions-footer">
-      <button class="action-btn" :class="{ 'is-active': isSpeaking }" @click.stop="speakContent" title="朗读 / 停止" aria-label="朗读">
+      <button class="action-btn" :class="{ 'is-active': isSpeaking }" @click.stop="speakContent" :title="t('outputView.speak')" :aria-label="t('outputView.speak')">
         <svg v-if="!isSpeaking" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
           <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
@@ -194,18 +228,31 @@ watch(
         </svg>
         <span v-if="isSpeaking" class="action-badge">■</span>
       </button>
-      <button class="action-btn" @click.stop="copyToClipboard" title="复制 Markdown 原文" aria-label="复制">
+      <button class="action-btn" @click.stop="copyToClipboard" :title="t('outputView.copy')" :aria-label="t('outputView.copy')">
         <el-icon><CopyDocument /></el-icon>
-        <span v-if="copySuccess" class="action-success">✓</span>
+        <span v-if="copySuccess" class="action-success">{{ t('common.copied') }}</span>
       </button>
-      <button class="action-btn" @click.stop="downloadAsMarkdown" title="下载为 Markdown" aria-label="下载">
+      <button class="action-btn" @click.stop="downloadAsMarkdown" :title="t('outputView.download')" :aria-label="t('outputView.download')">
         <el-icon><Download /></el-icon>
         <span v-if="downloadSuccess" class="action-success">✓</span>
+      </button>
+      <button class="action-btn" @click.stop="openSaveDialog" :title="t('outputView.save')" :aria-label="t('outputView.save')">
+        <el-icon><Link /></el-icon>
+        <span v-if="saveSuccess" class="action-success">✓</span>
       </button>
       <button class="action-btn" @click.stop="showRaw = !showRaw" :title="showRaw ? t('outputView.renderedView') : t('outputView.rawView')" :aria-label="t('outputView.toggleView')">
         <el-icon><Document /></el-icon>
       </button>
     </div>
+
+    <!-- 保存文件名对话框 -->
+    <el-dialog v-model="saveDialogVisible" :title="t('outputView.saveDialogTitle')" width="400px" align-center>
+      <el-input v-model="saveFilename" :placeholder="t('outputView.saveDialogPlaceholder')" @keyup.enter="saveToProject" />
+      <template #footer>
+        <el-button @click="saveDialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="saveToProject">{{ t('common.save') }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 

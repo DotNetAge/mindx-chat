@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { html } from 'diff2html'
 import 'diff2html/bundles/css/diff2html.min.css'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   filePath: string
@@ -19,7 +22,7 @@ const diffHtml = computed(() => {
   return html(props.diff, {
     drawFileList: false,
     matching: 'lines',
-    outputFormat: props.sideBySide ? 'side-by-side' : 'line-by-file',
+    outputFormat: props.sideBySide ? 'side-by-side' : 'line-by-line',
     maxLineLengthHighlight: 10000,
   })
 })

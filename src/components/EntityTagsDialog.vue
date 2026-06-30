@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CollectionTag } from '@element-plus/icons-vue'
+import { CollectionTag, EditPen } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import { getMindXClient } from '../services/websocket'
 import { useConnectionStore } from '../stores/connectionStore'
 import { presetCategories } from '../types/entityCategories'
 import type { EntityCategory } from '../types/entityCategories'
+import SchemaEditorDialog from './SchemaEditorDialog.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -31,6 +32,19 @@ const allPresetTypes = computed(() => {
   }
   return map
 })
+
+// ── Schema 编辑器状态 ──
+const schemaEditorVisible = ref(false)
+const schemaEditorCategory = ref('')
+const schemaEditorTypeName = ref('')
+const schemaEditorTypeLabel = ref('')
+
+function openSchemaEditor(categoryName: string, typeValue: string, typeLabel: string) {
+  schemaEditorCategory.value = categoryName
+  schemaEditorTypeName.value = typeValue
+  schemaEditorTypeLabel.value = typeLabel
+  schemaEditorVisible.value = true
+}
 
 // ── 选中的 value 数组 ──
 const selectedValues = ref<string[]>([])
@@ -188,6 +202,16 @@ watch(() => props.visible, (val) => {
                       <span class="tag-desc">{{ t('entityTags.descs.' + et.value) }}</span>
                     </div>
                   </el-checkbox>
+                  <el-tooltip :content="t('entityTags.editSchema')" placement="top" :show-after="400">
+                    <el-button
+                      class="edit-schema-btn"
+                      text
+                      size="small"
+                      @click.stop="openSchemaEditor(cat.name, et.value, t('entityTags.types.' + et.value))"
+                    >
+                      <el-icon><EditPen /></el-icon>
+                    </el-button>
+                  </el-tooltip>
                 </div>
               </el-checkbox-group>
             </div>
@@ -209,6 +233,16 @@ watch(() => props.visible, (val) => {
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- Schema 编辑器 -->
+    <SchemaEditorDialog
+      :visible="schemaEditorVisible"
+      @update:visible="schemaEditorVisible = $event"
+      :category="schemaEditorCategory"
+      :type-name="schemaEditorTypeName"
+      :type-label="schemaEditorTypeLabel"
+      @saved="loadSaved()"
+    />
   </div>
 </template>
 
@@ -325,9 +359,30 @@ watch(() => props.visible, (val) => {
 }
 
 .tag-checkbox-item {
+  display: flex;
+  align-items: center;
   padding: 0;
   border-bottom: 1px solid rgba(55, 65, 81, 0.25);
   transition: background 0.15s ease;
+}
+
+.tag-checkbox-item .edit-schema-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 4px;
+  color: #475569;
+  opacity: 0;
+  transition: all 0.2s ease;
+}
+
+.tag-checkbox-item:hover .edit-schema-btn {
+  opacity: 1;
+  color: #06b6d4;
+}
+
+.tag-checkbox-item .edit-schema-btn:hover {
+  color: #22d3ee;
+  background: rgba(6, 182, 212, 0.1);
 }
 
 .tag-checkbox-item:last-child {
@@ -341,7 +396,8 @@ watch(() => props.visible, (val) => {
 .tag-checkbox {
   display: flex;
   align-items: center;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 10px 12px;
   height: auto;
 }

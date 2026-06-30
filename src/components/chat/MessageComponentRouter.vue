@@ -166,8 +166,9 @@ function formatContent(content: string): string {
       :content="message.content"
       :title="message.eventTitle || '最终输出'"
       :format="'markdown'"
-      :tokensIn="message.meta?.inputTokens || 0"
-      :tokensOut="message.meta?.outputTokens || 0"
+      :tokensIn="message.metadata?.inputTokens || 0"
+      :tokensOut="message.metadata?.outputTokens || 0"
+      :tokensCache="message.metadata?.cacheTokens || 0"
     />
 
     <!-- Permission Request Component -->

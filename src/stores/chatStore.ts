@@ -30,6 +30,7 @@ export interface ExecutionStats {
   tokensUsed: number
   inputTokens: number
   outputTokens: number
+  cacheTokens: number
 }
 
 interface OfflineMessageQueueItem {
@@ -59,6 +60,9 @@ export const useChatStore = defineStore('chat', {
 
     // 按 session 持久化的用量统计 (sessionId → { tokensUsed, cost })
     sessionTokenStats: {} as Record<string, { tokensUsed: number; cost: number }>,
+
+    // 按 session 缓存的最后一条消息 token 数据，刷新后恢复用
+    sessionMessageTokens: {} as Record<string, { inputTokens: number; outputTokens: number; cacheTokens: number; totalTokens: number } | null>,
 
     pendingCorrelationId: null as string | null,
     pendingContentBySession: {} as Record<string, string>,
@@ -333,6 +337,27 @@ export const useChatStore = defineStore('chat', {
         totalRestored: restored.length,
         actionCount: restored.filter(m => m.eventType === 'tool_exec' || m.eventType === 'tool_exec_start' || m.eventType === 'tool_exec_end').length
       })
+
+      // 从 localStorage 恢复 token 数据
+      const cachedTokens = localStorage.getItem('mindx_chat_message_tokens')
+      const tokenCache: Record<string, any> = cachedTokens ? JSON.parse(cachedTokens) : {}
+      const sessionTokens = tokenCache[sessionId]
+      if (sessionTokens) {
+        this.sessionMessageTokens[sessionId] = sessionTokens
+        // 找到最后一条 task_summary，注入 token 数据
+        for (let i = restored.length - 1; i >= 0; i--) {
+          if (restored[i].eventType === 'task_summary') {
+            restored[i].metadata = {
+              ...restored[i].metadata,
+              inputTokens: sessionTokens.inputTokens,
+              outputTokens: sessionTokens.outputTokens,
+              cacheTokens: sessionTokens.cacheTokens,
+              totalTokens: sessionTokens.totalTokens
+            }
+            break
+          }
+        }
+      }
 
       this.messagesBySession[sessionId] = restored
     },
@@ -764,7 +789,8 @@ export const useChatStore = defineStore('chat', {
           duration: envelope?.meta?.duration || data.duration || '',
           tokensUsed,
           inputTokens: metaTokens?.input_tokens || dataTokens?.input_tokens || 0,
-          outputTokens: metaTokens?.output_tokens || dataTokens?.output_tokens || 0
+          outputTokens: metaTokens?.output_tokens || dataTokens?.output_tokens || 0,
+          cacheTokens: metaTokens?.cache_tokens || dataTokens?.cache_tokens || 0
         }
 
         const cost = (tokensUsed / 1_000_000) * this.tokenPricePerMillion
@@ -893,6 +919,7 @@ export const useChatStore = defineStore('chat', {
       // TaskSummary 不再重复更新 token 计数，避免与 ExecutionSummary 重复计算
       const inputTokens = opts?.meta?.input_tokens || data?.token_usage?.input_tokens || data?.input_tokens || 0
       const outputTokens = opts?.meta?.output_tokens || data?.token_usage?.output_tokens || data?.output_tokens || 0
+      const cacheTokens = opts?.meta?.cache_tokens || data?.token_usage?.cache_tokens || data?.cache_tokens || 0
       const totalTokens = typeof data === 'object' ? (data.token_usage?.total_tokens || data.total_tokens || inputTokens + outputTokens) : inputTokens + outputTokens
 
       this.addMessage(targetSessionId, {
@@ -905,9 +932,14 @@ export const useChatStore = defineStore('chat', {
           phase: 'summary',
           inputTokens,
           outputTokens,
+          cacheTokens,
           totalTokens
         }
       })
+
+      // 缓存 token 数据用于刷新后恢复
+      this.sessionMessageTokens[targetSessionId] = { inputTokens, outputTokens, cacheTokens, totalTokens }
+      localStorage.setItem('mindx_chat_message_tokens', JSON.stringify(this.sessionMessageTokens))
 
       delete this.pendingContentBySession[targetSessionId]
 
