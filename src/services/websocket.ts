@@ -276,6 +276,17 @@ class MindXWebSocketClient {
       meta: envelope.meta
     }
 
+    // [DEBUG] Log subtask events specifically
+    if (method === 'subtask_spawned' || method === 'subtask_completed') {
+      console.log(`[MindX WS DEBUG] Received "${method}" notification:`, {
+        method,
+        session_id: envelope.session_id,
+        agent_name: envelope.meta?.agent_name,
+        title: envelope.title,
+        data: envelope.data
+      })
+    }
+
     const handlers = this.handlers.get(method)
     if (handlers) {
       handlers.forEach(handler => {

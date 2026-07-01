@@ -64,7 +64,11 @@ export const useChatStore = defineStore('chat', {
     // 按 session 缓存的最后一条消息 token 数据，刷新后恢复用
     sessionMessageTokens: {} as Record<string, { inputTokens: number; outputTokens: number; cacheTokens: number; totalTokens: number } | null>,
 
+    // 只看答案模式 — 隐藏执行过程，只显示用户问题和 LLM 最终回答
+    showAnswerOnly: false as boolean,
+
     pendingCorrelationId: null as string | null,
+    pendingPermissionToolName: '' as string,
     pendingContentBySession: {} as Record<string, string>,
     // goharness 发送顺序: tool_use_delta → tool_exec_start → tool_exec_end
     // 此缓存用于在 start 到达前暂存 delta 数据，不做任何协议转换
@@ -75,6 +79,11 @@ export const useChatStore = defineStore('chat', {
 
     // 追踪每个 session 当前正在产生事件的 agent，用于标记消息来源
     sessionCurrentAgentName: {} as Record<string, string>,
+
+    // 子Agent 对话流 — 按 sessionId → taskId → ChatMessage[] 存储
+    subtaskMessagesBySession: {} as Record<string, Record<string, ChatMessage[]>>,
+    // 活跃子任务索引 — 按 sessionId → [{task_id, agent_name}]
+    activeSubtasksBySession: {} as Record<string, Array<{ task_id: string; agent_name: string }>>,
 
     // File modification tracking
     pendingFileModifications: [] as Array<{
@@ -222,6 +231,8 @@ export const useChatStore = defineStore('chat', {
       const toolCallStartTimestamps = new Map<string, number>()
       // 前一条消息的 timestamp，用于估算思考时长
       let prevTimestamp = 0
+      // taskID → {agent_name, description} 映射，用于 subtask_completed 恢复
+      const taskInfoMap: Record<string, { agent_name: string; description: string }> = {}
 
       for (let idx = 0; idx < serverMessages.length; idx++) {
         const msg = serverMessages[idx]
@@ -259,25 +270,142 @@ export const useChatStore = defineStore('chat', {
         // 通过 tool_call_id 精确匹配对应的工具调用
         if (msg.role === 'tool') {
           const match = pendingToolCalls.get(msg.tool_call_id || '')
-          const toolName = match?.name || t('message.toolUse')
+          const toolName = match?.name || 'tool'
           const toolArgs = match?.args || null
           const startTs = toolCallStartTimestamps.get(msg.tool_call_id || '')
           const durationMs = startTs ? Math.round((msgTimestamp - startTs) * 1000) : 0
-          restored.push({
-            id: `restored_tool_${idx}_${msg.timestamp}`,
-            role: 'tool',
-            content: msg.content || '',
-            eventType: 'tool_exec',
-            eventTitle: `${toolName}`,
-            eventData: {
-              start: { tool_name: toolName, params: toolArgs },
-              end: { tool_name: toolName, success: true, result: msg.content || '', duration_ms: durationMs },
-              status: 'done'
-            },
-            metadata: { phase: 'complete', success: true, tool_call_id: msg.tool_call_id },
-            timestamp: new Date(msg.timestamp).toISOString(),
-            sessionId
-          })
+          const content = msg.content || ''
+
+          // 检测 SubAgent 工具调用（按工具名称匹配）
+          // SubAgent 工具的结果以 JSON 格式存储在 session 中:
+          //   {"task_id":"subagent-N","status":"running","agent_name":"<agentName>"}
+          // 注意：task 描述不会保存在 tool 结果里，只在实时 WebSocket 的 subtask_spawned 事件中有
+          if (toolName === 'SubAgent') {
+            let agentName = ''
+            let taskID = ''
+            try {
+              const parsed = JSON.parse(content)
+              agentName = parsed.agent_name || ''
+              taskID = parsed.task_id || ''
+            } catch (e) {
+              console.warn('[MindX Chat] restoreSessionMessages: failed to parse SubAgent tool result JSON', e)
+            }
+            console.log('[MindX Chat] restoreSessionMessages: detected SubAgent dispatch', { agentName, taskID })
+            if (taskID) taskInfoMap[taskID] = { agent_name: agentName, description: toolArgs?.task || '' }
+            restored.push({
+              id: `restored_tool_${idx}_${msg.timestamp}`,
+              role: 'system',
+              content,
+              eventType: 'subtask_spawned',
+              eventTitle: t('message.subtaskSpawned'),
+              eventData: { task_id: taskID, agent_name: agentName, description: '' },
+              metadata: { phase: 'subtask_spawned' },
+              timestamp: new Date(msg.timestamp).toISOString(),
+              sessionId
+            })
+          } else if (toolName === 'CollectResults') {
+            // CollectResults 工具返回子任务完成结果，格式：
+            //   "[subagent-N] completed (session:abc123):\n<answer>"   (成功)
+            //   "[subagent-N] failed (session:abc123): <error>"         (失败)
+            //   "[subagent-N] completed:\n<answer>"                    (旧格式，无 session)
+            //   "[subagent-N] failed: <error>"                        (旧格式，无 session)
+            const subtaskCompletedPattern = /\[([^\]]+)\]\s+(completed|failed)\s*(?:\(session:([^)]+)\))?:\s*(.*)/s
+            const lines = content.split('\n---\n')
+            let matchedAny = false
+            for (const line of lines) {
+              const m = line.match(subtaskCompletedPattern)
+              if (m) {
+                matchedAny = true
+                const taskID = m[1]
+                const isSuccess = m[2] === 'completed'
+                const subSessionID = m[3] || ''
+                const rest = m[4].trim()
+                console.log('[MindX Chat] restoreSessionMessages: detected CollectResults', { taskID, isSuccess, subSessionID })
+                restored.push({
+                  id: `restored_tool_${idx}_${msg.timestamp}_${taskID}`,
+                  role: 'system',
+                  content: line,
+                  eventType: 'subtask_completed',
+                  eventTitle: isSuccess ? t('message.subtaskCompleted') : t('message.subtaskFailed'),
+                  eventData: {
+                    task_id: taskID,
+                    agent_name: taskInfoMap[taskID]?.agent_name || '',
+                    description: taskInfoMap[taskID]?.description || '',
+                    success: isSuccess,
+                    answer: isSuccess ? rest : '',
+                    error: isSuccess ? '' : rest,
+                    session_id: subSessionID
+                  },
+                  metadata: { phase: 'subtask_completed', success: isSuccess },
+                  timestamp: new Date(msg.timestamp).toISOString(),
+                  sessionId
+                })
+              }
+            }
+            // 未匹配到任何子任务结果时，降级为普通 tool 事件
+            if (!matchedAny) {
+              restored.push({
+                id: `restored_tool_${idx}_${msg.timestamp}`,
+                role: 'tool',
+                content,
+                eventType: 'tool_exec',
+                eventTitle: `${toolName}`,
+                eventData: {
+                  start: { tool_name: toolName, params: toolArgs },
+                  end: { tool_name: toolName, success: true, result: content, duration_ms: durationMs },
+                  status: 'done'
+                },
+                metadata: { phase: 'complete', success: true, tool_call_id: msg.tool_call_id },
+                timestamp: new Date(msg.timestamp).toISOString(),
+                sessionId
+              })
+            }
+          } else if (toolName === 'AskUser') {
+            // AskUser 工具从 tool_call 参数重建 form 事件，显示问题表单
+            const formData: Record<string, any> = {}
+            if (toolArgs) {
+              formData.correlation_id = `restored_${msg.timestamp}`
+              const questions: any[] = []
+              // AskUser 参数格式：{ question: "...", options: [...], multiSelect: bool }
+              if (toolArgs.question) {
+                questions.push({
+                  question: toolArgs.question,
+                  options: Array.isArray(toolArgs.options) ? toolArgs.options : [],
+                  multi_select: !!toolArgs.multiSelect
+                })
+              }
+              if (questions.length > 0) {
+                formData.questions = questions
+              }
+            }
+            restored.push({
+              id: `restored_form_${idx}_${msg.timestamp}`,
+              role: 'system',
+              content: '',
+              eventType: 'form',
+              eventTitle: t('message.clarification'),
+              eventData: formData,
+              metadata: { phase: 'clarify' },
+              timestamp: new Date(msg.timestamp).toISOString(),
+              sessionId
+            })
+          } else {
+            restored.push({
+              id: `restored_tool_${idx}_${msg.timestamp}`,
+              role: 'tool',
+              content,
+              eventType: 'tool_exec',
+              eventTitle: `${toolName}`,
+              eventData: {
+                start: { tool_name: toolName, params: toolArgs },
+                end: { tool_name: toolName, success: true, result: content, duration_ms: durationMs },
+                status: 'done'
+              },
+              metadata: { phase: 'complete', success: true, tool_call_id: msg.tool_call_id },
+              timestamp: new Date(msg.timestamp).toISOString(),
+              sessionId
+            })
+          }
           pendingToolCalls.delete(msg.tool_call_id || '')
           prevTimestamp = msgTimestamp
           continue
@@ -314,6 +442,51 @@ export const useChatStore = defineStore('chat', {
           }
           default:
             role = 'system'
+            // 检测 subtask 历史消息（后端存的是 markdown 文本格式）
+            // 格式: ### <title>: `taskID`
+            if (msg.content) {
+              const c = msg.content
+              const subtaskMatch = c.match(/^### .+: `([^`]+)`/m)
+              if (subtaskMatch) {
+                const extractField = (pattern: RegExp) => {
+                  const m = c.match(pattern)
+                  return m ? m[1].trim() : ''
+                }
+                const taskID = subtaskMatch[1]
+                if (c.indexOf('**Agent**:') >= 0) {
+                  // subtask_spawned
+                  eventType = 'subtask_spawned'
+                  eventData = {
+                    task_id: taskID,
+                    agent_name: extractField(/\*\*Agent\*\*: (.+)/),
+                    description: extractField(/\*\*(?:描述|Description)\*\*: (.+)/m)
+                  }
+                  eventTitle = t('message.subtaskSpawned')
+                } else if (c.indexOf('**结果**:') >= 0 || c.indexOf('**Answer**:') >= 0) {
+                  // subtask_completed success
+                  eventType = 'subtask_completed'
+                  eventData = {
+                    task_id: taskID,
+                    agent_name: taskInfoMap[taskID]?.agent_name || '',
+                    description: taskInfoMap[taskID]?.description || '',
+                    success: true,
+                    answer: extractField(/\*\*(?:结果|Answer)\*\*:\s*(.+)/m)
+                  }
+                  eventTitle = t('message.subtaskCompleted')
+                } else if (c.indexOf('**错误**:') >= 0 || c.indexOf('**Error**:') >= 0) {
+                  // subtask_completed failed
+                  eventType = 'subtask_completed'
+                  eventData = {
+                    task_id: taskID,
+                    agent_name: taskInfoMap[taskID]?.agent_name || '',
+                    description: taskInfoMap[taskID]?.description || '',
+                    success: false,
+                    error: extractField(/\*\*(?:错误|Error)\*\*:\s*(.+)/m)
+                  }
+                  eventTitle = t('message.subtaskFailed')
+                }
+              }
+            }
             break
         }
 
@@ -528,12 +701,6 @@ export const useChatStore = defineStore('chat', {
         case 'task_summary':
           this.handleTaskSummary(data, envelope)
           break
-        case 'agent_talk_start':
-          this.handleAgentTalkStart(data)
-          break
-        case 'agent_talk_end':
-          this.handleAgentTalkEnd(data)
-          break
         case 'compaction':
           this.handleCompaction(data)
           break
@@ -654,6 +821,8 @@ export const useChatStore = defineStore('chat', {
 
       // tool_name 优先级: data.tool_name > pendingToolUseDelta.name > opts.title > '工具'
       const toolName = data?.tool_name || this.pendingToolUseDelta?.name || opts?.title || t('message.toolUse')
+      // AskUser 工具有专用视图 AskUserView，跳过 tool_exec 避免重复显示
+      if (toolName === 'AskUser') return
       this.currentAction = toolName
       this.isProcessing = true
 
@@ -745,13 +914,9 @@ export const useChatStore = defineStore('chat', {
       const finalContent = this.pendingContentBySession[targetSessionId] || data || ''
       delete this.pendingContentBySession[targetSessionId]
 
-      this.addMessage(targetSessionId, {
-        role: 'assistant',
-        content: finalContent,
-        eventType: 'final_answer',
-        eventTitle: opts?.title || t('message.finalAnswer')
-      })
-
+      // final_answer 之后必定紧跟 task_summary（同一同步块内连续发射），
+      // task_summary 携带相同内容 + token 元数据。
+      // 此处只做状态清理，不添加消息，由 handleTaskSummary 渲染最终显示。
       this.isProcessing = false
     },
 
@@ -832,10 +997,86 @@ export const useChatStore = defineStore('chat', {
       this.isProcessing = false
     },
 
+    // 根据 agent_name 查找当前 session 中匹配的活跃 subtask
+    getActiveSubtaskForAgent(sessionId: string, agentName?: string): string | null {
+      if (!sessionId || !agentName) return null
+      const subtasks = this.activeSubtasksBySession[sessionId]
+      if (!subtasks || subtasks.length === 0) return null
+      const found = subtasks.find(s => s.agent_name === agentName)
+      return found ? found.task_id : null
+    },
+
+    // 添加一条消息到 subtask 子消息列表
+    // 累积 tool_use_delta 参数到同 id 的最后一条 subtask 消息
+    appendSubtaskToolUseDelta(sessionId: string, taskId: string, data: any): void {
+      const msgs = this.subtaskMessagesBySession[sessionId]?.[taskId]
+      if (!msgs) return
+      const lastDelta = [...msgs].reverse().find(m => m.eventType === 'tool_use_delta' && m.eventData?.id === data?.id)
+      if (lastDelta) {
+        if (data?.arguments) {
+          lastDelta.content += data.arguments
+          lastDelta.eventData = { ...lastDelta.eventData, ...data }
+        }
+      } else {
+        this.addSubtaskMessage(sessionId, taskId, {
+          role: 'tool',
+          content: data?.arguments || '',
+          eventType: 'tool_use_delta',
+          eventTitle: '',
+          eventData: data,
+          agentName: '',
+          metadata: { phase: 'tool_use_delta' }
+        })
+      }
+    },
+
+    addSubtaskMessage(sessionId: string, taskId: string, msg: Omit<ChatMessage, 'id' | 'timestamp' | 'sessionId'>): ChatMessage {
+      if (!this.subtaskMessagesBySession[sessionId]) {
+        this.subtaskMessagesBySession[sessionId] = {}
+      }
+      if (!this.subtaskMessagesBySession[sessionId][taskId]) {
+        this.subtaskMessagesBySession[sessionId][taskId] = []
+      }
+      const newMsg: ChatMessage = {
+        ...msg,
+        id: `subtask_${taskId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: new Date().toISOString(),
+        sessionId
+      }
+      this.subtaskMessagesBySession[sessionId][taskId].push(newMsg)
+      return newMsg
+    },
+
+    // 获取某个 subtask 的子消息
+    getSubtaskMessages(sessionId: string, taskId: string): ChatMessage[] {
+      return this.subtaskMessagesBySession[sessionId]?.[taskId] || []
+    },
+
     handleSubtaskSpawned(data: any, opts?: { session_id?: string; title?: string }) {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
-      this.addMessage(targetSessionId, {
+      const taskId = data?.task_id || ''
+      const agentName = data?.agent_name || ''
+
+      // 注册为活跃 subtask
+      if (targetSessionId && taskId && agentName) {
+        if (!this.activeSubtasksBySession[targetSessionId]) {
+          this.activeSubtasksBySession[targetSessionId] = []
+        }
+        // 避免重复注册
+        if (!this.activeSubtasksBySession[targetSessionId].find(s => s.task_id === taskId)) {
+          this.activeSubtasksBySession[targetSessionId].push({ task_id: taskId, agent_name: agentName })
+        }
+        // 初始化子消息数组
+        if (!this.subtaskMessagesBySession[targetSessionId]) {
+          this.subtaskMessagesBySession[targetSessionId] = {}
+        }
+        if (!this.subtaskMessagesBySession[targetSessionId][taskId]) {
+          this.subtaskMessagesBySession[targetSessionId][taskId] = []
+        }
+      }
+
+      const msg = this.addMessage(targetSessionId, {
         role: 'system',
         content: typeof data === 'string' ? data : '',
         eventType: 'subtask_spawned',
@@ -843,13 +1084,31 @@ export const useChatStore = defineStore('chat', {
         eventData: data,
         metadata: { phase: 'subtask_spawned' }
       })
+      console.log('[MindX CHAT DEBUG] handleSubtaskSpawned:', {
+        targetSessionId,
+        activeSessionId: sessionStore.activeSessionId,
+        taskId,
+        agentName,
+        activeSessionMsgsCount: (this.messagesBySession[sessionStore.activeSessionId] || []).length,
+        addedMsgId: msg.id,
+        addedMsgEventType: msg.eventType,
+        eventData: data
+      })
     },
 
     handleSubtaskCompleted(data: any, opts?: { session_id?: string; title?: string }) {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
       const content = typeof data === 'string' ? data : (data?.answer || data?.error || '')
-      this.addMessage(targetSessionId, {
+      const taskId = data?.task_id || ''
+
+      // 从活跃 subtask 列表中移除
+      if (targetSessionId && taskId && this.activeSubtasksBySession[targetSessionId]) {
+        this.activeSubtasksBySession[targetSessionId] =
+          this.activeSubtasksBySession[targetSessionId].filter(s => s.task_id !== taskId)
+      }
+
+      const msg = this.addMessage(targetSessionId, {
         role: 'system',
         content,
         eventType: 'subtask_completed',
@@ -857,15 +1116,136 @@ export const useChatStore = defineStore('chat', {
         eventData: data,
         metadata: { phase: 'subtask_completed', success: data?.success }
       })
+      console.log('[MindX CHAT DEBUG] handleSubtaskCompleted:', {
+        targetSessionId,
+        activeSessionId: sessionStore.activeSessionId,
+        taskId,
+        activeSessionMsgsCount: (this.messagesBySession[sessionStore.activeSessionId] || []).length,
+        addedMsgId: msg.id,
+        addedMsgEventType: msg.eventType,
+        eventData: data
+      })
+    },
+
+    /**
+     * 异步加载主会话中所有子Agent 的子会话消息。
+     * 从已恢复的 subtask_completed 事件中提取 session_id，
+     * 通过 session.get RPC 加载子会话，填充 subtaskMessagesBySession。
+     */
+    async loadSubtaskSessions(sessionId: string): Promise<void> {
+      const msgs = this.messagesBySession[sessionId] || []
+      // CollectResults 工具结果中的 session_id → task_id 映射
+      const sessionMap = new Map<string, string>()
+      for (const msg of msgs) {
+        if (msg.eventType === 'subtask_completed' && msg.eventData?.session_id) {
+          sessionMap.set(msg.eventData.session_id, msg.eventData.task_id)
+        }
+      }
+      if (sessionMap.size === 0) return
+
+      const connStore = useConnectionStore()
+      const entries = [...sessionMap.entries()]
+      console.log(`[MindX Chat] loadSubtaskSessions: loading ${entries.length} sub-agent session(s)`, { sessionId })
+
+      await Promise.all(entries.map(async ([subSessionID, taskID]) => {
+        try {
+          const detail = await connStore.fetchSessionDetail(subSessionID)
+          if (!detail?.messages?.length) return
+
+          // 初始化 subtask 消息数组
+          if (!this.subtaskMessagesBySession[sessionId]) {
+            this.subtaskMessagesBySession[sessionId] = {}
+          }
+          if (!this.subtaskMessagesBySession[sessionId][taskID]) {
+            this.subtaskMessagesBySession[sessionId][taskID] = []
+          }
+
+          // 转换子会话消息 → ChatMessage 列表
+          const subMsgs: ChatMessage[] = []
+          for (const sm of detail.messages) {
+            if (sm.role === 'user') {
+              subMsgs.push({
+                id: `subtask_restored_${taskID}_${sm.timestamp}`,
+                role: 'user',
+                content: sm.content,
+                eventType: 'user',
+                timestamp: new Date(sm.timestamp).toISOString(),
+                sessionId
+              })
+            } else if (sm.role === 'assistant') {
+              // reasoning_content → thinking_done
+              if (sm.reasoning_content?.trim()) {
+                subMsgs.push({
+                  id: `subtask_restored_${taskID}_${sm.timestamp}_think`,
+                  role: 'assistant',
+                  content: sm.reasoning_content,
+                  eventType: 'thinking_done',
+                  eventTitle: t('message.thinking'),
+                  metadata: { complete: true },
+                  timestamp: new Date(sm.timestamp).toISOString(),
+                  sessionId
+                })
+              }
+              // 正文
+              if (sm.content?.trim()) {
+                subMsgs.push({
+                  id: `subtask_restored_${taskID}_${sm.timestamp}_msg`,
+                  role: 'assistant',
+                  content: sm.content,
+                  eventType: 'markdown',
+                  timestamp: new Date(sm.timestamp).toISOString(),
+                  sessionId
+                })
+              }
+              // tool_calls
+              if (sm.tool_calls?.length) {
+                for (const tc of sm.tool_calls) {
+                  subMsgs.push({
+                    id: `subtask_restored_${taskID}_${sm.timestamp}_tc_${tc.id}`,
+                    role: 'assistant',
+                    content: tc.arguments || '',
+                    eventType: 'tool_use',
+                    eventTitle: tc.name,
+                    eventData: { tool_name: tc.name, arguments: tc.arguments, id: tc.id },
+                    timestamp: new Date(sm.timestamp).toISOString(),
+                    sessionId
+                  })
+                }
+              }
+            } else if (sm.role === 'tool') {
+              subMsgs.push({
+                id: `subtask_restored_${taskID}_${sm.timestamp}_tool`,
+                role: 'tool',
+                content: sm.content,
+                eventType: 'tool_exec',
+                eventTitle: '',
+                eventData: {
+                  start: { tool_call_id: sm.tool_call_id },
+                  end: { tool_call_id: sm.tool_call_id, success: true, result: sm.content },
+                  status: 'done'
+                },
+                timestamp: new Date(sm.timestamp).toISOString(),
+                sessionId
+              })
+            }
+          }
+
+          this.subtaskMessagesBySession[sessionId][taskID] = subMsgs
+          console.log(`[MindX Chat] loadSubtaskSessions: loaded ${subMsgs.length} msgs for task ${taskID} (session:${subSessionID})`)
+        } catch (err) {
+          console.warn(`[MindX Chat] loadSubtaskSessions: failed to load session ${subSessionID}:`, err)
+        }
+      }))
     },
 
     handlePermissionRequest(data: any, opts?: { session_id?: string; title?: string }) {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
 
-      const correlationId = data?.correlation_id || data?.correlationId || null
-      if (correlationId) {
-        this.pendingCorrelationId = correlationId
+      // 非阻塞权限：存储 tool_name 供 execution.resume 使用
+      const toolName = data?.tool_name || data?.toolName || ''
+      if (toolName) {
+        this.pendingPermissionToolName = toolName
       }
 
       this.addMessage(targetSessionId, {
@@ -874,7 +1254,7 @@ export const useChatStore = defineStore('chat', {
         eventType: 'permission_request',
         eventTitle: opts?.title || '🔒 ' + t('message.permissionRequest'),
         eventData: data,
-        metadata: { phase: 'permission', correlationId }
+        metadata: { phase: 'permission' }
       })
     },
 
@@ -882,18 +1262,13 @@ export const useChatStore = defineStore('chat', {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
 
-      const correlationId = data?.correlation_id || data?.correlationId || null
-      if (correlationId) {
-        this.pendingCorrelationId = correlationId
-      }
-
       this.addMessage(targetSessionId, {
         role: 'system',
         content: '',
         eventType: 'form',
         eventTitle: opts?.title || '💬 ' + t('message.clarification'),
         eventData: data,
-        metadata: { phase: 'clarify', correlationId }
+        metadata: { phase: 'clarify' }
       })
     },
 
@@ -944,33 +1319,6 @@ export const useChatStore = defineStore('chat', {
       delete this.pendingContentBySession[targetSessionId]
 
       this.isProcessing = false
-    },
-
-    handleAgentTalkStart(data: any, opts?: { session_id?: string; title?: string }) {
-      const sessionStore = useSessionStore()
-      const targetSessionId = opts?.session_id || sessionStore.activeSessionId
-      this.addMessage(targetSessionId, {
-        role: 'system',
-        content: typeof data === 'string' ? data : (data?.message || ''),
-        eventType: 'agent_talk_start',
-        eventTitle: opts?.title || '🤖 ' + t('message.agentTalkStart'),
-        eventData: data,
-        metadata: { phase: 'agent_talk_start', to: data?.to }
-      })
-    },
-
-    handleAgentTalkEnd(data: any, opts?: { session_id?: string }) {
-      const sessionStore = useSessionStore()
-      const targetSessionId = opts?.session_id || sessionStore.activeSessionId
-      const content = typeof data === 'string' ? data : (data?.reply || data?.error || '')
-      this.addMessage(targetSessionId, {
-        role: 'system',
-        content,
-        eventType: 'agent_talk_end',
-        eventTitle: '🤖 ' + t('message.agentTalkEnd'),
-        eventData: data,
-        metadata: { phase: 'agent_talk_end', to: data?.to, hasError: !!data?.error }
-      })
     },
 
     handleCompaction(data: any, opts?: { session_id?: string }) {

@@ -35,8 +35,6 @@ export enum ResponseType {
   ModelList = 'model_list',
   SkillList = 'skill_list',
 
-  AgentTalkStart = 'agent_talk_start',
-  AgentTalkEnd = 'agent_talk_end',
   Compaction = 'compaction',
   MaxTurnsReached = 'max_turns_reached',
   ContentDelta = 'content_delta',

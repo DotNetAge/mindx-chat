@@ -280,8 +280,6 @@
     "clarification": "需要釐清",
     "permissionDenied": "權限被拒絕",
     "taskSummary": "任務摘要",
-    "agentTalkStart": "Agent 對話開始",
-    "agentTalkEnd": "Agent 對話結束",
     "compaction": "上下文壓縮",
     "maxTurnsReached": "達到最大輪次",
     "executionSummary": "執行摘要",
@@ -332,7 +330,8 @@
       "AgentTalk": "悄悄話",
       "LocalSearch": "搜尋知識庫",
       "Sleep": "等待",
-      "Skill": "激活技能"
+      "Skill": "激活技能",
+      "Introspect": "内省"
     }
   },
   "diff": { "added": "新增", "modified": "修改" },
@@ -342,7 +341,14 @@
     "details": "詳情",
     "yourReply": "你的回覆",
     "placeholder": "請選擇選項或輸入自訂回覆...",
-    "submit": "送出回覆"
+    "submit": "送出回覆",
+    "multiQuestions": "{count} 個問題待回答",
+    "multiSelect": "可多選",
+    "singleSelect": "單選",
+    "inputPlaceholder": "輸入你的回答...",
+    "myChoices": "以下是我的選擇：",
+    "other": "其他",
+    "otherPlaceholder": "請輸入..."
   },
   "choices": {
     "pleaseSelect": "請選擇",
@@ -390,18 +396,8 @@
     "description": "任務描述",
     "result": "執行結果",
     "errorMsg": "錯誤訊息",
-    "truncated": "...(內容過長, 已截斷)"
-  },
-  "agentTalk": {
-    "start": "Agent 對話開始",
-    "end": "Agent 對話結束",
-    "errorLabel": "錯誤",
-    "replied": "已回覆",
-    "expand": "展開",
-    "collapse": "收合",
-    "sendMessage": "傳送訊息",
-    "talkError": "對話錯誤",
-    "receivedReply": "收到回覆"
+    "truncated": "...(內容過長, 已截斷)",
+    "conversationFlow": "子Agent對話流"
   },
   "compactionView": {
     "title": "上下文壓縮",

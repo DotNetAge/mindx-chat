@@ -384,6 +384,20 @@ export const useConnectionStore = defineStore('connection', {
       client.on('thinking_delta', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
+        // 子Agent thinking → 路由到 subtask
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          chatStore.addSubtaskMessage(targetSessionId, subtaskId, {
+            role: 'system',
+            content: envelope.data || '',
+            eventType: 'thinking_delta',
+            eventTitle: '💭 ' + t('chat.thinking'),
+            eventData: envelope.data,
+            agentName: envelope.agent_name,
+            metadata: { phase: 'thinking_delta' }
+          })
+          return
+        }
         if (targetSessionId) {
           chatStore.handleThinkingDelta(envelope.data, targetSessionId)
         } else {
@@ -392,12 +406,40 @@ export const useConnectionStore = defineStore('connection', {
       })
 
       client.on('thinking_done', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          const content = typeof envelope.data === 'string' ? envelope.data : (envelope.data?.reasoning_content || envelope.data?.content || '')
+          chatStore.addSubtaskMessage(targetSessionId, subtaskId, {
+            role: 'system',
+            content,
+            eventType: 'thinking_done',
+            eventTitle: '💭 ' + t('message.thinking'),
+            eventData: envelope.data,
+            agentName: envelope.agent_name,
+            metadata: { complete: true, phase: 'thinking_done' }
+          })
+          return
+        }
         chatStore.handleThinkingDone(envelope.data)
       })
 
       client.on('markdown', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          chatStore.addSubtaskMessage(targetSessionId, subtaskId, {
+            role: 'assistant',
+            content: envelope.data || '',
+            eventType: 'markdown',
+            eventTitle: envelope.title || '📝 ' + t('chat.output'),
+            eventData: envelope.data,
+            agentName: envelope.agent_name,
+            metadata: { phase: 'output' }
+          })
+          return
+        }
         chatStore.handleContentDelta(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title,
@@ -408,6 +450,19 @@ export const useConnectionStore = defineStore('connection', {
       client.on('content_delta', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          chatStore.addSubtaskMessage(targetSessionId, subtaskId, {
+            role: 'assistant',
+            content: envelope.data || '',
+            eventType: 'content_delta',
+            eventTitle: envelope.title || '📝 ' + t('chat.output'),
+            eventData: envelope.data,
+            agentName: envelope.agent_name,
+            metadata: { phase: 'output' }
+          })
+          return
+        }
         chatStore.handleContentDelta(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -418,6 +473,14 @@ export const useConnectionStore = defineStore('connection', {
       client.on('tool_use_delta', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          chatStore.appendSubtaskToolUseDelta(targetSessionId, subtaskId, {
+            ...envelope.data,
+            agent_name: envelope.agent_name
+          })
+          return
+        }
         chatStore.handleToolUseDelta(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -428,6 +491,28 @@ export const useConnectionStore = defineStore('connection', {
       client.on('tool_exec_start', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
+        const toolName = envelope.data?.tool_name || envelope.title || '🔧 ' + t('message.toolUse')
+
+        // AskUser 工具有专用视图，跳过 tool_exec 避免重复显示
+        if (toolName === 'AskUser') return
+
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          chatStore.addSubtaskMessage(targetSessionId, subtaskId, {
+            role: 'tool',
+            content: '',
+            eventType: 'tool_exec',
+            eventTitle: toolName,
+            eventData: {
+              start: envelope.data,
+              end: null,
+              status: 'executing'
+            },
+            agentName: envelope.agent_name,
+            metadata: { phase: 'active' }
+          })
+          return
+        }
         chatStore.handleToolExecStart(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -438,6 +523,17 @@ export const useConnectionStore = defineStore('connection', {
       client.on('tool_exec_end', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          // 更新 subtask 中最后一条 tool_exec 消息的状态为完成
+          const msgs = chatStore.getSubtaskMessages(targetSessionId, subtaskId)
+          const toolMsg = msgs?.findLast(m => m.eventType === 'tool_exec' && m.eventData?.status === 'executing')
+          if (toolMsg && toolMsg.eventData) {
+            toolMsg.eventData.end = envelope.data
+            toolMsg.eventData.status = envelope.data?.success !== false ? 'done' : 'failed'
+          }
+          return
+        }
         chatStore.handleToolExecEnd(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -446,6 +542,13 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('subtask_spawned', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        console.log('[MindX CONN DEBUG] subtask_spawned handler invoked:', {
+          targetSessionId,
+          activeSessionId: sessionStore.activeSessionId,
+          agent_name: envelope.agent_name,
+          title: envelope.title,
+          data: envelope.data
+        })
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
         chatStore.handleSubtaskSpawned(envelope.data, {
           session_id: targetSessionId,
@@ -455,6 +558,13 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('subtask_completed', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        console.log('[MindX CONN DEBUG] subtask_completed handler invoked:', {
+          targetSessionId,
+          activeSessionId: sessionStore.activeSessionId,
+          agent_name: envelope.agent_name,
+          title: envelope.title,
+          data: envelope.data
+        })
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
         chatStore.handleSubtaskCompleted(envelope.data, {
           session_id: targetSessionId,
@@ -465,6 +575,19 @@ export const useConnectionStore = defineStore('connection', {
       client.on('final_answer', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          chatStore.addSubtaskMessage(targetSessionId, subtaskId, {
+            role: 'assistant',
+            content: envelope.data || '',
+            eventType: 'final_answer',
+            eventTitle: envelope.title || '📋 ' + t('message.finalAnswer'),
+            eventData: envelope.data,
+            agentName: envelope.agent_name,
+            metadata: { phase: 'final_answer' }
+          })
+          return
+        }
         chatStore.handleFinalAnswer(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -538,26 +661,22 @@ export const useConnectionStore = defineStore('connection', {
       client.on('error', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          chatStore.addSubtaskMessage(targetSessionId, subtaskId, {
+            role: 'system',
+            content: envelope.data || envelope.title || '❌ ' + t('common.error'),
+            eventType: 'error',
+            eventTitle: '❌ ' + t('common.error'),
+            eventData: envelope.data,
+            agentName: envelope.agent_name,
+            metadata: { phase: 'error' }
+          })
+          return
+        }
         chatStore.handleError(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
-        })
-      })
-
-      client.on('agent_talk_start', (envelope) => {
-        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
-        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
-        chatStore.handleAgentTalkStart(envelope.data, {
-          session_id: targetSessionId,
-          title: envelope.title
-        })
-      })
-
-      client.on('agent_talk_end', (envelope) => {
-        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
-        chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
-        chatStore.handleAgentTalkEnd(envelope.data, {
-          session_id: targetSessionId
         })
       })
 
@@ -683,6 +802,23 @@ export const useConnectionStore = defineStore('connection', {
       })
     },
 
+    /**
+     * 非阻塞权限：用户同意后调用 execution.resume 将授权存入缓存，
+     * 前端随后静默重发最后用户消息，LLM 重新进入循环时 PermissionHook
+     * 检查缓存发现已授权，工具正常执行。
+     */
+    async resumeExecution(sessionId: string, toolName: string): Promise<void> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      await client.call<{ status: string }>('execution.resume', {
+        session_id: sessionId,
+        tool_name: toolName
+      })
+    },
+
+    /**
+     * @deprecated 旧版阻塞式权限回复 RPC，已由 execution.resume 替代。
+     */
     async respondToPermission(correlationId: string, action: string, extra?: { params?: Record<string, any>; reason?: string }): Promise<void> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')

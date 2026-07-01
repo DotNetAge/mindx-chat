@@ -337,7 +337,8 @@
       "AgentTalk": "Whisper",
       "LocalSearch": "Search Knowledge Base",
       "Sleep": "Wait",
-      "Skill": "Activate Skill"
+      "Skill": "Activate Skill",
+      "Introspect": "Introspect"
     }
   },
   "diff": { "added": "Added", "modified": "Modified" },
@@ -347,7 +348,14 @@
     "details": "Details",
     "yourReply": "Your Reply",
     "placeholder": "Select an option or type a custom reply...",
-    "submit": "Submit Reply"
+    "submit": "Submit Reply",
+    "multiQuestions": "{count} questions to answer",
+    "multiSelect": "Multi-select",
+    "singleSelect": "Single Select",
+    "inputPlaceholder": "Type your answer...",
+    "myChoices": "My choices: ",
+    "other": "Other",
+    "otherPlaceholder": "Please enter..."
   },
   "choices": {
     "pleaseSelect": "Please Select",
@@ -395,18 +403,8 @@
     "description": "Description",
     "result": "Result",
     "errorMsg": "Error Message",
-    "truncated": "...(content truncated)"
-  },
-  "agentTalk": {
-    "start": "Agent Talk Started",
-    "end": "Agent Talk Ended",
-    "errorLabel": "Error",
-    "replied": "Replied",
-    "expand": "Expand",
-    "collapse": "Collapse",
-    "sendMessage": "Send Message",
-    "talkError": "Talk Error",
-    "receivedReply": "Received Reply"
+    "truncated": "...(content truncated)",
+    "conversationFlow": "Sub-agent Conversation"
   },
   "compactionView": {
     "title": "Context Compaction",

@@ -8,10 +8,10 @@ import PermissionBar from './PermissionBar.vue'
 import OutputView from './OutputView.vue'
 import ErrorView from './ErrorView.vue'
 import SubtaskView from './SubtaskView.vue'
-import AgentTalkView from './AgentTalkView.vue'
 import CompactionView from './CompactionView.vue'
 import MaxTurnsView from './MaxTurnsView.vue'
 import FormView from './FormView.vue'
+import AskUserView from './AskUserView.vue'
 import DiffView from './DiffView.vue'
 import FormattedContent from './FormattedContent.vue'
 
@@ -27,17 +27,26 @@ const props = defineProps({
 const componentType = computed(() => {
   const et = props.message.eventType
 
+  // [DEBUG] Log when we receive subtask events
+  if (et === 'subtask_spawned' || et === 'subtask_completed') {
+    console.log('[MindX ROUTER DEBUG] componentType computation:', {
+      eventType: et,
+      eventData: props.message.eventData,
+      eventTitle: props.message.eventTitle,
+      content: props.message.content?.substring(0, 100)
+    })
+  }
+
   if (et === 'thinking_delta' || et === 'thinking_done') return 'thinking'
   if (et === 'content_delta' || et === 'markdown') return 'output'
   if (et === 'tool_use_delta') return 'output'
-  // goharness 工具执行事件（严格对齐）
   if (et === 'tool_exec' || et === 'tool_exec_start' || et === 'tool_exec_end') return 'action'
   if (et === 'subtask_spawned' || et === 'subtask_completed') return 'subtask'
   if (et === 'final_answer' || et === 'task_summary') return 'output'
   if (et === 'permission_request') return 'permission'
-  if (et === 'form' || et === 'clarify_needed') return 'form'
+  if (et === 'form') return 'ask_user'
+  if (et === 'clarify_needed') return 'form'
   if (et === 'error' || et === 'permission_denied') return 'error'
-  if (et === 'agent_talk_start' || et === 'agent_talk_end') return 'agent_talk'
   if (et === 'compaction') return 'compaction'
   if (et === 'max_turns_reached') return 'max_turns'
   if (et === 'cycle_end' || et === 'execution_summary') return 'system_event'
@@ -82,9 +91,30 @@ const permissionData = computed(() => ({
 }))
 
 const subtaskData = computed(() => {
+  const et = props.message.eventType
+  const c = props.message.content || ''
   const d = props.message.eventData || {}
+
+  // 处理 tool_exec 消息中嵌入的 subtask 分发事件
+  // 格式: "分发工作<agentName>, <description>"
+  if (et === 'tool_exec' && c.startsWith('分发工作')) {
+    const commaIdx = c.indexOf(',')
+    const agentName = commaIdx > 10 ? c.substring(4, commaIdx).trim() : ''
+    const description = commaIdx > 0 ? c.substring(commaIdx + 1).trim() : c.substring(4).trim()
+    return {
+      isSpawned: true,
+      taskID: agentName,
+      agentName,
+      description,
+      timeout: '',
+      success: undefined,
+      answer: '',
+      error: ''
+    }
+  }
+
   return {
-    isSpawned: props.message.eventType === 'subtask_spawned',
+    isSpawned: et === 'subtask_spawned',
     taskID: d.task_id || d.TaskID || '',
     agentName: d.agent_name || d.AgentName || '',
     description: d.description || d.Description || '',
@@ -196,12 +226,6 @@ function formatContent(content: string): string {
       v-bind="subtaskData"
     />
 
-    <!-- Agent Talk Component -->
-    <AgentTalkView
-      v-else-if="componentType === 'agent_talk'"
-      v-bind="agentTalkData"
-    />
-
     <!-- Compaction Component -->
     <CompactionView
       v-else-if="componentType === 'compaction'"
@@ -212,6 +236,12 @@ function formatContent(content: string): string {
     <MaxTurnsView
       v-else-if="componentType === 'max_turns'"
       v-bind="maxTurnsData"
+    />
+
+    <!-- AskUser Component (非阻塞设计：提交时直接发送用户消息，不再 emit submit） -->
+    <AskUserView
+      v-else-if="componentType === 'ask_user'"
+      :formData="formData"
     />
 
     <!-- Form / Clarify Component -->

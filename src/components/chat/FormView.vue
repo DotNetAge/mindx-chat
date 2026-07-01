@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -14,54 +14,114 @@ const props = defineProps({
 const emit = defineEmits(['submit'])
 
 const isExpanded = ref(true)
-const selectedOption = ref<string | null>(null)
-const freeformInput = ref('')
 
-const displayText = computed(() => {
-  return props.formData?.question || props.formData?.text || props.formData?.message || ''
-})
+/** 解析 questions 数组，兼容单问题平铺结构 */
+interface QuestionItem {
+  index: number
+  question: string
+  options: string[]
+  multiSelect: boolean
+}
 
-const options = computed(() => {
-  const opts = props.formData?.options
-  if (!opts) return []
-  if (Array.isArray(opts)) {
-    return opts.map(o => (typeof o === 'string' ? o : o.label || o.value || JSON.stringify(o)))
+const questions = computed<QuestionItem[]>(() => {
+  const raw = props.formData
+  // 标准结构：{ questions: [{ question, options, multi_select }] }
+  if (raw.questions && Array.isArray(raw.questions) && raw.questions.length > 0) {
+    return raw.questions.map((q: any, i: number) => ({
+      index: i,
+      question: q.question || '',
+      options: Array.isArray(q.options) ? q.options.filter((o: any) => typeof o === 'string') : [],
+      multiSelect: !!q.multi_select
+    }))
+  }
+  // 兼容旧平铺结构：{ question, options, multi_select }
+  if (raw.question) {
+    return [{
+      index: 0,
+      question: raw.question,
+      options: Array.isArray(raw.options) ? raw.options.filter((o: any) => typeof o === 'string') : [],
+      multiSelect: !!raw.multi_select
+    }]
   }
   return []
 })
 
-const extraFields = computed(() => {
-  const excludeKeys = new Set(['question', 'text', 'message', 'options'])
-  return Object.entries(props.formData || {})
-    .filter(([key]) => !excludeKeys.has(key))
-    .map(([key, value]) => ({
-      key,
-      value: typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)
-    }))
-})
+const hasQuestions = computed(() => questions.value.length > 0)
+
+/** 单选答案: questionIndex → selectedOption */
+const singleAnswers = reactive<Record<number, string>>({})
+/** 多选答案: questionIndex → Set<option> */
+const multiAnswers = reactive<Record<number, Set<string>>>({})
+/** 自由输入答案: questionIndex → text */
+const freeformInputs = reactive<Record<number, string>>({})
+
+function isSingleSelected(qIdx: number, option: string): boolean {
+  return singleAnswers[qIdx] === option
+}
+
+function selectSingle(qIdx: number, option: string) {
+  singleAnswers[qIdx] = option
+}
+
+function toggleMulti(qIdx: number, option: string) {
+  if (!multiAnswers[qIdx]) {
+    multiAnswers[qIdx] = new Set()
+  }
+  const s = multiAnswers[qIdx]
+  if (s.has(option)) {
+    s.delete(option)
+  } else {
+    s.add(option)
+  }
+  // trigger reactivity by reassigning
+  multiAnswers[qIdx] = new Set(s)
+}
+
+function isMultiSelected(qIdx: number, option: string): boolean {
+  return multiAnswers[qIdx]?.has(option) ?? false
+}
+
+function hasAnyAnswer(): boolean {
+  // 至少一个问题有答案才可提交
+  for (const q of questions.value) {
+    if (q.options.length > 0) {
+      if (q.multiSelect) {
+        if (multiAnswers[q.index]?.size > 0) return true
+      } else {
+        if (singleAnswers[q.index]) return true
+      }
+    } else {
+      if (freeformInputs[q.index]?.trim()) return true
+    }
+  }
+  return false
+}
+
+function handleSubmit() {
+  const answers: Record<string, string> = {}
+  for (const q of questions.value) {
+    const key = `q_${q.index}`
+    if (q.options.length > 0) {
+      if (q.multiSelect) {
+        const selected = multiAnswers[q.index]
+        answers[key] = selected ? Array.from(selected).join(', ') : ''
+      } else {
+        answers[key] = singleAnswers[q.index] || ''
+      }
+    } else {
+      answers[key] = freeformInputs[q.index]?.trim() || ''
+    }
+  }
+  emit('submit', { answers })
+}
 
 function toggleExpand() {
   isExpanded.value = !isExpanded.value
 }
-
-function selectOption(option: string) {
-  selectedOption.value = option
-}
-
-function handleSubmit() {
-  const data: Record<string, any> = {}
-  if (selectedOption.value) {
-    data.selected_option = selectedOption.value
-  }
-  if (freeformInput.value.trim()) {
-    data.response = freeformInput.value.trim()
-  }
-  emit('submit', data)
-}
 </script>
 
 <template>
-  <div class="form-view">
+  <div class="form-view" v-if="hasQuestions">
     <div class="form-header" @click="toggleExpand">
       <div class="header-left">
         <div class="form-icon">
@@ -71,13 +131,16 @@ function handleSubmit() {
                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </div>
-
         <div class="title-section">
           <h4 class="form-title">{{ t('form.title') }}</h4>
-          <p class="form-subtitle" v-if="displayText">{{ displayText.slice(0, 60) }}{{ displayText.length > 60 ? '...' : '' }}</p>
+          <p class="form-subtitle">
+            {{ questions.length > 1
+              ? t('form.multiQuestions', { count: questions.length })
+              : questions[0]?.question?.slice(0, 60) || ''
+            }}{{ questions[0]?.question?.length > 60 ? '...' : '' }}
+          </p>
         </div>
       </div>
-
       <div class="header-right">
         <el-icon class="expand-icon"><ArrowDown v-if="isExpanded" /><ArrowRight v-else /></el-icon>
       </div>
@@ -85,50 +148,76 @@ function handleSubmit() {
 
     <transition name="expand">
       <div class="form-body" v-show="isExpanded">
-        <div class="question-block" v-if="displayText">
-          <p class="question-text">{{ displayText }}</p>
-        </div>
-
-        <div class="options-block" v-if="options.length > 0">
-          <div class="options-label">📌 {{ t('form.pleaseSelect') }}</div>
-          <div class="options-grid">
-            <button
-              v-for="(option, index) in options"
-              :key="index"
-              class="option-chip"
-              :class="{ selected: selectedOption === option }"
-              @click="selectOption(option)"
-            >
-              <span v-if="selectedOption === option" class="check-mark">✓</span>
-              {{ option }}
-            </button>
+        <div
+          v-for="(q, idx) in questions"
+          :key="q.index"
+          class="question-card"
+          :class="{ 'is-last': idx === questions.length - 1 }"
+        >
+          <div class="question-header">
+            <span class="question-number" v-if="questions.length > 1">{{ idx + 1 }}.</span>
+            <p class="question-text">{{ q.question }}</p>
+            <span
+              v-if="q.options.length > 0 && q.multiSelect"
+              class="question-badge multi-badge"
+            >{{ t('form.multiSelect') }}</span>
+            <span
+              v-else-if="q.options.length > 0"
+              class="question-badge single-badge"
+            >{{ t('form.singleSelect') }}</span>
           </div>
-        </div>
 
-        <div class="fields-block" v-if="extraFields.length > 0">
-          <div class="fields-label">📋 {{ t('form.details') }}</div>
-          <div class="fields-grid">
-            <div v-for="field in extraFields" :key="field.key" class="field-card">
-              <span class="field-key">{{ field.key }}</span>
-              <span class="field-value">{{ field.value }}</span>
-            </div>
+          <!-- 选项区域 -->
+          <div class="options-block" v-if="q.options.length > 0">
+            <!-- 多选 -->
+            <template v-if="q.multiSelect">
+              <label
+                v-for="option in q.options"
+                :key="option"
+                class="option-item checkbox-item"
+                :class="{ checked: isMultiSelected(q.index, option) }"
+              >
+                <el-checkbox
+                  :model-value="isMultiSelected(q.index, option)"
+                  @change="toggleMulti(q.index, option)"
+                  size="small"
+                />
+                <span class="option-label">{{ option }}</span>
+              </label>
+            </template>
+            <!-- 单选 -->
+            <template v-else>
+              <label
+                v-for="option in q.options"
+                :key="option"
+                class="option-item radio-item"
+                :class="{ checked: isSingleSelected(q.index, option) }"
+              >
+                <el-radio
+                  :model-value="isSingleSelected(q.index, option)"
+                  @change="selectSingle(q.index, option)"
+                  size="small"
+                />
+                <span class="option-label">{{ option }}</span>
+              </label>
+            </template>
           </div>
-        </div>
 
-        <div class="input-block">
-          <div class="input-label">✍️ {{ t('form.yourReply') }}</div>
-          <textarea
-            v-model="freeformInput"
-            class="response-input"
-            placeholder="输入你的回答或补充说明..."
-            rows="3"
-          ></textarea>
+          <!-- 自由输入 -->
+          <div class="input-block" v-else>
+            <textarea
+              v-model="freeformInputs[q.index]"
+              class="response-input"
+              :placeholder="t('form.inputPlaceholder')"
+              rows="2"
+            ></textarea>
+          </div>
         </div>
 
         <div class="action-area">
           <button
             class="submit-btn"
-            :disabled="!selectedOption && !freeformInput.trim()"
+            :disabled="!hasAnyAnswer()"
             @click="handleSubmit"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -161,7 +250,6 @@ function handleSubmit() {
   transition: background 0.2s ease;
   gap: 16px;
 }
-
 .form-header:hover {
   background: rgba(6, 182, 212, 0.04);
 }
@@ -232,11 +320,32 @@ function handleSubmit() {
   gap: 16px;
 }
 
-.question-block {
-  padding: 14px 16px;
-  background: rgba(6, 182, 212, 0.06);
-  border: 1px solid rgba(6, 182, 212, 0.18);
+/* Question Card */
+.question-card {
+  padding: 16px;
+  background: rgba(6, 182, 212, 0.04);
+  border: 1px solid rgba(6, 182, 212, 0.14);
   border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.question-card.is-last {
+  margin-bottom: 0;
+}
+
+.question-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.question-number {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  flex-shrink: 0;
 }
 
 .question-text {
@@ -245,108 +354,80 @@ function handleSubmit() {
   color: var(--text-primary);
   font-weight: 500;
   margin: 0;
+  flex: 1;
+  min-width: 0;
 }
 
-.options-block,
-.fields-block,
-.input-block {
-  padding: 14px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-}
-
-.options-label,
-.fields-label,
-.input-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-  margin-bottom: 12px;
-}
-
-.options-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.option-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border-radius: 20px;
-  border: 1px solid var(--border-color);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  user-select: none;
-}
-
-.option-chip:hover {
-  border-color: var(--accent-cyan);
-  color: var(--accent-cyan);
-  background: rgba(6, 182, 212, 0.08);
-}
-
-.option-chip.selected {
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(8, 145, 178, 0.15));
-  border-color: var(--accent-cyan);
-  color: var(--accent-cyan);
-  box-shadow: 0 0 12px rgba(6, 182, 212, 0.15);
-}
-
-.check-mark {
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.fields-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 8px;
-}
-
-.field-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-}
-
-.field-key {
+.question-badge {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.multi-badge {
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+}
+.single-badge {
+  background: rgba(6, 182, 212, 0.12);
+  color: #22d3ee;
+  border: 1px solid rgba(6, 182, 212, 0.25);
 }
 
-.field-value {
+/* Options */
+.options-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.option-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin: 0;
+}
+.option-item:hover {
+  border-color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.06);
+}
+.option-item.checked {
+  border-color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.1);
+  box-shadow: 0 0 8px rgba(6, 182, 212, 0.08);
+}
+
+.option-label {
   font-size: 13px;
+  font-weight: 500;
   color: var(--text-primary);
-  word-break: break-all;
-  line-height: 1.4;
+  line-height: 1.5;
+}
+
+/* Freeform Input */
+.input-block {
+  padding: 0;
 }
 
 .response-input {
   width: 100%;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--bg-secondary);
   color: var(--text-primary);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: inherit;
   font-size: 13px;
   line-height: 1.6;
   resize: vertical;
@@ -354,16 +435,15 @@ function handleSubmit() {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   box-sizing: border-box;
 }
-
 .response-input::placeholder {
   color: var(--text-muted);
 }
-
 .response-input:focus {
   border-color: var(--accent-cyan);
   box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.12);
 }
 
+/* Action Area */
 .action-area {
   display: flex;
   justify-content: flex-end;
@@ -384,28 +464,25 @@ function handleSubmit() {
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 4px 16px rgba(6, 182, 212, 0.3);
 }
-
 .submit-btn:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 6px 24px rgba(6, 182, 212, 0.45);
 }
-
 .submit-btn:active:not(:disabled) {
   transform: translateY(0);
 }
-
 .submit-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
   box-shadow: none;
 }
 
+/* Transition */
 .expand-enter-active,
 .expand-leave-active {
   transition: all 0.3s ease;
   overflow: hidden;
 }
-
 .expand-enter-from,
 .expand-leave-to {
   opacity: 0;

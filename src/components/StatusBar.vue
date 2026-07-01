@@ -348,6 +348,14 @@ function handleOpenAbout() {
     </div>
 
     <div class="status-center">
+      <div class="answer-only-switch">
+        <el-switch
+          v-model="chatStore.showAnswerOnly"
+          size="small"
+          active-text="只看答案"
+          inactive-text=""
+        />
+      </div>
       <ElTooltip :content="t('tokenUsage.viewDetails')" placement="top" :show-after="400">
         <button class="stat-block" @click="handleOpenTokenReport">
           <span class="stat-label">{{ t('tokenUsage.footerSessions') }}</span>
@@ -640,6 +648,37 @@ function handleOpenAbout() {
   transition: background 0.15s ease;
   font-size: 10px;
   white-space: nowrap;
+}
+
+.answer-only-switch {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+  padding-right: 6px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+.answer-only-switch :deep(.el-switch) {
+  --el-switch-on-color: #8b5cf6;
+  --el-switch-off-color: rgba(100, 116, 139, 0.35);
+  height: 18px;
+  line-height: 18px;
+}
+.answer-only-switch :deep(.el-switch__core) {
+  height: 12px;
+  min-width: 28px;
+  border-radius: 6px;
+}
+.answer-only-switch :deep(.el-switch__core::after) {
+  width: 10px;
+  height: 10px;
+}
+.answer-only-switch :deep(.el-switch__label) {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted, #94a3b8);
+}
+.answer-only-switch :deep(.el-switch.is-checked .el-switch__label) {
+  color: #a78bfa;
 }
 
 .stat-block:hover {

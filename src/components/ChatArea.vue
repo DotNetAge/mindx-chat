@@ -178,6 +178,27 @@ watch(
 const selectedModel = ref(connectionStore.currentModel?.name || '')
 const showProviderPicker = ref(false)
 
+/** 只看答案模式：按消息类型过滤 */
+const shouldShowMessage = (msg: ChatMessage): boolean => {
+  if (!chatStore.showAnswerOnly) return true
+  const et = msg.eventType
+  if (et === 'thinking_delta' || et === 'thinking_done') return false
+  if (et === 'tool_exec' || et === 'tool_exec_start' || et === 'tool_exec_end') return false
+  if (et === 'tool_use_delta') return false
+  if (et === 'subtask_spawned' || et === 'subtask_completed') return false
+  if (et === 'compaction') return false
+  if (et === 'max_turns_reached') return false
+  if (et === 'permission_denied') return false
+  // form (AskUserView) 和 permission_request (AskPermissionView) 需要用户交互，始终显示
+  if (et === 'file_modified') return false
+  if (et === 'cycle_end' || et === 'execution_summary') return false
+  return true
+}
+
+const filteredMessages = computed(() => {
+  return chatStore.currentMessages.filter(shouldShowMessage)
+})
+
 const currentActionLabel = computed(() => {
   if (chatStore.currentAction) return chatStore.currentAction
   if (chatStore.isProcessing && chatStore.currentThinking) return t('chat.thinking')
@@ -210,38 +231,6 @@ const currentAgentDisplayName = computed(() => {
   const agent = connectionStore.currentAgent
   if (!agent) return 'Agent'
   return localeMetaValue(agent.meta, 'name', agent.name)
-})
-
-function subAgentDisplayName(agentName: string): string {
-  const agent = connectionStore.agents.find(a => a.name === agentName)
-  if (!agent) return agentName
-  return localeMetaValue(agent.meta, 'name', agent.name)
-}
-
-interface MessageGroup {
-  agentName: string
-  isSubAgent: boolean
-  messages: ChatMessage[]
-}
-
-const messageGroups = computed<MessageGroup[]>(() => {
-  const messages = chatStore.currentMessages
-  const currentName = connectionStore.currentAgent?.name || ''
-  const groups: MessageGroup[] = []
-  let current: MessageGroup | null = null
-
-  for (const msg of messages) {
-    const agentName = msg.agentName || currentName
-    const isSubAgent = agentName !== currentName
-
-    if (!current || current.agentName !== agentName) {
-      current = { agentName, isSubAgent, messages: [] }
-      groups.push(current)
-    }
-    current.messages.push(msg)
-  }
-
-  return groups
 })
 
 function onQuickPrompt(text: string) {
@@ -387,6 +376,12 @@ function handleModelChanged() {
   selectedModel.value = connectionStore.currentModelName
 }
 
+/**
+ * FormView（clarify_needed）表单提交处理。
+ * 注意：AskUser 现已改为非阻塞设计，
+ * AskUserView 直接通过 WebSocket 发送用户消息，
+ * 不再经由此 RPC 路径。
+ */
 async function handleFormSubmit(data: Record<string, any>) {
   const correlationId = chatStore.pendingCorrelationId
   if (!correlationId) {
@@ -394,49 +389,86 @@ async function handleFormSubmit(data: Record<string, any>) {
     return
   }
 
-  const answers: Record<string, string> = {}
-  if (data.selected_option) answers.selected_option = data.selected_option
-  if (data.response) answers.response = data.response
+  let answers: Record<string, string> = {}
+  // 新格式：{ answers: { q_0: "...", q_1: "..." } }
+  if (data.answers && typeof data.answers === 'object') {
+    answers = data.answers
+  } else {
+    // 兼容旧格式：{ selected_option, response }
+    if (data.selected_option) answers.selected_option = data.selected_option
+    if (data.response) answers.response = data.response
+  }
 
   try {
     await connectionStore.respondToAskUser(correlationId, answers)
-    console.log('[MindX] AskUser response sent:', { correlationId, answers })
+    console.log('[MindX] FormView response sent:', { correlationId, answers })
     chatStore.pendingCorrelationId = null
   } catch (err) {
-    console.error('[MindX] Failed to send AskUser response:', err)
+    console.error('[MindX] Failed to send FormView response:', err)
   }
 }
 
-async function handlePermissionGrant(data: Record<string, any>) {
-  const correlationId = chatStore.pendingCorrelationId
-  if (!correlationId) {
-    console.warn('[MindX] No pending correlation ID for permission grant')
+/**
+ * 非阻塞权限同意：
+ * 1. 调用 execution.resume RPC 将授权存入后端缓存（GrantCache）
+ * 2. 静默重发最后一条用户消息，LLM 重新进入循环继续执行
+ */
+async function handlePermissionGrant(_data: Record<string, any>) {
+  const toolName = chatStore.pendingPermissionToolName
+  if (!toolName) {
+    console.warn('[MindX] No pending permission tool name for grant')
+    return
+  }
+
+  const sessionId = sessionStore.activeSessionId
+  if (!sessionId) {
+    console.warn('[MindX] No active session for permission grant')
     return
   }
 
   try {
-    await connectionStore.respondToPermission(correlationId, 'grant', { params: data })
-    console.log('[MindX] Permission granted:', { correlationId, data })
-    chatStore.pendingCorrelationId = null
+    // 1. 调用 execution.resume 将授权存入缓存
+    await connectionStore.resumeExecution(sessionId, toolName)
+    console.log('[MindX] Permission granted, execution.resume called:', { sessionId, toolName })
+
+    // 2. 清理本地 pending 状态
+    chatStore.pendingPermissionToolName = ''
+
+    // 3. 静默重发最后一条用户消息 — 不在 UI 中显示
+    const messages = chatStore.currentMessages
+    let lastUserMsg = ''
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        lastUserMsg = messages[i].content
+        break
+      }
+    }
+    if (lastUserMsg) {
+      const client = getMindXClient()
+      if (client) {
+        client.sendMessage(lastUserMsg, sessionId)
+        chatStore.isProcessing = true
+        console.log('[MindX] Resending last user message after permission grant')
+      }
+    }
   } catch (err) {
     console.error('[MindX] Failed to grant permission:', err)
   }
 }
 
-async function handlePermissionDeny(reason?: string) {
-  const correlationId = chatStore.pendingCorrelationId
-  if (!correlationId) {
-    console.warn('[MindX] No pending correlation ID for permission deny')
+/**
+ * 非阻塞权限拒绝：LLM 循环已经暂停，无需通知后端。
+ * 只需清理本地 pending 状态即可。
+ */
+async function handlePermissionDeny(_reason?: string) {
+  const toolName = chatStore.pendingPermissionToolName
+  if (!toolName) {
+    console.warn('[MindX] No pending permission tool name for deny')
     return
   }
 
-  try {
-    await connectionStore.respondToPermission(correlationId, 'deny', { reason: reason || t('chat.userDenied') })
-    console.log('[MindX] Permission denied:', { correlationId, reason })
-    chatStore.pendingCorrelationId = null
-  } catch (err) {
-    console.error('[MindX] Failed to deny permission:', err)
-  }
+  chatStore.pendingPermissionToolName = ''
+  console.log('[MindX] Permission denied (non-blocking, no backend call):', { toolName })
 }
 
 function handleRetry(messageId: string) {
@@ -452,6 +484,19 @@ function handleDismiss(messageId: string) {
     ...msgs.slice(0, errIdx),
     ...msgs.slice(errIdx + 1)
   ]
+}
+
+// [DEBUG] Log current messages for subtask debugging
+function logCurrentMessages(messages: any[]) {
+  const subtaskMsgs = messages.filter(m => m.eventType === 'subtask_spawned' || m.eventType === 'subtask_completed')
+  if (subtaskMsgs.length > 0) {
+    console.log('[MindX CHAT DEBUG] ChatArea rendering messages with subtask events:', {
+      totalMessages: messages.length,
+      subtaskCount: subtaskMsgs.length,
+      subtaskMessages: subtaskMsgs.map(m => ({ id: m.id, eventType: m.eventType, eventData: m.eventData }))
+    })
+  }
+  return ''
 }
 </script>
 
@@ -557,50 +602,35 @@ function handleDismiss(messageId: string) {
     <!-- Messages Area -->
     <div class="chat-messages" ref="chatContainer">
       <div class="messages-container" v-if="chatStore.currentMessages.length > 0">
-        <template v-for="group in messageGroups">
-          <!-- SubAgent group: nested container with agent header -->
-          <div v-if="group.isSubAgent" :key="group.agentName + 'sub'" class="subagent-group">
-            <div class="subagent-group-header">
-              <span class="subagent-agent-badge">{{ subAgentDisplayName(group.agentName) }}</span>
-              <span class="subagent-agent-meta">sub-agent</span>
-            </div>
-            <transition-group name="message-list" tag="div" class="subagent-messages">
-              <div
-                v-for="message in group.messages"
-                :key="message.id"
-                class="message-wrapper"
-                :class="[message.role, message.eventType]"
-              >
-                <MessageComponentRouter 
-                  :message="message"
-                  @permission-grant="(data) => handlePermissionGrant(data)"
-                  @permission-deny="(reason) => handlePermissionDeny(reason)"
-                  @form-submit="(data) => handleFormSubmit(data)"
-                  @retry="handleRetry(message.id)"
-                  @dismiss="handleDismiss(message.id)"
-                />
-              </div>
-            </transition-group>
+        <!-- [DEBUG] -->
+        {{ logCurrentMessages(chatStore.currentMessages) }}
+        <transition-group name="message-list" tag="div" class="message-list-inner">
+          <div
+            v-for="message in filteredMessages"
+            :key="message.id"
+            class="message-wrapper"
+            :class="[message.role, message.eventType]"
+          >
+            <MessageComponentRouter 
+              :message="message"
+              @permission-grant="(data) => handlePermissionGrant(data)"
+              @permission-deny="(reason) => handlePermissionDeny(reason)"
+              @form-submit="(data) => handleFormSubmit(data)"
+              @retry="handleRetry(message.id)"
+              @dismiss="handleDismiss(message.id)"
+            />
           </div>
-          <!-- Main agent group: flat rendering -->
-          <transition-group v-else :key="group.agentName + 'main'" name="message-list" tag="div" class="main-messages">
-            <div
-              v-for="message in group.messages"
-              :key="message.id"
-              class="message-wrapper"
-              :class="[message.role, message.eventType]"
-            >
-              <MessageComponentRouter 
-                :message="message"
-                @permission-grant="(data) => handlePermissionGrant(data)"
-                @permission-deny="(reason) => handlePermissionDeny(reason)"
-                @form-submit="(data) => handleFormSubmit(data)"
-                @retry="handleRetry(message.id)"
-                @dismiss="handleDismiss(message.id)"
-              />
-            </div>
-          </transition-group>
-        </template>
+        </transition-group>
+
+        <!-- 只看答案模式下的 Loading 占位 -->
+        <div v-if="chatStore.showAnswerOnly && chatStore.isProcessing" class="answer-only-placeholder">
+          <div class="placeholder-loading">
+            <svg class="placeholder-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
+            </svg>
+            <span>正在奋力思考中...</span>
+          </div>
+        </div>
       </div>
 
       <ChatEmptyState
@@ -1138,6 +1168,33 @@ function handleDismiss(messageId: string) {
   gap: 16px;
 }
 
+/* 只看答案模式 - 加载占位 */
+.answer-only-placeholder {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}
+.placeholder-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px;
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #a78bfa;
+}
+.placeholder-spinner {
+  animation: placeholder-spin 1s linear infinite;
+  color: #8b5cf6;
+}
+@keyframes placeholder-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .message-wrapper {
   animation: slideInUp 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -1171,51 +1228,8 @@ function handleDismiss(messageId: string) {
   transform: translateX(16px);
 }
 
-/* ── SubAgent nested group ── */
-.subagent-group {
-  margin-left: -12px;
-  margin-right: -12px;
-  padding: 12px 12px 4px;
-  background: rgba(139, 92, 246, 0.03);
-  border: 1px solid rgba(139, 92, 246, 0.1);
-  border-radius: 10px;
-  position: relative;
-}
-
-.subagent-group-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid rgba(139, 92, 246, 0.08);
-}
-
-.subagent-agent-badge {
-  font-size: 11px;
-  font-weight: 700;
-  color: #a78bfa;
-  letter-spacing: 0.3px;
-}
-
-.subagent-agent-meta {
-  font-size: 9px;
-  font-weight: 600;
-  color: #6b7280;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  background: rgba(139, 92, 246, 0.06);
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-
-.subagent-messages {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.main-messages {
+/* ── Messages list (flat) ── */
+.message-list-inner {
   display: flex;
   flex-direction: column;
   gap: 16px;

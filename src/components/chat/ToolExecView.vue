@@ -40,6 +40,11 @@ const toolName = computed(() => {
   return translated !== key ? translated : raw
 })
 
+const isAskUser = computed(() => {
+  const raw = props.start?.tool_name || props.end?.tool_name || props.title
+  return raw === 'AskUser'
+})
+
 // ===== 计时器：执行中实时计时，完成后显示服务端 duration_ms =====
 const startTime = ref<number>(0)
 const elapsedMs = ref(0)
@@ -460,8 +465,8 @@ watch(
     <div class="exec-header">
       <span class="tool-name">{{ toolName }}</span>
 
-      <!-- 参数预览 -->
-      <span v-if="cleanParams(start?.params)" class="params-preview">
+      <!-- 参数预览（AskUser 的参数由 FormView 专业渲染，此处隐藏） -->
+      <span v-if="!isAskUser && cleanParams(start?.params)" class="params-preview">
         {{ formatParamsPreview(start.params) }}
       </span>
 
@@ -473,7 +478,7 @@ watch(
 
       <template v-else-if="isDone && !isFailed">
         <span class="timer done">{{ durationText }}</span>
-        <button class="detail-btn" @click="showDetail = true">{{ t('tool.viewResult') }}</button>
+        <button v-if="!isAskUser" class="detail-btn" @click="showDetail = true">{{ t('tool.viewResult') }}</button>
       </template>
 
       <template v-else-if="isFailed">

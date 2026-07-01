@@ -339,7 +339,8 @@
       "AgentTalk": "悄悄话",
       "LocalSearch": "搜索知识库",
       "Sleep": "等待",
-      "Skill": "激活技能"
+      "Skill": "激活技能",
+      "Introspect": "内省"
     }
   },
   "diff": { "added": "新增", "modified": "修改" },
@@ -349,7 +350,14 @@
     "details": "详情",
     "yourReply": "你的回复",
     "placeholder": "请选择选项或输入自定义回复...",
-    "submit": "提交回复"
+    "submit": "提交回复",
+    "multiQuestions": "{count} 个问题待回答",
+    "multiSelect": "可多选",
+    "singleSelect": "单选",
+    "inputPlaceholder": "输入你的回答...",
+    "myChoices": "以下是我的选择：",
+    "other": "其它",
+    "otherPlaceholder": "请输入..."
   },
   "choices": {
     "pleaseSelect": "请选择",
@@ -397,18 +405,8 @@
     "description": "任务描述",
     "result": "执行结果",
     "errorMsg": "错误信息",
-    "truncated": "...(内容过长, 已截断)"
-  },
-  "agentTalk": {
-    "start": "Agent 对话开始",
-    "end": "Agent 对话结束",
-    "errorLabel": "错误",
-    "replied": "已回复",
-    "expand": "展开",
-    "collapse": "收起",
-    "sendMessage": "发送消息",
-    "talkError": "对话错误",
-    "receivedReply": "收到回复"
+    "truncated": "...(内容过长, 已截断)",
+    "conversationFlow": "子Agent对话流"
   },
   "compactionView": {
     "title": "上下文压缩",

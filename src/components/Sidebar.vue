@@ -362,6 +362,8 @@ async function selectSession(sessionId: string) {
     const detail = await connectionStore.fetchSessionDetail(sessionId)
     if (detail?.messages && detail.messages.length > 0) {
       chatStore.restoreSessionMessages(sessionId, detail.messages)
+      // 异步加载子Agent 会话（不阻塞主界面渲染）
+      chatStore.loadSubtaskSessions(sessionId).catch(err => console.warn('Failed to load subtask sessions:', err))
     } else {
       // 服务端无消息时清空该 session 的消息
       chatStore.clearSessionMessages(sessionId)
