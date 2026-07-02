@@ -1,4 +1,11 @@
 {
+  "taskList": {
+    "title": "任务清单",
+    "empty": "暂无任务",
+    "currentlyWorking": "正在处理 {n} 项",
+    "allDone": "全部完成",
+    "blockedBy": "被 {n} 项阻塞"
+  },
   "common": {
     "confirm": "确定",
     "cancel": "取消",
@@ -343,7 +350,7 @@
       "Introspect": "内省"
     }
   },
-  "diff": { "added": "新增", "modified": "修改" },
+  "diff": { "added": "新增", "modified": "查看修改" },
   "form": {
     "title": "需要澄清",
     "pleaseSelect": "请选择",
@@ -663,6 +670,8 @@
   "outputView.save": "保存到工作目录",
   "outputView.saveDialogTitle": "保存文件",
   "outputView.saveDialogPlaceholder": "输入文件名（.md 后缀可选）",
+  "outputView.noProjectDir": "未设置工作目录，无法保存",
+  "outputView.saveError": "保存失败: {msg}",
   "outputView.tokensIn": "词元输入 {n}",
   "outputView.tokensOut": "词元输出 {n}",
   "outputView.tokensCache": "缓存 {n}",

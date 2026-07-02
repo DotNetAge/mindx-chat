@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, useTemplateRef, nextTick } from 'vue'
 import { CopyDocument, Document, Download, Link } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useMarkdown } from '../../composables/useMarkdown'
 import { useI18n } from 'vue-i18n'
 
@@ -170,7 +171,7 @@ async function saveToProject() {
   const { useConnectionStore } = await import('../../stores/connectionStore')
   const conn = useConnectionStore()
   if (!conn.currentProjectDir) {
-    console.warn('[OutputView] no project dir set')
+    ElMessage.warning(t('outputView.noProjectDir'))
     return
   }
   const fullPath = `${conn.currentProjectDir}/${finalName}`
@@ -180,8 +181,9 @@ async function saveToProject() {
     saveDialogVisible.value = false
     saveSuccess.value = true
     setTimeout(() => { saveSuccess.value = false }, 2000)
-  } catch (e) {
+  } catch (e: any) {
     console.warn('[OutputView] save failed:', e)
+    ElMessage.error(t('outputView.saveError', { msg: e?.message || t('common.unknownError') }))
   }
 }
 

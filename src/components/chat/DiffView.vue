@@ -75,8 +75,8 @@ const diffHtml = computed(() => {
 .diff-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 16px 20px;
+  gap: 8px;
+  padding: 10px 14px;
   background: rgba(6, 182, 212, 0.06);
   border-bottom: 1px solid rgba(6, 182, 212, 0.15);
   cursor: pointer;
@@ -89,15 +89,20 @@ const diffHtml = computed(() => {
 }
 
 .header-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
   background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
   color: white;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+.header-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 .file-path {
@@ -161,7 +166,7 @@ const diffHtml = computed(() => {
 }
 
 .diff-body {
-  max-height: 500px;
+  max-height: 360px;
   overflow-y: auto;
   overflow-x: auto;
 }
@@ -198,28 +203,58 @@ const diffHtml = computed(() => {
 .diff-body :deep(.d2h-code-line) {
   font-size: 11px;
   line-height: 1.5;
+  color: #e2e8f0;
 }
 
 .diff-body :deep(.d2h-code-side-line) {
   font-size: 11px;
   line-height: 1.5;
+  color: #e2e8f0;
 }
 
 .diff-body :deep(.d2h-code-line-ctn) {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
+  color: #e2e8f0;
 }
 
-.diff-body :deep(.d2h-del) {
-  background-color: rgba(239, 68, 68, 0.12);
-}
-
-.diff-body :deep(.d2h-ins) {
-  background-color: rgba(16, 185, 129, 0.12);
-}
-
+/* 行号列：背景较深、字色足够亮 */
 .diff-body :deep(.d2h-info) {
-  background-color: rgba(100, 116, 139, 0.08);
-  color: #94a3b8;
+  background-color: rgba(15, 23, 42, 0.6);
+  color: #cbd5e1;
+}
+
+.diff-body :deep(.d2h-info-contents) {
+  color: #cbd5e1;
+}
+
+/* 删除行：高亮浅红背景，黑色字保证可读 */
+.diff-body :deep(.d2h-del) {
+  background-color: rgba(239, 68, 68, 0.28);
+  color: #000;
+}
+
+.diff-body :deep(.d2h-del-contents),
+.diff-body :deep(.d2h-del .d2h-code-line-ctn),
+.diff-body :deep(.d2h-del .d2h-code-line) {
+  color: #000;
+}
+
+/* 新增行：高亮浅绿背景，黑色字保证可读 */
+.diff-body :deep(.d2h-ins) {
+  background-color: rgba(16, 185, 129, 0.30);
+  color: #000;
+}
+
+.diff-body :deep(.d2h-ins-contents),
+.diff-body :deep(.d2h-ins .d2h-code-line-ctn),
+.diff-body :deep(.d2h-ins .d2h-code-line) {
+  color: #000;
+}
+
+/* 变更标记（@ 之类）使用黑色字更清晰 */
+.diff-body :deep(.d2h-change) {
+  color: #000;
+  background-color: rgba(251, 191, 36, 0.6);
 }
 </style>

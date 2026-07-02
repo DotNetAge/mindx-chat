@@ -14,8 +14,11 @@ import FormView from './FormView.vue'
 import AskUserView from './AskUserView.vue'
 import DiffView from './DiffView.vue'
 import FormattedContent from './FormattedContent.vue'
+import TaskListView from './TaskListView.vue'
+import { useChatStore, isTaskTool } from '../../stores/chatStore'
 
 const { t } = useI18n()
+const chatStore = useChatStore()
 
 const props = defineProps({
   message: {
@@ -40,7 +43,17 @@ const componentType = computed(() => {
   if (et === 'thinking_delta' || et === 'thinking_done') return 'thinking'
   if (et === 'content_delta' || et === 'markdown') return 'output'
   if (et === 'tool_use_delta') return 'output'
-  if (et === 'tool_exec' || et === 'tool_exec_start' || et === 'tool_exec_end') return 'action'
+  if (et === 'tool_exec' || et === 'tool_exec_start' || et === 'tool_exec_end') {
+    // TaskXXX 工具系列：聚合成持久 Todo List 视图，不再走 ToolExecView
+    const toolName = props.message.eventTitle || props.message.eventData?.start?.tool_name || ''
+    if (isTaskTool(toolName)) {
+      const sid = props.message.sessionId
+      const firstId = sid ? chatStore.firstTaskToolMessageIdBySession[sid] : undefined
+      // 仅该会话第一条 TaskXXX 消息渲染持久块，其余隐藏（状态由 store 自动 ingest 更新）
+      return firstId && props.message.id === firstId ? 'task_list' : 'task_list_hidden'
+    }
+    return 'action'
+  }
   if (et === 'subtask_spawned' || et === 'subtask_completed') return 'subtask'
   if (et === 'final_answer' || et === 'task_summary') return 'output'
   if (et === 'permission_request') return 'permission'
@@ -184,8 +197,16 @@ function formatContent(content: string): string {
       v-bind="thinkingData"
     />
 
+    <!-- Task List 持久视图（TaskXXX 工具系列聚合成 Todo List，首条锚定，后续调用隐藏） -->
+    <TaskListView
+      v-else-if="componentType === 'task_list'"
+    />
+
+    <!-- 后续 TaskXXX 调用：不渲染独立块（状态由 store 自动 ingest 到持久视图） -->
+    <template v-else-if="componentType === 'task_list_hidden'" />
+
     <!-- ToolExec Component (goharness tool_exec event) -->
-    <ToolExecView 
+    <ToolExecView
       v-else-if="componentType === 'action'"
       v-bind="actionData"
     />

@@ -1,4 +1,11 @@
 {
+  "taskList": {
+    "title": "Task List",
+    "empty": "No tasks yet",
+    "currentlyWorking": "Working on {n}",
+    "allDone": "All done",
+    "blockedBy": "blocked by {n}"
+  },
   "common": {
     "confirm": "Confirm",
     "cancel": "Cancel",
@@ -341,7 +348,7 @@
       "Introspect": "Introspect"
     }
   },
-  "diff": { "added": "Added", "modified": "Modified" },
+  "diff": { "added": "Added", "modified": "View changes" },
   "form": {
     "title": "Clarification Needed",
     "pleaseSelect": "Please Select",
@@ -662,6 +669,8 @@
   "outputView.save": "Save to Working Directory",
   "outputView.saveDialogTitle": "Save File",
   "outputView.saveDialogPlaceholder": "Enter filename (.md optional)",
+  "outputView.noProjectDir": "No working directory set, unable to save",
+  "outputView.saveError": "Save failed: {msg}",
   "outputView.tokensIn": "Input {n}",
   "outputView.tokensOut": "Output {n}",
   "outputView.tokensCache": "Cache {n}",

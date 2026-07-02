@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { useConnectionStore } from './connectionStore'
 
 export interface Session {
   session_id: string
@@ -47,6 +48,11 @@ export const useSessionStore = defineStore('session', {
 
     setActiveSession(sessionId: string) {
       this.activeSessionId = sessionId
+      // 同步更新当前工作目录，确保保存文件等功能可用
+      const session = this.sessions.find(s => s.session_id === sessionId)
+      if (session?.project_dir) {
+        useConnectionStore().currentProjectDir = session.project_dir
+      }
     },
 
     syncServerSessions(serverSessions: Session[], replace = false) {

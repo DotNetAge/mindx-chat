@@ -10,6 +10,7 @@ import { getMindXClient } from '../services/websocket'
 import MessageComponentRouter from './chat/MessageComponentRouter.vue'
 import ProviderModelPicker from './chat/ProviderModelPicker.vue'
 import ScheduleView from './chat/ScheduleView.vue'
+import SkeletonChat from './chat/SkeletonChat.vue'
 import ChatEmptyState from './ChatEmptyState.vue'
 import FileReviewBar from './FileReviewBar.vue'
 import GraphViewer from './GraphViewer.vue'
@@ -108,7 +109,8 @@ function startSpeechRecognition() {
   }
 
   isRecording.value = true
-  messageInput.value = ''
+  // 保留已有输入内容，录音转写结果追加到尾部
+  const existingText = messageInput.value
 
   const sr = new SpeechRecognitionAPI()
   if (locale.value === 'zh') sr.lang = 'zh-CN'
@@ -125,7 +127,8 @@ function startSpeechRecognition() {
         finalTranscript += r[0].transcript
       }
     }
-    messageInput.value = finalTranscript
+    // 仅在尾部插入转写文本，不清除已有内容
+    messageInput.value = existingText + finalTranscript
   }
 
   sr.onerror = () => {
@@ -175,6 +178,30 @@ watch(
   { flush: 'post' }
 )
 
+// 切换会话骨架屏揭晓：先让消息流在背后渲染并滚到底部，再移除骨架屏
+watch(
+  () => chatStore.sessionRevealPending,
+  (pending) => {
+    if (pending) {
+      nextTick(() => {
+        // 临时禁用平滑滚动，确保瞬间到位
+        const el = chatContainer.value
+        if (el) {
+          el.style.scrollBehavior = 'auto'
+          scrollToBottom()
+          // 确保滚动提交到浏览器的渲染管线后再揭晓
+          requestAnimationFrame(() => {
+            chatStore.isRestoringSession = false
+            chatStore.sessionRevealPending = false
+            // 恢复平滑滚动
+            el.style.scrollBehavior = ''
+          })
+        }
+      })
+    }
+  }
+)
+
 const selectedModel = ref(connectionStore.currentModel?.name || '')
 const showProviderPicker = ref(false)
 
@@ -190,7 +217,7 @@ const shouldShowMessage = (msg: ChatMessage): boolean => {
   if (et === 'max_turns_reached') return false
   if (et === 'permission_denied') return false
   // form (AskUserView) 和 permission_request (AskPermissionView) 需要用户交互，始终显示
-  if (et === 'file_modified') return false
+  // file_modified 展示文件变更结果（结果性内容），不属于过程信息，始终显示
   if (et === 'cycle_end' || et === 'execution_summary') return false
   return true
 }
@@ -601,7 +628,8 @@ function logCurrentMessages(messages: any[]) {
 
     <!-- Messages Area -->
     <div class="chat-messages" ref="chatContainer">
-      <div class="messages-container" v-if="chatStore.currentMessages.length > 0">
+      <!-- 消息流：与骨架屏共存，加载时隐藏在骨架屏后方 -->
+      <div v-if="chatStore.currentMessages.length > 0" class="messages-container">
         <!-- [DEBUG] -->
         {{ logCurrentMessages(chatStore.currentMessages) }}
         <transition-group name="message-list" tag="div" class="message-list-inner">
@@ -633,8 +661,14 @@ function logCurrentMessages(messages: any[]) {
         </div>
       </div>
 
+      <!-- 切换会话加载历史消息时的骨架屏覆盖层 -->
+      <div v-if="chatStore.isRestoringSession" class="skeleton-overlay">
+        <SkeletonChat />
+      </div>
+
+      <!-- 空状态：仅当未加载且无消息时显示 -->
       <ChatEmptyState
-        v-else
+        v-if="!chatStore.isRestoringSession && chatStore.currentMessages.length === 0"
         :is-connected="connectionStore.isConnected"
         :is-offline-mode="connectionStore.isOfflineMode"
         :sessions-length="sessionStore.sessions.length"
@@ -1158,6 +1192,7 @@ function logCurrentMessages(messages: any[]) {
   overflow-y: auto;
   padding: 24px 28px;
   scroll-behavior: smooth;
+  position: relative;
 }
 
 .messages-container {
@@ -1166,6 +1201,15 @@ function logCurrentMessages(messages: any[]) {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* 骨架屏覆盖层：在消息恢复期间遮盖消息流 */
+.skeleton-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: var(--bg-primary, #0f172a);
+  overflow: hidden;
 }
 
 /* 只看答案模式 - 加载占位 */

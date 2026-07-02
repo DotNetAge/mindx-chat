@@ -1,4 +1,11 @@
 {
+  "taskList": {
+    "title": "任務清單",
+    "empty": "暫無任務",
+    "currentlyWorking": "正在處理 {n} 項",
+    "allDone": "全部完成",
+    "blockedBy": "被 {n} 項阻塞"
+  },
   "common": {
     "confirm": "確定",
     "cancel": "取消",
@@ -334,7 +341,7 @@
       "Introspect": "内省"
     }
   },
-  "diff": { "added": "新增", "modified": "修改" },
+  "diff": { "added": "新增", "modified": "查看修改" },
   "form": {
     "title": "需要釐清",
     "pleaseSelect": "請選擇",
@@ -643,6 +650,8 @@
   "outputView.save": "儲存到工作目錄",
   "outputView.saveDialogTitle": "儲存檔案",
   "outputView.saveDialogPlaceholder": "輸入檔案名（.md 後綴可選）",
+  "outputView.noProjectDir": "未設定工作目錄，無法儲存",
+  "outputView.saveError": "儲存失敗: {msg}",
   "outputView.tokensIn": "詞元輸入 {n}",
   "outputView.tokensOut": "詞元輸出 {n}",
   "outputView.tokensCache": "快取 {n}",

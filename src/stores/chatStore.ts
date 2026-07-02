@@ -22,6 +22,27 @@ export interface ChatMessage {
   agentName?: string
 }
 
+/** TaskXXX 工具系列维护的任务项，与会话绑定 */
+export interface TaskItem {
+  id: string
+  subject: string
+  description?: string
+  status: string // 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  owner?: string
+  activeForm?: string
+  blockedBy?: string[]
+  blocks?: string[]
+  metadata?: Record<string, any>
+  createdAt?: string
+}
+
+const TASK_TOOL_NAMES = new Set(['TaskCreate', 'TaskUpdate', 'TaskList'])
+
+/** 判断工具名是否属于 TaskXXX 系列（用于持久 Todo List 视图） */
+export function isTaskTool(name: string): boolean {
+  return TASK_TOOL_NAMES.has(name)
+}
+
 export interface ExecutionStats {
   totalIterations: number
   toolCalls: number
@@ -64,6 +85,11 @@ export const useChatStore = defineStore('chat', {
     // 按 session 缓存的最后一条消息 token 数据，刷新后恢复用
     sessionMessageTokens: {} as Record<string, { inputTokens: number; outputTokens: number; cacheTokens: number; totalTokens: number } | null>,
 
+    // 切换会话时正在恢复历史消息（骨架屏用）
+    isRestoringSession: false as boolean,
+    // 消息已加载完毕待揭晓（ChatArea 先滚动底部再移除骨架屏）
+    sessionRevealPending: false as boolean,
+
     // 只看答案模式 — 隐藏执行过程，只显示用户问题和 LLM 最终回答
     showAnswerOnly: false as boolean,
 
@@ -84,6 +110,11 @@ export const useChatStore = defineStore('chat', {
     subtaskMessagesBySession: {} as Record<string, Record<string, ChatMessage[]>>,
     // 活跃子任务索引 — 按 sessionId → [{task_id, agent_name}]
     activeSubtasksBySession: {} as Record<string, Array<{ task_id: string; agent_name: string }>>,
+
+    // TaskXXX 工具系列 — 会话级 task map（taskId → TaskItem），由 TaskCreate/Update/List 工具事件驱动
+    tasksBySession: {} as Record<string, Record<string, TaskItem>>,
+    // 每个会话第一条 TaskXXX 工具消息 id，作为持久 Todo List 块的渲染锚点
+    firstTaskToolMessageIdBySession: {} as Record<string, string>,
 
     // File modification tracking
     pendingFileModifications: [] as Array<{
@@ -175,6 +206,8 @@ export const useChatStore = defineStore('chat', {
 
     clearSessionMessages(sessionId: string) {
       this.messagesBySession[sessionId] = []
+      delete this.tasksBySession[sessionId]
+      delete this.firstTaskToolMessageIdBySession[sessionId]
       this.resetProcessingState()
     },
 
@@ -533,6 +566,25 @@ export const useChatStore = defineStore('chat', {
       }
 
       this.messagesBySession[sessionId] = restored
+
+      // 恢复 TaskXXX 工具事件到会话级 task map，并注册持久 Todo List 块锚点
+      for (const m of restored) {
+        if (m.eventType === 'tool_exec' && m.eventTitle && isTaskTool(m.eventTitle)) {
+          if (!this.firstTaskToolMessageIdBySession[sessionId]) {
+            this.firstTaskToolMessageIdBySession[sessionId] = m.id
+          }
+          const end = m.eventData?.end
+          if (end) {
+            this.ingestTaskToolEnd(
+              sessionId,
+              m.eventTitle,
+              m.eventData?.start?.params,
+              end.result,
+              end.success !== false
+            )
+          }
+        }
+      }
     },
 
     clearCurrentSession() {
@@ -841,7 +893,7 @@ export const useChatStore = defineStore('chat', {
         this.pendingToolUseDelta = null
       }
 
-      this.addMessage(targetSessionId, {
+      const msg = this.addMessage(targetSessionId, {
         role: 'tool',
         content: '',
         eventType: 'tool_exec',
@@ -853,6 +905,11 @@ export const useChatStore = defineStore('chat', {
         },
         metadata: { phase: 'active' }
       })
+
+      // TaskXXX 工具：注册持久 Todo List 块的渲染锚点（仅该会话首次）
+      if (isTaskTool(toolName) && !this.firstTaskToolMessageIdBySession[targetSessionId]) {
+        this.firstTaskToolMessageIdBySession[targetSessionId] = msg.id
+      }
     },
 
     // --- goharness ToolExecEnd ---
@@ -868,8 +925,109 @@ export const useChatStore = defineStore('chat', {
         toolMsg.eventData.end = data
         toolMsg.eventData.status = data?.success !== false ? 'done' : 'failed'
 
+        // TaskXXX 工具：将结果 ingest 到会话级 task map
+        const endToolName = data?.tool_name || toolMsg.eventTitle || ''
+        if (isTaskTool(endToolName)) {
+          this.ingestTaskToolEnd(
+            targetSessionId,
+            endToolName,
+            toolMsg.eventData.start?.params,
+            data?.result,
+            data?.success !== false
+          )
+        }
+
         this.currentAction = null
       }
+    },
+
+    /**
+     * 将 TaskXXX 工具的执行结果 ingest 到会话级 task map。
+     * - TaskCreate: 新增一个 task（默认 pending）
+     * - TaskUpdate: 按 task_id 更新 status / subject / owner / active_form / 依赖等
+     * - TaskList:   用返回的快照整体刷新 task map（最权威来源）
+     * 失败的工具调用不更新 map。
+     */
+    ingestTaskToolEnd(sessionId: string, toolName: string, startParams: any, endResult: string, success: boolean) {
+      if (!success) return
+      if (!this.tasksBySession[sessionId]) this.tasksBySession[sessionId] = {}
+
+      let parsed: any = null
+      if (endResult) {
+        try {
+          parsed = JSON.parse(endResult)
+        } catch {
+          parsed = null
+        }
+      }
+      if (!parsed || typeof parsed !== 'object') return
+
+      const map = this.tasksBySession[sessionId]
+
+      if (toolName === 'TaskCreate') {
+        const id = parsed.task_id
+        if (!id) return
+        map[id] = {
+          id,
+          subject: parsed.subject || startParams?.subject || '',
+          description: parsed.description || startParams?.description || '',
+          status: parsed.status || 'pending',
+          activeForm: parsed.active_form || startParams?.active_form || '',
+          metadata: parsed.metadata || {},
+        }
+      } else if (toolName === 'TaskUpdate') {
+        const id = parsed.task_id || startParams?.task_id
+        if (!id) return
+        const prev = map[id] || { id, subject: '', status: 'pending' }
+        const patch: TaskItem = { ...prev }
+        if (parsed.status) patch.status = parsed.status
+        if (startParams) {
+          if (startParams.subject) patch.subject = startParams.subject
+          if (startParams.description) patch.description = startParams.description
+          if (startParams.owner) patch.owner = startParams.owner
+          if (startParams.active_form) patch.activeForm = startParams.active_form
+          if (Array.isArray(startParams.addBlocks)) {
+            patch.blocks = Array.from(new Set([...(prev.blocks || []), ...startParams.addBlocks]))
+          }
+          if (Array.isArray(startParams.addBlockedBy)) {
+            patch.blockedBy = Array.from(new Set([...(prev.blockedBy || []), ...startParams.addBlockedBy]))
+          }
+          if (startParams.metadata && typeof startParams.metadata === 'object') {
+            const merged = { ...(prev.metadata || {}) }
+            for (const [k, v] of Object.entries(startParams.metadata)) {
+              if (v === null) delete merged[k]
+              else merged[k] = v
+            }
+            patch.metadata = merged
+          }
+        }
+        map[id] = patch
+      } else if (toolName === 'TaskList') {
+        const tasks = parsed.tasks
+        if (Array.isArray(tasks)) {
+          const fresh: Record<string, TaskItem> = {}
+          for (const tk of tasks) {
+            if (tk && tk.task_id) {
+              fresh[tk.task_id] = {
+                id: tk.task_id,
+                subject: tk.subject || '',
+                status: tk.status || 'pending',
+                owner: tk.owner,
+                activeForm: tk.active_form,
+                blockedBy: Array.isArray(tk.blocked_by) ? tk.blocked_by : undefined,
+                metadata: tk.metadata,
+                createdAt: tk.created_at,
+              }
+            }
+          }
+          this.tasksBySession[sessionId] = fresh
+        }
+      }
+    },
+
+    clearTaskList(sessionId: string) {
+      delete this.tasksBySession[sessionId]
+      delete this.firstTaskToolMessageIdBySession[sessionId]
     },
 
     // --- FileModified: 工具执行后文件变更通知 ---
