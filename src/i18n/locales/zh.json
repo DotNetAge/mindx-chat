@@ -381,6 +381,7 @@
     "reason": "执行原因",
     "paramDetails": "参数详情",
     "modifyParams": "修改参数",
+    "remember": "本次会话记住此授权",
     "deny": "拒绝执行",
     "allow": "授权执行",
     "userDenied": "用户拒绝",
@@ -603,6 +604,8 @@
   },
   "fileReview": {
     "filesModified": "{count} 个文件被修改",
+    "expand": "展开文件列表",
+    "collapse": "折叠文件列表",
     "confirming": "确认中...",
     "confirmAll": "全部确认",
     "rollingBack": "回滚中...",

@@ -759,6 +759,7 @@ export const useConnectionStore = defineStore('connection', {
 
     setLastAgent(agentName: string) {
       this.lastAgentName = agentName
+      localStorage.setItem('mindx-last-agent', agentName)
     },
 
     setLastSession(sessionId: string) {

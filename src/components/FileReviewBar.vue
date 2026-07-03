@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { Check, Close } from '@element-plus/icons-vue'
+import { Check, Close, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
 import { useChatStore } from '../stores/chatStore'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useSessionStore } from '../stores/sessionStore'
@@ -14,6 +14,11 @@ const { t } = useI18n()
 
 const confirming = ref(false)
 const rollingBack = ref(false)
+const isCollapsed = ref(false)
+
+function toggleCollapse() {
+  isCollapsed.value = !isCollapsed.value
+}
 
 async function confirmAll() {
   const sessionId = sessionStore.activeSessionId
@@ -57,47 +62,52 @@ async function rollbackAll() {
 <template>
   <div v-if="chatStore.pendingFileModifications.length > 0" class="file-review-bar">
     <div class="review-card">
-      <div class="review-header">
+      <div class="review-header" @click="toggleCollapse">
         <span class="header-icon">
           <el-icon :size="18"><WarningFilled /></el-icon>
         </span>
         <span class="header-title">{{ chatStore.pendingFileModifications.length }} {{ t('fileReview.filesModified') }}</span>
+        <button class="collapse-btn" @click.stop="toggleCollapse" :aria-label="isCollapsed ? t('fileReview.expand') : t('fileReview.collapse')">
+          <el-icon :size="14"><ArrowUp v-if="!isCollapsed" /><ArrowDown v-else /></el-icon>
+        </button>
       </div>
-      <div class="review-body">
-        <div class="review-files">
-          <div
-            v-for="(f, i) in chatStore.pendingFileModifications"
-            :key="i"
-            class="review-file-row"
-          >
-            <span class="file-path">{{ f.path }}</span>
-            <div class="file-stats">
-              <span class="stat stat-add">+{{ f.additions }}</span>
-              <span class="stat stat-del">-{{ f.deletions }}</span>
+      <div v-show="!isCollapsed">
+        <div class="review-body">
+          <div class="review-files">
+            <div
+              v-for="(f, i) in chatStore.pendingFileModifications"
+              :key="i"
+              class="review-file-row"
+            >
+              <span class="file-path">{{ f.path }}</span>
+              <div class="file-stats">
+                <span class="stat stat-add">+{{ f.additions }}</span>
+                <span class="stat stat-del">-{{ f.deletions }}</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-      <div class="review-actions">
-        <el-button
-          size="small"
-          type="success"
-          :loading="confirming"
-          :disabled="rollingBack"
-          @click="confirmAll"
-        >
-          <el-icon :size="14"><Check /></el-icon>
-          {{ confirming ? t('fileReview.confirming') : t('fileReview.confirmAll') }}
-        </el-button>
-        <el-button
-          size="small"
-          :loading="rollingBack"
-          :disabled="confirming"
-          @click="rollbackAll"
-        >
-          <el-icon :size="14"><Close /></el-icon>
-          {{ rollingBack ? t('fileReview.rollingBack') : t('fileReview.rollbackAll') }}
-        </el-button>
+        <div class="review-actions">
+          <el-button
+            size="small"
+            type="success"
+            :loading="confirming"
+            :disabled="rollingBack"
+            @click="confirmAll"
+          >
+            <el-icon :size="14"><Check /></el-icon>
+            {{ confirming ? t('fileReview.confirming') : t('fileReview.confirmAll') }}
+          </el-button>
+          <el-button
+            size="small"
+            :loading="rollingBack"
+            :disabled="confirming"
+            @click="rollbackAll"
+          >
+            <el-icon :size="14"><Close /></el-icon>
+            {{ rollingBack ? t('fileReview.rollingBack') : t('fileReview.rollbackAll') }}
+          </el-button>
+        </div>
       </div>
     </div>
   </div>
@@ -130,6 +140,33 @@ async function rollbackAll() {
   padding: 16px 20px;
   background: rgba(245, 158, 11, 0.06);
   border-bottom: 1px solid rgba(245, 158, 11, 0.15);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s ease;
+}
+
+.review-header:hover {
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.collapse-btn {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.collapse-btn:hover {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
 }
 
 .header-icon {

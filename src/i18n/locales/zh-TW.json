@@ -382,7 +382,8 @@
     "warning": "此操作可能影響以下檔案與資源",
     "paramsLabel": "参数详情",
     "denyExecute": "拒绝执行",
-    "grantExecute": "授权执行"
+    "grantExecute": "授权执行",
+    "remember": "本次會話記住此授權"
   },
   "errorView": {
     "title": "執行錯誤",
@@ -583,6 +584,8 @@
   },
   "fileReview": {
     "filesModified": "{count} 個檔案被修改",
+    "expand": "展開檔案列表",
+    "collapse": "摺疊檔案列表",
     "confirming": "確認中...",
     "confirmAll": "全部確認",
     "rollingBack": "還原中...",

@@ -46,6 +46,9 @@ const progressPct = computed(() => {
   return Math.round((s.completed / effective) * 100)
 })
 
+// 任务是否全部完成（含 cancelled）——用于决定是否取消 sticky Pin
+const isAllDone = computed(() => stats.value.total > 0 && progressPct.value === 100)
+
 // 排序：in_progress 置顶 → pending → completed → cancelled；组内按 createdAt
 const sortedTasks = computed(() => {
   const rank = (s: string) =>
@@ -63,7 +66,7 @@ function toggleCollapse() {
 </script>
 
 <template>
-  <div class="task-list-view" :class="{ 'has-active': stats.inProgress > 0 }">
+  <div class="task-list-view" :class="{ 'has-active': stats.inProgress > 0, 'is-done': isAllDone }">
     <div class="tl-header" @click="toggleCollapse">
       <div class="tl-header-left">
         <div class="tl-icon" :class="{ active: stats.inProgress > 0, done: stats.total > 0 && stats.completed === stats.total }">
@@ -159,11 +162,26 @@ function toggleCollapse() {
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(139, 92, 246, 0.04));
   border: 1px solid rgba(99, 102, 241, 0.22);
   transition: all 0.3s ease;
+  /* 任务未完成时，列表粘在消息流容器顶部，让用户继续往下阅读时仍能跟踪进度。
+     任务全部完成（is-done）后改为 static，回到正常流式位置。 */
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  /* 防止 sticky 时背景透明导致下方消息透出 */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .task-list-view.has-active {
   border-color: rgba(59, 130, 246, 0.35);
   box-shadow: 0 0 24px rgba(59, 130, 246, 0.08);
+}
+
+/* 任务全部完成后取消 sticky，让消息流自然滚动 */
+.task-list-view.is-done {
+  position: static;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .tl-header {

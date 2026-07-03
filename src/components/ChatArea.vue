@@ -440,7 +440,7 @@ async function handleFormSubmit(data: Record<string, any>) {
  * 1. 调用 execution.resume RPC 将授权存入后端缓存（GrantCache）
  * 2. 静默重发最后一条用户消息，LLM 重新进入循环继续执行
  */
-async function handlePermissionGrant(_data: Record<string, any>) {
+async function handlePermissionGrant(data: Record<string, any>) {
   const toolName = chatStore.pendingPermissionToolName
   if (!toolName) {
     console.warn('[MindX] No pending permission tool name for grant')
@@ -453,30 +453,23 @@ async function handlePermissionGrant(_data: Record<string, any>) {
     return
   }
 
+  const remember = data?.remember === true
+
   try {
-    // 1. 调用 execution.resume 将授权存入缓存
+    // 1. 调用 execution.resume 将授权存入缓存（兼容旧路径）
     await connectionStore.resumeExecution(sessionId, toolName)
-    console.log('[MindX] Permission granted, execution.resume called:', { sessionId, toolName })
+    console.log('[MindX] Permission granted, execution.resume called:', { sessionId, toolName, remember })
 
     // 2. 清理本地 pending 状态
     chatStore.pendingPermissionToolName = ''
 
-    // 3. 静默重发最后一条用户消息 — 不在 UI 中显示
-    const messages = chatStore.currentMessages
-    let lastUserMsg = ''
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === 'user') {
-        lastUserMsg = messages[i].content
-        break
-      }
-    }
-    if (lastUserMsg) {
-      const client = getMindXClient()
-      if (client) {
-        client.sendMessage(lastUserMsg, sessionId)
-        chatStore.isProcessing = true
-        console.log('[MindX] Resending last user message after permission grant')
-      }
+    // 3. 静默重发魔术词 — 不在 UI 中显示
+    const client = getMindXClient()
+    if (client) {
+      const magicWord = remember ? 'PermissionAllowSession' : 'PermissionAllow'
+      client.sendMessage(magicWord, sessionId)
+      chatStore.isProcessing = true
+      console.log('[MindX] Sending permission magic word:', magicWord)
     }
   } catch (err) {
     console.error('[MindX] Failed to grant permission:', err)
@@ -701,6 +694,7 @@ function logCurrentMessages(messages: any[]) {
             v-model="messageInput"
             type="textarea"
             :rows="2"
+            :autosize="{ minRows: 2, maxRows: 10 }"
             resize="none"
             :readonly="optimizeLoading"
             :placeholder="isRecording ? t('chat.recordingPlaceholder') : (translateMode ? t('chat.translatePlaceholder') : (!connectionStore.isOfflineMode && connectionStore.isConnected ? t('chat.defaultPlaceholder') : (connectionStore.isOfflineMode ? t('chat.offlineInputPlaceholder') : t('chat.notConnected'))))"
@@ -1405,6 +1399,9 @@ function logCurrentMessages(messages: any[]) {
   line-height: 1.6;
   padding: 0;
   resize: none;
+  /* autosize 模式下高度由 Element Plus 动态设 inline style；
+     transition 监听 height 变化使其平滑过渡，避免输入多行时瞬间跳变。 */
+  transition: height 0.2s ease;
 }
 
 /* ── 录音指示器 ── */

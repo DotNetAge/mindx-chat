@@ -26,8 +26,11 @@ const props = defineProps({
 const emit = defineEmits(['grant', 'deny'])
 
 const isExpanded = ref(true)
+const submitted = ref(false)
 const customParams = ref<Record<string, any>>({})
 const showCustomInput = ref(false)
+const isSubmitting = ref(false)
+const remember = ref(false)
 
 const levelConfig = computed(() => {
   const configs: Record<string, { color: string; bg: string; border: string; icon: string; label: string }> = {
@@ -57,10 +60,22 @@ const levelConfig = computed(() => {
 })
 
 function handleGrant() {
-  emit('grant', customParams.value)
+  if (isSubmitting.value) return
+  isSubmitting.value = true
+  submitted.value = true
+  isExpanded.value = false
+  if (remember.value) {
+    emit('grant', { ...customParams.value, remember: true })
+  } else {
+    emit('grant', customParams.value)
+  }
 }
 
 function handleDeny() {
+  if (isSubmitting.value) return
+  isSubmitting.value = true
+  submitted.value = true
+  isExpanded.value = false
   emit('deny', '用户拒绝')
 }
 
@@ -155,7 +170,7 @@ function toggleExpand() {
                   {{ value.slice(0, 50) }}...
                 </template>
                 <template v-else-if="typeof value === 'object'">
-                  [Object]
+                  {{ JSON.stringify(value) }}
                 </template>
                 <template v-else>
                   {{ value }}
@@ -165,16 +180,22 @@ function toggleExpand() {
           </div>
         </div>
 
+        <!-- 记住授权 -->
+        <label class="remember-option">
+          <input type="checkbox" v-model="remember" :disabled="isSubmitting" />
+          <span class="remember-label">{{ t('permission.remember') }}</span>
+        </label>
+
         <!-- Action Buttons -->
         <div class="action-buttons">
-          <button class="deny-btn" @click="handleDeny">
+          <button class="deny-btn" @click="handleDeny" :disabled="isSubmitting">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" fill="currentColor"/>
             </svg>
             {{ t('permission.deny') }}
           </button>
           
-          <button class="grant-btn" @click="handleGrant" :style="{ background: `linear-gradient(135deg, ${levelConfig.color}, ${levelConfig.color}dd)` }">
+          <button class="grant-btn" @click="handleGrant" :disabled="isSubmitting" :style="{ background: `linear-gradient(135deg, ${levelConfig.color}, ${levelConfig.color}dd)` }">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" fill="currentColor"/>
             </svg>
@@ -387,35 +408,39 @@ function toggleExpand() {
 }
 
 .params-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .param-card {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  background: var(--bg-card);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.2);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .param-key {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-  font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
+  color: #64748b;
+  font-weight: 600;
+  text-transform: lowercase;
 }
 
 .param-value {
-  font-size: 13px;
+  flex: 1;
+  min-width: 0;
   color: var(--text-primary);
   word-break: break-all;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 
 .action-buttons {
@@ -436,6 +461,38 @@ function toggleExpand() {
   font-weight: 700;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.deny-btn:disabled,
+.grant-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* 记住授权勾选框 */
+.remember-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  cursor: pointer;
+  user-select: none;
+}
+
+.remember-option input[type="checkbox"] {
+  accent-color: var(--accent-cyan);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.remember-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .deny-btn {

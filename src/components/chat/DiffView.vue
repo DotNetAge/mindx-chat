@@ -166,7 +166,7 @@ const diffHtml = computed(() => {
 }
 
 .diff-body {
-  max-height: 360px;
+  max-height: 240px;
   overflow-y: auto;
   overflow-x: auto;
 }

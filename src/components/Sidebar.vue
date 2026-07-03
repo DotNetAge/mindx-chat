@@ -140,13 +140,13 @@ async function applyUpdate() {
   // Determine the update command based on install source
   let cmd: string | null = null
   if (source === 'homebrew') {
-    cmd = 'brew upgrade mindx'
+    cmd = 'brew update && brew upgrade mindx && mindx restart'
   } else if (source === 'snap') {
-    cmd = 'sudo snap refresh mindx'
+    cmd = 'sudo snap refresh mindx && mindx restart'
   } else if (source === 'system' && isMac) {
-    cmd = 'brew upgrade mindx'
+    cmd = 'brew update && brew upgrade mindx && mindx restart'
   } else if (source === 'system' && !isMac) {
-    cmd = 'sudo apt update && sudo apt install -y mindx'
+    cmd = 'sudo apt update && sudo apt install -y mindx && mindx restart'
   }
 
   if (cmd) {
@@ -531,6 +531,14 @@ watch(() => connectionStore.state, async (newState, oldState) => {
         userPreferences.value = {
           lastAgent: userConfig.last_agent || '',
           lastSessionId: userConfig.last_session_id || ''
+        }
+      }
+      // 从 localStorage 读取 last_agent 作为服务端未持久化的兜底
+      if (!userPreferences.value.lastAgent) {
+        const localLastAgent = localStorage.getItem('mindx-last-agent')
+        if (localLastAgent) {
+          console.log(`[MindX] 📋 Restored lastAgent from localStorage: "${localLastAgent}"`)
+          userPreferences.value.lastAgent = localLastAgent
         }
       }
 
