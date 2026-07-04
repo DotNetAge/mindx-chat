@@ -522,24 +522,18 @@ watch(() => connectionStore.state, async (newState, oldState) => {
         connectionStore.fetchServerVersion()
       ])
 
-      // 1. 先保存用户偏好设定（在 setAgents 之前，确保 watcher 触发时已就绪）
-      if (userConfig.last_agent || userConfig.last_session_id) {
-        console.log(`[MindX] 📋 User preferences from config:`, {
-          last_agent: userConfig.last_agent,
-          last_session_id: userConfig.last_session_id
-        })
-        userPreferences.value = {
-          lastAgent: userConfig.last_agent || '',
-          lastSessionId: userConfig.last_session_id || ''
-        }
+      // 1. 读取用户偏好：localStorage（WebUI 最近选择）优先级最高，
+      //    服务端配置（来自 TUI/CLI 或旧版进程）作为兜底
+      const localLastAgent = localStorage.getItem('mindx-last-agent')
+      if (localLastAgent) {
+        console.log(`[MindX] 📋 lastAgent from localStorage: "${localLastAgent}"`)
+        userPreferences.value.lastAgent = localLastAgent
+      } else if (userConfig.last_agent) {
+        console.log(`[MindX] 📋 lastAgent from server config: "${userConfig.last_agent}"`)
+        userPreferences.value.lastAgent = userConfig.last_agent
       }
-      // 从 localStorage 读取 last_agent 作为服务端未持久化的兜底
-      if (!userPreferences.value.lastAgent) {
-        const localLastAgent = localStorage.getItem('mindx-last-agent')
-        if (localLastAgent) {
-          console.log(`[MindX] 📋 Restored lastAgent from localStorage: "${localLastAgent}"`)
-          userPreferences.value.lastAgent = localLastAgent
-        }
+      if (userConfig.last_session_id) {
+        userPreferences.value.lastSessionId = userConfig.last_session_id
       }
 
       // 2. 填充 agents / models 到 store（这会触发 agentsList computed 更新）

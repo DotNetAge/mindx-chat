@@ -18,8 +18,16 @@
           </div>
         </div>
 
-        <!-- xterm container -->
-        <div ref="terminalContainerRef" class="terminal-container"></div>
+        <!-- Terminal area -->
+        <div class="terminal-wrapper">
+          <!-- Loading overlay (shown while terminal starts) -->
+          <div v-if="loading" class="terminal-loading">
+            <div class="loading-spinner"></div>
+            <span class="loading-text">Starting terminal...</span>
+          </div>
+          <!-- xterm container (hidden while loading) -->
+          <div v-show="!loading" ref="terminalContainerRef" class="terminal-container"></div>
+        </div>
       </div>
     </Transition>
   </Teleport>
@@ -81,6 +89,7 @@ let savedSessionId = ''
 let savedCwd = ''
 let savedConnected = false
 
+const loading = ref(false)
 const connected = ref(false)
 let resizeObserver: ResizeObserver | null = null
 let fitTimers: ReturnType<typeof setTimeout>[] = []
@@ -125,13 +134,18 @@ onBeforeUnmount(() => {
 // ── Terminal Init / Teardown ──
 
 async function initTerminal() {
+  loading.value = true
   cleanup()
   const container = terminalContainerRef.value
-  if (!container) return
+  if (!container) {
+    loading.value = false
+    return
+  }
 
   const client = getMindXClient()
   if (!client || !client.isConnected()) {
     writeLine('\x1b[33m[Terminal] WebSocket not connected\x1b[0m')
+    loading.value = false
     return
   }
 
@@ -206,6 +220,7 @@ async function initTerminal() {
     const result = await client.call<{ session_id: string }>('terminal.start', { cwd: cwd || '' })
     sessionId = result.session_id
     connected.value = true
+    loading.value = false
 
     // Listen for PTY output pushed from server
     outputUnregister = client.on('terminal.output', (envelope) => {
@@ -232,6 +247,7 @@ async function initTerminal() {
     }
   } catch (err) {
     writeLine(`\x1b[31m[Terminal] Failed to start: ${err}\x1b[0m`)
+    loading.value = false
   }
 }
 
@@ -504,6 +520,13 @@ function writeLine(text: string) {
 }
 
 /* ===== Terminal Container ===== */
+.terminal-wrapper {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
 .terminal-container {
   flex: 1;
   width: 100%;
@@ -529,6 +552,43 @@ function writeLine(text: string) {
 }
 .terminal-container :deep(.xterm-scroll-area) {
   width: 100% !important;
+}
+
+/* ===== Loading Overlay ===== */
+.terminal-loading {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #0d1117;
+}
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #30363d;
+  border-top-color: #58a6ff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.loading-text {
+  font-size: 13px;
+  color: #8b949e;
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ===== Transitions ===== */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 /* ===== Transition ===== */

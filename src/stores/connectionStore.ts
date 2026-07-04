@@ -760,10 +760,23 @@ export const useConnectionStore = defineStore('connection', {
     setLastAgent(agentName: string) {
       this.lastAgentName = agentName
       localStorage.setItem('mindx-last-agent', agentName)
+      this.saveUserConfig({ last_agent: agentName })
     },
 
     setLastSession(sessionId: string) {
       this.lastSessionId = sessionId
+      this.saveUserConfig({ last_session_id: sessionId })
+    },
+
+    /** 通用方法：将任意配置字段持久化到服务端 ~/.mindx/mindx.json */
+    async saveUserConfig(partial: Record<string, any>) {
+      const client = getMindXClient()
+      if (!client || !client.isConnected()) return
+      try {
+        await client.call('user.config', partial)
+      } catch (err) {
+        console.warn('[MindX] Failed to persist user config to server:', err)
+      }
     },
 
     setPendingTerminalCommand(cmd: string | null) {
