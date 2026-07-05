@@ -543,6 +543,7 @@ watch(() => connectionStore.state, async (newState, oldState) => {
         description: a.description,
         model: a.model,
         skills: a.skills,
+        exclude_tools: a.exclude_tools,
         introduction: a.introduction,
         meta: a.meta
       })))
