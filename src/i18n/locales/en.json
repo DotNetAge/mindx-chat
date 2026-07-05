@@ -599,7 +599,14 @@
     "newFile": "New File",
     "newFolder": "New Folder",
     "rename": "Rename",
-    "delete": "Delete"
+    "delete": "Delete",
+    "indexManifest": {
+      "excluded": "Excluded",
+      "indexing": "Indexing...",
+      "addToKB": "Add to knowledge base",
+      "inKB": "In knowledge base",
+      "removeFromKB": "Remove from knowledge base"
+    }
   },
   "fileReview": {
     "filesModified": "{count} file(s) modified",

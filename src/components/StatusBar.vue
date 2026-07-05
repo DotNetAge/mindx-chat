@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, watch, ref, onUnmounted, inject } from 'vue'
-import type { Ref } from 'vue'
+import { computed, watch, ref, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage, ElTooltip } from 'element-plus'
+import { ElTooltip, ElBadge } from 'element-plus'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useChatStore } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useFileExplorerStore } from '../stores/fileExplorerStore'
-import { useGraphStore } from '../stores/graphStore'
-import { getMindXClient } from '../services/websocket'
-import { FolderOpened, Plus, Document, Loading, Monitor } from '@element-plus/icons-vue'
+
+import { FolderOpened, Document, Loading, Monitor } from '@element-plus/icons-vue'
 import LogDrawer from './LogDrawer.vue'
 import IndexDetailsDialog from './IndexDetailsDialog.vue'
 import TerminalDrawer from './TerminalDrawer.vue'
@@ -19,162 +17,54 @@ const connectionStore = useConnectionStore()
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const fileExplorerStore = useFileExplorerStore()
-const graphStore = useGraphStore()
-
 const logDrawerRef = ref<InstanceType<typeof LogDrawer> | null>(null)
-function openLogDrawer() { logDrawerRef.value?.open() }
+function openLogDrawer() {
+  logErrorCount.value = 0
+  logDrawerRef.value?.open()
+}
+
+// ── Log error/warning badge ──
+const logErrorCount = ref(0)
+let logPollTimer: ReturnType<typeof setInterval> | null = null
+
+async function pollLogCounts() {
+  if (!connectionStore.isConnected) return
+  try {
+    const res = await connectionStore.fetchLogCounts()
+    const errorLines = res?.counts?.error?.lines || 0
+    logErrorCount.value = errorLines
+  } catch {
+    // silently ignore
+  }
+}
+
+watch(() => connectionStore.isConnected, (connected) => {
+  if (connected) {
+    pollLogCounts()
+    if (!logPollTimer) {
+      logPollTimer = setInterval(pollLogCounts, 10000)
+    }
+  } else {
+    logErrorCount.value = 0
+    if (logPollTimer) {
+      clearInterval(logPollTimer)
+      logPollTimer = null
+    }
+  }
+})
+onUnmounted(() => { if (logPollTimer) { clearInterval(logPollTimer); logPollTimer = null } })
 
 const showTerminalDrawer = computed({
   get: () => connectionStore.showTerminalDrawer,
   set: (val: boolean) => { connectionStore.showTerminalDrawer = val }
 })
 
-const showSetupDialog = inject<Ref<boolean>>('showSetupDialog')!
-const showEntityTags = inject<Ref<boolean>>('showEntityTags')!
-
 const statusColor = computed(() => connectionStore.statusColor)
 const statusLabel = computed(() => connectionStore.statusLabel)
 const version = computed(() => connectionStore.serverVersion ? `v${connectionStore.serverVersion}` : '')
 
-const filewatchAvailable = computed(() => graphStore.filewatchStatus?.available ?? false)
-const filewatchRunning = computed(() => graphStore.filewatchStatus?.running ?? false)
-const autoIndexLabel = computed(() => {
-  if (!filewatchAvailable.value) return t('sidebar.autoIndex.conditionsNotMet')
-  return filewatchRunning.value ? t('sidebar.autoIndex.enabled') : t('sidebar.autoIndex.disabled')
-})
-const autoIndexTitle = computed(() => {
-  if (!filewatchAvailable.value) return t('sidebar.autoIndex.conditionsNotMet')
-  return filewatchRunning.value ? t('sidebar.autoIndex.running') : t('sidebar.autoIndex.stopped')
-})
-
-const toggling = ref(false)
-
-// ── Requirements Dialog ──
-const showRequirementsDialogVisible = ref(false)
-const requirementsList = ref<{ label: string; ok: boolean }[]>([])
-
-async function checkAndShowRequirements() {
-  await graphStore.refreshFilewatchStatus()
-
-  const watched = graphStore.filewatchStatus?.watched || []
-  const hasWatchedDirs = watched.length > 0
-
-  const client = getMindXClient()
-  let hasTags = false
-  if (client) {
-    try {
-      const res = await client.call<{ types: any[] }>('entity_tags.get', {})
-      hasTags = (res?.types?.length ?? 0) > 0
-    } catch {
-      // RPC failed — treat as no tags
-    }
-  }
-
-  requirementsList.value = [
-    { label: t('sidebar.autoIndex.requirementWatchedDirs'), ok: hasWatchedDirs },
-    { label: t('sidebar.autoIndex.requirementEntityTags'), ok: hasTags },
-  ]
-
-  const allMet = requirementsList.value.every(r => r.ok)
-  if (allMet) return true
-
-  showRequirementsDialogVisible.value = true
-  return false
-}
-
-function handleCreateSession() {
-  showRequirementsDialogVisible.value = false
-  showSetupDialog.value = true
-}
-
-function handleConfigureTags() {
-  showRequirementsDialogVisible.value = false
-  showEntityTags.value = true
-}
-
-async function handleToggleAutoIndex() {
-  if (toggling.value) return
-
-  if (!filewatchAvailable.value) {
-    await checkAndShowRequirements()
-    return
-  }
-
-  toggling.value = true
-  try {
-    if (filewatchRunning.value) {
-      await graphStore.stopFilewatch()
-      // Refresh status to confirm
-      await graphStore.refreshFilewatchStatus()
-      if (!graphStore.filewatchStatus?.running) {
-        ElMessage.success(t('sidebar.autoIndex.stopped'))
-      } else {
-        ElMessage.warning(t('sidebar.autoIndex.stopFailed'))
-      }
-      return
-    }
-
-    // ── Prerequisites for starting auto-index ──
-    const allMet = await checkAndShowRequirements()
-    if (!allMet) return
-
-    // All checks passed — start auto-indexing
-    await graphStore.startFilewatch()
-    // Refresh status to confirm — retry a few times to handle startup race
-    let running = false
-    for (let i = 0; i < 10; i++) {
-      await graphStore.refreshFilewatchStatus()
-      if (graphStore.filewatchStatus?.running) {
-        running = true
-        break
-      }
-      await new Promise(r => setTimeout(r, 100))
-    }
-    if (running) {
-      ElMessage.success(t('sidebar.autoIndex.started'))
-    } else {
-      ElMessage.warning(t('sidebar.autoIndex.startFailedUnknown'))
-    }
-  } finally {
-    toggling.value = false
-  }
-}
-
-/** Click on auto-index indicator: check conditions first, then open dialog. */
-async function handleAutoIndexClick() {
-  const allMet = await checkAndShowRequirements()
-  if (!allMet) return
-  showIndexDialog.value = true
-}
-
-onMounted(() => {
-  if (connectionStore.isConnected) {
-    graphStore.refreshFilewatchStatus()
-  }
-})
-
-watch(() => connectionStore.isConnected, async (connected) => {
-  if (connected) {
-    await graphStore.refreshFilewatchStatus()
-  } else {
-    graphStore.$patch({ filewatchStatus: null })
-  }
-})
-
-// GraphViewer 关闭时会清空 filewatchStatus，需要重新刷新
-watch(() => graphStore.visible, (visible) => {
-  if (!visible && connectionStore.isConnected) {
-    graphStore.refreshFilewatchStatus()
-  }
-})
-
 const activeProjectDir = computed(() => {
-  // Priority: session's project_dir > first watched directory from filewatch
-  const active = sessionStore.sessions.find(s => s.session_id === sessionStore.activeSessionId)
-  if (active?.project_dir) return active.project_dir
-  const watched = graphStore.filewatchStatus?.watched
-  if (watched && watched.length > 0) return watched[0]
-  return ''
+  return sessionStore.activeSession?.project_dir || ''
 })
 
 const updateLabel = computed(() => {
@@ -186,38 +76,50 @@ const updateLabel = computed(() => {
 const indexingState = computed(() => connectionStore.indexingState)
 const showIndexDialog = ref(false)
 
+// ── Manifest data for progress bar ──
+const manifestData = ref<any>(null)
+const manifestLoading = ref(false)
+
+async function fetchManifest() {
+  const projectDir = activeProjectDir.value
+  if (!projectDir) return
+  manifestLoading.value = true
+  try {
+    manifestData.value = await connectionStore.getManifest(projectDir)
+  } catch (err: any) {
+    console.warn('[StatusBar] Failed to fetch manifest:', err)
+  } finally {
+    manifestLoading.value = false
+  }
+}
+
+watch(() => sessionStore.activeSession?.project_dir, (projectDir) => {
+  if (projectDir && connectionStore.isConnected) {
+    fetchManifest()
+  } else {
+    manifestData.value = null
+  }
+})
+
 // ── Index progress bar ──
 const indexProgress = computed(() => {
-  const idx = graphStore.filewatchStatus?.index_state
-  if (!idx) return { indexed: 0, total: 0, percent: 0 }
-  let total = 0, indexed = 0
-  for (const s of Object.values(idx)) {
-    total += s.total_files
-    indexed += s.indexed_files
-  }
+  if (!manifestData.value) return { indexed: 0, total: 0, percent: 0 }
+  const total = manifestData.value.total_files || 0
+  const indexed = manifestData.value.indexed_files || 0
   return { indexed, total, percent: total > 0 ? Math.round((indexed / total) * 100) : 0 }
 })
-// Debug: log indexing state changes
-watch(indexingState, (s) => {
-  console.log('[INDEXING-DEBUG] StatusBar indexingState changed:', JSON.stringify(s))
-})
 
-// Debug: log indexProgress changes
-watch(indexProgress, (p) => {
-  console.log('[INDEXING-DEBUG] StatusBar indexProgress:', JSON.stringify(p))
-})
-
-// Periodic refresh of filewatchStatus while indexing is active
+// Periodic refresh of manifest while indexing is active
 let progressTimer: ReturnType<typeof setInterval> | null = null
 watch(indexingState, (s) => {
   if (s.active && !progressTimer) {
-    console.log('[INDEXING-DEBUG] Starting 2s polling timer')
+    console.log('[STATUSBAR] Starting 2s manifest polling timer')
     progressTimer = setInterval(() => {
-      graphStore.refreshFilewatchStatus()
+      fetchManifest()
       chatStore.syncTotalTokenStats()
     }, 2000)
   } else if (!s.active && progressTimer) {
-    console.log('[INDEXING-DEBUG] Stopping 2s polling timer')
+    console.log('[STATUSBAR] Stopping 2s manifest polling timer')
     clearInterval(progressTimer)
     progressTimer = null
   }
@@ -257,10 +159,6 @@ function handleOpenProjectDir() {
   if (activeProjectDir.value) {
     fileExplorerStore.open(activeProjectDir.value)
   }
-}
-
-function handleToggleFileBrowser() {
-  connectionStore.showFileBrowser = !connectionStore.showFileBrowser
 }
 
 function handleOpenAbout() {
@@ -308,46 +206,42 @@ function handleOpenAbout() {
         <ElTooltip :content="activeProjectDir" placement="top" :show-after="500">
           <span class="dir-path">{{ activeProjectDir }}</span>
         </ElTooltip>
-        <ElTooltip :content="t('sidebar.addToChat')" placement="top" :show-after="400">
+      </div>
+
+      <!-- 知识库索引 -->
+      <div class="kb-section" v-if="activeProjectDir">
+        <ElTooltip content="打开知识库整理服务" placement="top" :show-after="400">
           <button
-            class="action-btn add-btn"
-            @click="handleToggleFileBrowser"
+            class="kb-label-btn"
+            @click="showIndexDialog = true"
           >
-            <el-icon :size="13"><Plus /></el-icon>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg>
+            <span class="kb-label">知识库</span>
           </button>
         </ElTooltip>
-      </div>
 
-      <!-- Auto Index Status -->
-      <ElTooltip :content="autoIndexTitle" placement="top" :show-after="400">
-        <button
-          class="auto-index-indicator"
-          @click="handleAutoIndexClick"
-          :disabled="toggling"
+        <!-- Indexing Progress Bar -->
+        <div
+          class="indexing-progress"
+          v-if="indexProgress.total > 0 || indexingState.active"
         >
-          <span class="auto-index-dot" :class="{ running: filewatchRunning }" :style="!filewatchAvailable ? { background: '#f59e0b' } : undefined"></span>
-          <span class="auto-index-label">{{ autoIndexLabel }}</span>
-        </button>
-      </ElTooltip>
-
-      <!-- Indexing Progress Bar -->
-      <div
-        class="indexing-progress"
-        v-if="filewatchAvailable || indexingState.active || indexProgress.total > 0 || indexProgress.indexed > 0"
-      >
-        <div class="progress-bar-track">
-          <div class="progress-bar-fill" :style="{ width: indexProgress.percent + '%' }"></div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" :style="{ width: indexProgress.percent + '%' }"></div>
+          </div>
+          <span class="progress-text">{{ indexProgress.indexed }}/{{ indexProgress.total }}</span>
+          <span v-if="indexingState.active" class="indexing-file">
+            <el-icon class="is-loading index-loading-icon"><Loading /></el-icon>
+            {{ indexingState.message }}
+          </span>
         </div>
-        <span class="progress-text">{{ indexProgress.indexed }}/{{ indexProgress.total }}</span>
-        <span v-if="indexingState.active" class="indexing-file">
-          <el-icon class="is-loading index-loading-icon"><Loading /></el-icon>
-          {{ indexingState.message }}
-        </span>
       </div>
-      <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="graphStore.refreshFilewatchStatus()" />
+      <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="fetchManifest()" />
     </div>
 
-    <div class="status-center">
+    <div class="status-right">
+      <!-- 只看答案 -->
       <div class="answer-only-switch">
         <el-switch
           v-model="chatStore.showAnswerOnly"
@@ -356,6 +250,7 @@ function handleOpenAbout() {
           inactive-text=""
         />
       </div>
+      <!-- Token statistics -->
       <ElTooltip :content="t('tokenUsage.viewDetails')" placement="top" :show-after="400">
         <button class="stat-block" @click="handleOpenTokenReport">
           <span class="stat-label">{{ t('tokenUsage.footerSessions') }}</span>
@@ -371,9 +266,6 @@ function handleOpenAbout() {
           <span class="stat-value conversations">{{ totalConversations }}</span>
         </button>
       </ElTooltip>
-    </div>
-
-    <div class="status-right">
       <ElTooltip content="Terminal" placement="top" :show-after="400">
         <button
           class="action-btn terminal-btn"
@@ -383,12 +275,20 @@ function handleOpenAbout() {
         </button>
       </ElTooltip>
       <ElTooltip :content="t('chat.logTab')" placement="top" :show-after="400">
-        <button
-          class="action-btn log-btn"
-          @click="openLogDrawer"
+        <ElBadge
+          :value="logErrorCount"
+          :hidden="logErrorCount === 0"
+          :max="99"
+          type="danger"
+          class="log-badge"
         >
-          <el-icon :size="13"><Document /></el-icon>
-        </button>
+          <button
+            class="action-btn log-btn"
+            @click="openLogDrawer"
+          >
+            <el-icon :size="13"><Document /></el-icon>
+          </button>
+        </ElBadge>
       </ElTooltip>
       <template v-if="connectionStore.updateState">
         <span class="update-indicator" :class="{ downloading: connectionStore.updateState === 'downloading' }">
@@ -412,40 +312,6 @@ function handleOpenAbout() {
   </footer>
   <LogDrawer ref="logDrawerRef" />
   <TerminalDrawer :visible="showTerminalDrawer" @update:visible="showTerminalDrawer = $event" :cwd="activeProjectDir" />
-
-  <!-- Requirements Dialog -->
-  <el-dialog
-    v-model="showRequirementsDialogVisible"
-    :title="t('sidebar.autoIndex.startFailed')"
-    :width="360"
-    :close-on-click-modal="true"
-    append-to-body
-  >
-    <div class="requirements-dialog-body">
-      <p class="requirements-desc">{{ t('sidebar.autoIndex.startFailedDesc') }}</p>
-      <div class="requirements-list">
-        <div
-          v-for="(req, idx) in requirementsList"
-          :key="idx"
-          class="requirement-row"
-        >
-          <span class="requirement-icon" :class="{ met: req.ok }">{{ req.ok ? '✓' : '✗' }}</span>
-          <span class="requirement-label">{{ req.label }}</span>
-          <el-button
-            v-if="!req.ok"
-            size="small"
-            class="requirement-action-btn"
-            @click="idx === 0 ? handleCreateSession() : handleConfigureTags()"
-          >
-            {{ idx === 0 ? t('directoryBrowser.title') : t('entityTags.configure') }}
-          </el-button>
-        </div>
-      </div>
-    </div>
-    <template #footer>
-      <el-button @click="showRequirementsDialogVisible = false">{{ t('common.confirm') }}</el-button>
-    </template>
-  </el-dialog>
 </template>
 
 <style scoped>
@@ -486,54 +352,6 @@ function handleOpenAbout() {
   flex-shrink: 0;
 }
 
-/* Auto index status */
-.auto-index-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 4px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  cursor: pointer;
-  flex-shrink: 0;
-  border: 1px solid transparent;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  transition: all 0.15s ease;
-}
-
-.auto-index-indicator:hover {
-  background: rgba(55, 65, 81, 0.3);
-  border-color: rgba(55, 65, 81, 0.5);
-}
-
-.auto-index-indicator:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.auto-index-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: var(--text-muted, #64748b);
-  transition: background 0.3s;
-}
-
-.auto-index-dot.running {
-  background: #10b981;
-  box-shadow: 0 0 5px rgba(16, 185, 129, 0.5);
-}
-
-.auto-index-label {
-  font-size: 10px;
-  font-weight: 500;
-  white-space: nowrap;
-  color: var(--text-muted, #94a3b8);
-}
-
 .action-btn {
   display: inline-flex;
   align-items: center;
@@ -565,6 +383,21 @@ function handleOpenAbout() {
   color: #fbbf24;
 }
 
+/* Log badge positioning */
+.log-badge {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+.log-badge :deep(sup.el-badge__content) {
+  font-size: 9px;
+  padding: 0 4px;
+  height: 15px;
+  line-height: 15px;
+  min-width: 15px;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
 /* Project directory */
 .project-dir-section {
   display: flex;
@@ -575,16 +408,6 @@ function handleOpenAbout() {
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
   max-width: 100%;
-}
-
-.dir-btn:hover {
-  background: rgba(6, 182, 212, 0.15);
-  color: #22d3ee;
-}
-
-.add-btn:hover {
-  background: rgba(139, 92, 246, 0.15);
-  color: #a78bfa;
 }
 
 .dir-label-btn {
@@ -623,16 +446,6 @@ function handleOpenAbout() {
   white-space: nowrap;
   flex: 1;
   min-width: 0;
-}
-
-/* Center: token stats */
-.status-center {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  padding: 0 4px;
 }
 
 .stat-block {
@@ -728,12 +541,14 @@ function handleOpenAbout() {
   margin: 0 3px;
 }
 
-/* Right */
+/* Right - fills remaining space and right-aligns */
 .status-right {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .version-btn {
@@ -791,6 +606,40 @@ function handleOpenAbout() {
   white-space: nowrap;
 }
 
+/* ── Knowledge base section ── */
+.kb-section {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding-left: 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+.kb-label-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted, #94a3b8);
+  font: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+.kb-label-btn:hover {
+  background: rgba(55, 65, 81, 0.3);
+  border-color: rgba(55, 65, 81, 0.5);
+  color: #a78bfa;
+}
+.kb-label {
+  font-size: 10px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
 /* ── Index progress bar ── */
 .indexing-progress {
   display: inline-flex;
@@ -833,56 +682,5 @@ function handleOpenAbout() {
 .index-loading-icon {
   font-size: 12px;
   flex-shrink: 0;
-}
-
-/* ── Requirements Dialog ── */
-.requirements-dialog-body {
-  padding: 4px 0;
-}
-.requirements-desc {
-  margin: 0 0 12px 0;
-  font-size: 13px;
-  color: var(--text-secondary, #c8d6e5);
-  line-height: 1.5;
-}
-.requirements-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.requirement-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-}
-.requirement-icon {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  font-size: 11px;
-  font-weight: 700;
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-}
-.requirement-icon.met {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-}
-.requirement-label {
-  flex: 1;
-  font-size: 12px;
-  color: var(--text-primary, #e2e8f0);
-  line-height: 1.4;
-}
-.requirement-action-btn {
-  flex-shrink: 0;
-  font-size: 11px;
 }
 </style>

@@ -712,7 +712,14 @@
     "newFile": "新建文件",
     "newFolder": "新建文件夹",
     "rename": "重新命名",
-    "delete": "刪除"
+    "delete": "刪除",
+    "indexManifest": {
+      "excluded": "被排除",
+      "indexing": "正在索引",
+      "addToKB": "添加至知識庫",
+      "inKB": "已添加至知識庫",
+      "removeFromKB": "從知識庫刪除"
+    }
   },
   "kgViewer": {
     "title": "知识图谱",

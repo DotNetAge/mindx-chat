@@ -602,7 +602,14 @@
     "newFile": "新建文件",
     "newFolder": "新建文件夹",
     "rename": "重命名",
-    "delete": "删除"
+    "delete": "删除",
+    "indexManifest": {
+      "excluded": "被排除",
+      "indexing": "正在索引",
+      "addToKB": "添加至知识库",
+      "inKB": "已添加至知识库",
+      "removeFromKB": "从知识库删除"
+    }
   },
   "fileReview": {
     "filesModified": "{count} 个文件被修改",

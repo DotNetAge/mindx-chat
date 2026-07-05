@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElTooltip } from 'element-plus'
 import {
   Close, Folder, Document,
   RefreshRight, Setting, Edit, Reading, Link,
-  Plus, Delete, Monitor
+  Plus, Delete, Monitor,
+  CirclePlus, CircleCheck, CircleClose, Remove, Loading
 } from '@element-plus/icons-vue'
 import { useConnectionStore } from '../stores/connectionStore'
+import { useSessionStore } from '../stores/sessionStore'
 import { useFileExplorerStore } from '../stores/fileExplorerStore'
 import { useMarkdown } from '../composables/useMarkdown'
 import { useEditorPreferences } from '../composables/useEditorPreferences'
@@ -15,6 +17,7 @@ import CodemirrorEditor from './CodemirrorEditor.vue'
 
 const { t } = useI18n()
 const connectionStore = useConnectionStore()
+const sessionStore = useSessionStore()
 const store = useFileExplorerStore()
 const { md, renderMermaidInRoot } = useMarkdown()
 const editorPrefs = useEditorPreferences()
@@ -149,6 +152,41 @@ function showCtxMenu(e: MouseEvent, data: any) {
 
 function closeCtxMenu() {
   ctxMenuVisible.value = false
+}
+
+// ── 右键菜单：索引控制 ──
+function indexCtxState(): string {
+  const st = ctxTarget.value?.index_state
+  if (st === 'unindexed') return 'add'
+  if (st === 'pending' || st === 'indexed') return 'remove'
+  return ''
+}
+
+async function handleIndexCtx() {
+  const data = ctxTarget.value
+  if (!data || data._phantom) return
+  const st = indexCtxState()
+  if (!st) { closeCtxMenu(); return }
+  const projectDir = sessionStore.activeSession?.project_dir
+  if (!projectDir) { ElMessage.warning('No active project directory'); closeCtxMenu(); return }
+  if (st === 'add') {
+    try {
+      await connectionStore.addToManifest(projectDir, [data.path])
+      ElMessage.success(t('fileExplorer.addedToIndex') + ': ' + data.name)
+      data.index_state = 'pending'
+    } catch (err: any) {
+      ElMessage.error(t('fileExplorer.indexError') + ': ' + (err?.message || ''))
+    }
+  } else {
+    try {
+      await connectionStore.removeFromManifest(projectDir, [data.path])
+      ElMessage.success('Removed from index: ' + data.name)
+      data.index_state = 'unindexed'
+    } catch (err: any) {
+      ElMessage.error('Remove error: ' + (err?.message || ''))
+    }
+  }
+  closeCtxMenu()
 }
 
 // ── 统一内联编辑（Rename + 新建）──
@@ -458,6 +496,45 @@ function handleClose() {
   store.close()
   emit('close')
 }
+
+// ── 索引状态控制 ──
+function manifestTooltipKey(state: string): string {
+  const map: Record<string, string> = {
+    excluded: 'excluded',
+    indexing: 'indexing',
+    unindexed: 'addToKB',
+    indexed: 'inKB',
+    pending: 'removeFromKB',
+  }
+  return map[state] || ''
+}
+
+async function handleIndexClick(data: any) {
+  if (data._phantom) return
+  const projectDir = sessionStore.activeSession?.project_dir
+  if (!projectDir) { ElMessage.warning('No active project directory'); return }
+  if (data.index_state === 'unindexed') {
+    try {
+      await connectionStore.addToManifest(projectDir, [data.path])
+      ElMessage.success(t('fileExplorer.addedToIndex') + ': ' + data.name)
+      const node = treeRef.value?.getNode(data.path)
+      if (node) { node.data.index_state = 'pending' }
+      refreshTree(getParentPath(data.path))
+    } catch (err: any) {
+      ElMessage.error(t('fileExplorer.indexError') + ': ' + (err?.message || ''))
+    }
+  } else if (data.index_state === 'pending' || data.index_state === 'indexed') {
+    try {
+      await connectionStore.removeFromManifest(projectDir, [data.path])
+      ElMessage.success('Removed from index: ' + data.name)
+      const node = treeRef.value?.getNode(data.path)
+      if (node) { node.data.index_state = 'unindexed' }
+      refreshTree(getParentPath(data.path))
+    } catch (err: any) {
+      ElMessage.error('Remove error: ' + (err?.message || ''))
+    }
+  }
+}
 </script>
 
 <template>
@@ -579,6 +656,16 @@ function handleClose() {
                   <el-icon v-if="data.is_dir"><Folder /></el-icon>
                   <el-icon v-else><Document /></el-icon>
                 </span>
+                <!-- 索引状态图标 -->
+                <span v-if="data.index_state && !data._phantom" class="fe-index-icon" :class="'idx-' + data.index_state" @click.stop="handleIndexClick(data)">
+                  <ElTooltip :content="t(`fileExplorer.indexManifest.${manifestTooltipKey(data.index_state)}`)" placement="left" :show-after="300">
+                    <el-icon v-if="data.index_state === 'excluded'" :size="15"><Remove /></el-icon>
+                    <el-icon v-else-if="data.index_state === 'indexing'" :size="15" class="is-loading"><Loading /></el-icon>
+                    <el-icon v-else-if="data.index_state === 'unindexed'" :size="15"><CirclePlus /></el-icon>
+                    <el-icon v-else-if="data.index_state === 'indexed'" :size="15"><CircleCheck /></el-icon>
+                    <el-icon v-else-if="data.index_state === 'pending'" :size="15"><CircleClose /></el-icon>
+                  </ElTooltip>
+                </span>
                 <template v-if="editingPath === data.path">
                   <input
                     v-model="editingValue"
@@ -602,6 +689,14 @@ function handleClose() {
               <div class="ctx-menu-item" @click="handleNewFolder">
                 <el-icon><Folder /></el-icon>
                 {{ t('fileExplorer.newFolder') }}
+              </div>
+              <div v-if="indexCtxState() === 'add'" class="ctx-menu-item" @click="handleIndexCtx">
+                <el-icon><CirclePlus /></el-icon>
+                {{ t('fileExplorer.indexManifest.addToKB') }}
+              </div>
+              <div v-else-if="indexCtxState() === 'remove'" class="ctx-menu-item" @click="handleIndexCtx">
+                <el-icon><CircleClose /></el-icon>
+                {{ t('fileExplorer.indexManifest.removeFromKB') }}
               </div>
               <div class="ctx-menu-divider"></div>
               <div class="ctx-menu-item" @click="handleRename">
@@ -890,8 +985,8 @@ function handleClose() {
   background: var(--bg-hover);
 }
 .fe-tree :deep(.el-tree-node.is-current > .el-tree-node__content) {
-  background: rgba(6,182,212,.08);
-  border-left-color: var(--accent-cyan);
+  background-color: rgba(6,182,212,.08) !important;
+  border-left-color: var(--accent-cyan) !important;
 }
 .fe-tree :deep(.el-tree-node__expand-icon) {
   color: var(--text-muted);
@@ -1197,6 +1292,55 @@ function handleClose() {
   height: 1px;
   background: var(--border-color);
   margin: 4px 8px;
+}
+
+/* ─── 索引状态图标 ─── */
+.fe-index-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  transition: all .15s;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.fe-index-icon:hover {
+  background: var(--bg-hover);
+}
+.fe-index-icon.idx-unindexed {
+  opacity: 0.6;
+  color: var(--text-muted);
+}
+.fe-index-icon.idx-unindexed:hover {
+  opacity: 1;
+  color: var(--accent-cyan);
+  background: rgba(6,182,212,.08);
+}
+.fe-index-icon.idx-indexed {
+  color: #34d399;
+}
+.fe-index-icon.idx-indexed:hover {
+  background: rgba(239,68,68,.08);
+  color: #f87171;
+}
+.fe-index-icon.idx-pending {
+  color: #fbbf24;
+}
+.fe-index-icon.idx-pending:hover {
+  background: rgba(239,68,68,.08);
+  color: #f87171;
+}
+.fe-index-icon.idx-indexing {
+  cursor: default;
+  color: var(--accent-cyan);
+}
+.fe-index-icon.idx-excluded {
+  cursor: default;
+  opacity: 0.4;
+  color: var(--text-muted);
 }
 </style>
 

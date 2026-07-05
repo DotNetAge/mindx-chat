@@ -165,6 +165,7 @@ export interface FSEntry {
   is_dir: boolean;
   mode: string;
   mod_time: string;
+  index_state?: 'indexed' | 'unindexed' | 'pending' | 'indexing' | 'excluded' | '';
 }
 
 // --- Token Usage Statistics Types ---

@@ -1145,6 +1145,38 @@ export const useConnectionStore = defineStore('connection', {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
       return client.call('kb.stats', { project_dir: projectDir })
+    },
+
+    // ── Index Manifest RPC ──
+
+    async getManifest(projectDir: string): Promise<any> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('kb.manifest.get', { project_dir: projectDir })
+    },
+
+    async addToManifest(projectDir: string, files: string[]): Promise<any> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('kb.manifest.add', { project_dir: projectDir, files })
+    },
+
+    async removeFromManifest(projectDir: string, files: string[]): Promise<any> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('kb.manifest.remove', { project_dir: projectDir, files })
+    },
+
+    async startManifestProcessing(projectDir: string): Promise<any> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('kb.manifest.start', { project_dir: projectDir })
+    },
+
+    async stopManifestProcessing(projectDir: string): Promise<any> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('kb.manifest.stop', { project_dir: projectDir })
     }
   }
 })
