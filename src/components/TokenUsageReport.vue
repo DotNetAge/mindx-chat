@@ -2,6 +2,8 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConnectionStore } from '../stores/connectionStore'
+import { useChatStore } from '../stores/chatStore'
+import { useSessionStore } from '../stores/sessionStore'
 import type { MonthlyUsageStats, ModelUsageSummary } from '../types/websocket'
 
 const props = defineProps<{
@@ -11,6 +13,8 @@ const props = defineProps<{
 const emit = defineEmits(['update:visible'])
 
 const connectionStore = useConnectionStore()
+const chatStore = useChatStore()
+const sessionStore = useSessionStore()
 const { t } = useI18n()
 
 const loading = ref(false)
@@ -18,6 +22,70 @@ const currentYear = ref(new Date().getFullYear())
 const currentMonth = ref(new Date().getMonth() + 1)
 const monthlyData = ref<MonthlyUsageStats | null>(null)
 const error = ref<string | null>(null)
+
+const viewMode = ref<'monthly' | 'session'>('monthly')
+
+// 从服务端加载的会话 token 明细
+const sessionServerRecords = ref<Array<{
+  timestamp: string
+  inputTokens: number
+  outputTokens: number
+  cachedTokens: number
+  totalTokens: number
+  cost: number
+  sessionId: string
+}>>([])
+
+const sessionDetailLoading = ref(false)
+
+async function loadSessionDetail() {
+  const sessionId = sessionStore.activeSessionId
+  if (!sessionId || !connectionStore.isConnected) {
+    sessionServerRecords.value = []
+    return
+  }
+  sessionDetailLoading.value = true
+  try {
+    const data = await connectionStore.fetchSessionTokenDetail(sessionId)
+    sessionServerRecords.value = (data.records || []).map(r => ({
+      timestamp: r.timestamp,
+      inputTokens: r.input_tokens,
+      outputTokens: r.output_tokens,
+      cachedTokens: r.cached_tokens,
+      totalTokens: r.total_tokens,
+      cost: r.cost,
+      sessionId
+    }))
+  } catch (err) {
+    console.warn('[TokenUsageReport] Failed to load session detail from server:', err)
+    sessionServerRecords.value = []
+  } finally {
+    sessionDetailLoading.value = false
+  }
+}
+
+const sessionRecords = computed(() => {
+  const sessionId = sessionStore.activeSessionId
+
+  // 1. 从服务端加载的持久化明细（token.usage.session.detail）
+  const serverRecords = sessionServerRecords.value
+
+  // 2. 实时记录（token_usage_recorded 事件，当前会话未刷新时）
+  const liveRecords = chatStore.tokenUsageRecords.filter(r => r.sessionId === sessionId)
+
+  // 合并去重：按 timestamp + totalTokens 去重（服务端优先，避免重复）
+  const seen = new Set<string>()
+  const merged = [...serverRecords, ...liveRecords].filter(r => {
+    const key = `${r.timestamp}|${r.totalTokens}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+
+  // 按时间排序
+  merged.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+  return merged
+})
 
 const formatCost = (cost: number): string => {
   if (cost < 0.01) return '¥0.00'
@@ -32,6 +100,11 @@ const formatCompactNumber = (num: number): string => {
   if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M'
   if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K'
   return num.toString()
+}
+
+const formatTime = (iso: string): string => {
+  const d = new Date(iso)
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 const monthLabel = computed(() => `${currentYear.value} ${t('tokenUsage.month', { m: String(currentMonth.value).padStart(2, '0') })}`)
@@ -226,6 +299,20 @@ watch([currentYear, currentMonth], () => {
   if (props.visible) loadData()
 })
 
+// 切换到会话明细 Tab 时从服务端加载明细
+watch(viewMode, (mode) => {
+  if (mode === 'session' && props.visible) {
+    loadSessionDetail()
+  }
+})
+
+// 切换会话时重新加载明细
+watch(() => sessionStore.activeSessionId, () => {
+  if (viewMode.value === 'session' && props.visible) {
+    loadSessionDetail()
+  }
+})
+
 // 确保 v-if 创建组件时立即加载数据
 onMounted(() => {
   if (props.visible) loadData()
@@ -246,7 +333,17 @@ onMounted(() => {
       <div class="report-header">
         <h2 class="report-title">📊 {{ t('tokenUsage.monthlyUsage') }}</h2>
         <div class="header-controls">
-          <div class="month-picker">
+          <div class="view-toggle">
+            <button
+              :class="['toggle-btn', { active: viewMode === 'monthly' }]"
+              @click="viewMode = 'monthly'"
+            >{{ t('tokenUsage.monthlyReport') }}</button>
+            <button
+              :class="['toggle-btn', { active: viewMode === 'session' }]"
+              @click="viewMode = 'session'"
+            >{{ t('tokenUsage.sessionDetail') }}</button>
+          </div>
+          <div v-if="viewMode === 'monthly'" class="month-picker">
             <button class="picker-btn" @click="prevMonth" :disabled="loading">‹</button>
             <span class="month-label">{{ monthLabel }}</span>
             <button class="picker-btn" @click="nextMonth" :disabled="loading">›</button>
@@ -257,14 +354,54 @@ onMounted(() => {
     </template>
 
     <div v-loading="loading" class="report-body">
-      <div v-if="error" class="error-state">
+      <!-- Session Detail View -->
+      <template v-if="viewMode === 'session' && !loading">
+        <div class="section session-detail-section">
+          <h3 class="section-title">{{ t('tokenUsage.sessionDetail') }}</h3>
+          <div v-if="sessionDetailLoading" class="empty-state">
+            <p>{{ t('common.loading') }}</p>
+          </div>
+          <div v-else-if="sessionRecords.length === 0" class="empty-state">
+            <p>{{ t('tokenUsage.noRecord') }}</p>
+          </div>
+          <div v-else class="session-records-table-wrapper">
+            <table class="session-records-table">
+              <thead>
+                <tr>
+                  <th>{{ t('tokenUsage.time') }}</th>
+                  <th>{{ t('tokenUsage.inputTokens') }}</th>
+                  <th>{{ t('tokenUsage.outputTokens') }}</th>
+                  <th>{{ t('tokenUsage.cacheTokens') }}</th>
+                  <th>{{ t('tokenUsage.totalTokens') }}</th>
+                  <th>{{ t('tokenUsage.cost') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(r, i) in sessionRecords" :key="i">
+                  <td class="cell-time">{{ formatTime(r.timestamp) }}</td>
+                  <td class="cell-num">{{ formatNumber(r.inputTokens) }}</td>
+                  <td class="cell-num">{{ formatNumber(r.outputTokens) }}</td>
+                  <td class="cell-num">{{ formatNumber(r.cachedTokens) }}</td>
+                  <td class="cell-num">{{ formatNumber(r.totalTokens) }}</td>
+                  <td class="cell-cost">{{ formatCost(r.cost) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+
+      <!-- Error State -->
+      <div v-else-if="error" class="error-state">
         <p>{{ error }}</p>
         <el-button size="small" type="primary" @click="loadData">{{ t('common.retry') }}</el-button>
       </div>
 
+      <!-- Monthly Content -->
       <template v-else-if="monthlyData">
-        <!-- Cost Overview -->
-        <section class="section cost-overview">
+        <template v-if="viewMode === 'monthly'">
+          <!-- Cost Overview -->
+          <section class="section cost-overview">
           <div class="cost-summary">
             <span class="cost-label">{{ t('tokenUsage.spending') }}</span>
             <span class="cost-value">{{ formatCost(monthlyData.total_cost) }}</span>
@@ -278,11 +415,16 @@ onMounted(() => {
             <div class="chart-area">
               <div class="bars-wrapper">
                 <div v-for="item in dailyCostData" :key="item.day" class="bar-col">
-                  <div
-                    class="bar cost-bar"
-                    :style="{ height: getDailyBarHeight(item.cost) + 'px' }"
-                    :title="`${item.label}日: ${formatCost(item.cost)}`"
-                  ></div>
+                  <el-tooltip
+                    :content="t('tokenUsage.dayTooltip', { label: item.label + t('tokenUsage.month', { m: '' }).replace('月', ''), value: formatCost(item.cost) })"
+                    placement="top"
+                    :hide-after="100"
+                  >
+                    <div
+                      class="bar cost-bar"
+                      :style="{ height: getDailyBarHeight(item.cost) + 'px' }"
+                    ></div>
+                  </el-tooltip>
                 </div>
               </div>
               <div class="x-axis">
@@ -335,7 +477,7 @@ onMounted(() => {
             <!-- Tokens Chart -->
             <div class="model-chart-card">
               <div class="card-header">
-                <span class="card-title">Tokens</span>
+                <span class="card-title">{{ t('tokenUsage.tokens') }}</span>
                 <span class="card-value">{{ formatNumber(model.total_tokens) }}</span>
               </div>
               <div class="mini-chart">
@@ -350,12 +492,17 @@ onMounted(() => {
                       :key="idx"
                       class="token-bar-col"
                     >
-                      <div
+                      <el-tooltip
                         v-if="item.tokens > 0"
-                        class="token-bar"
-                        :style="{ height: getTokenBarHeight(model.model, item.tokens) + 'px' }"
-                        :title="`${item.label}日: ${formatCompactNumber(item.tokens)}`"
-                      ></div>
+                        :content="`${item.label}${t('tokenUsage.month', { m: '' }).replace('月', '')}日: ${formatNumber(item.tokens)} ${t('tokenUsage.tokens')}, ${formatNumber(item.requests)} ${t('tokenUsage.requests')}`"
+                        placement="top"
+                        :hide-after="100"
+                      >
+                        <div
+                          class="token-bar"
+                          :style="{ height: getTokenBarHeight(model.model, item.tokens) + 'px' }"
+                        ></div>
+                      </el-tooltip>
                     </div>
                   </div>
                   <div class="x-axis-mini">
@@ -368,8 +515,10 @@ onMounted(() => {
           </div>
         </section>
 
+        </template>
+
         <!-- Empty State -->
-        <div v-if="!monthlyData.model_breakdown.length && !loading" class="empty-state">
+        <div v-if="!monthlyData.model_breakdown.length && !loading && viewMode === 'monthly'" class="empty-state">
           <p>{{ t('tokenUsage.noRecord') }}</p>
         </div>
       </template>
@@ -489,6 +638,29 @@ onMounted(() => {
 .token-bar:hover { filter: brightness(1.25); }
 .x-axis-mini { display: flex; justify-content: space-between; padding-top: 4px; margin-top: 2px; border-top: 1px solid rgba(55, 65, 81, 0.25); }
 .x-axis-mini span { font-size: 9px; color: #475569; font-family: 'JetBrains Mono', monospace; }
+
+/* Session Detail Table */
+.session-detail-section { background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(55, 65, 81, 0.4); border-radius: 12px; padding: 20px 24px; }
+.section-title { font-size: 15px; font-weight: 700; color: #e2e8f0; margin: 0 0 16px 0; }
+.session-records-table-wrapper { overflow-x: auto; }
+.session-records-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.session-records-table thead th {
+  text-align: right; padding: 8px 12px; font-weight: 600; color: #94a3b8;
+  border-bottom: 1px solid rgba(55, 65, 81, 0.4); white-space: nowrap; font-family: 'JetBrains Mono', monospace;
+}
+.session-records-table thead th:first-child { text-align: left; }
+.session-records-table tbody td { text-align: right; padding: 6px 12px; color: #e2e8f0; border-bottom: 1px solid rgba(55, 65, 81, 0.15); }
+.session-records-table tbody td:first-child { text-align: left; }
+.session-records-table tbody tr:hover td { background: rgba(59, 130, 246, 0.08); }
+.cell-time { font-family: 'JetBrains Mono', monospace; color: #94a3b8; font-size: 11px; white-space: nowrap; }
+.cell-num { font-family: 'JetBrains Mono', monospace; color: #e2e8f0; }
+.cell-cost { font-family: 'JetBrains Mono', monospace; color: #fbbf24; }
+
+/* View Toggle */
+.view-toggle { display: flex; background: rgba(30, 41, 59, 0.8); border: 1px solid rgba(55, 65, 81, 0.6); border-radius: 8px; overflow: hidden; }
+.toggle-btn { padding: 5px 14px; border: none; background: transparent; color: #64748b; font-size: 12px; cursor: pointer; transition: all 0.2s; font-weight: 500; white-space: nowrap; }
+.toggle-btn.active { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+.toggle-btn:hover:not(.active) { color: #94a3b8; }
 
 .report-body::-webkit-scrollbar { width: 5px; }
 .report-body::-webkit-scrollbar-track { background: transparent; }

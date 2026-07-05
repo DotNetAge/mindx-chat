@@ -166,8 +166,8 @@ function toggleExpand() {
             >
               <span class="param-key">{{ key }}</span>
               <span class="param-value">
-                <template v-if="typeof value === 'string' && value.length > 50">
-                  {{ value.slice(0, 50) }}...
+                <template v-if="typeof value === 'string' && value.length > 200">
+                  {{ value.slice(0, 200) }}...
                 </template>
                 <template v-else-if="typeof value === 'object'">
                   {{ JSON.stringify(value) }}

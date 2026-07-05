@@ -54,6 +54,18 @@ export interface ExecutionStats {
   cacheTokens: number
 }
 
+/** 单次 token_usage_recorded 事件的明细记录 */
+export interface TokenUsageRecord {
+  timestamp: string
+  inputTokens: number
+  outputTokens: number
+  cachedTokens: number
+  totalTokens: number
+  cost: number
+  sessionId: string
+  title?: string
+}
+
 interface OfflineMessageQueueItem {
   text: string
   timestamp: string
@@ -84,6 +96,9 @@ export const useChatStore = defineStore('chat', {
 
     // 按 session 缓存的最后一条消息 token 数据，刷新后恢复用
     sessionMessageTokens: {} as Record<string, { inputTokens: number; outputTokens: number; cacheTokens: number; totalTokens: number } | null>,
+
+    // 当前会话的 TokenUsage 实时明细记录
+    tokenUsageRecords: [] as TokenUsageRecord[],
 
     // 切换会话时正在恢复历史消息（骨架屏用）
     isRestoringSession: false as boolean,
@@ -1080,18 +1095,41 @@ export const useChatStore = defineStore('chat', {
 
     handleTokenUsageRecorded(data: any, envelope?: { session_id?: string; title?: string; meta?: any }) {
       if (data && typeof data === 'object') {
-        const tokensUsed = data.total_tokens || 0
+        // total_tokens = prompt_tokens + completion_tokens (raw sum)
+        // cached_tokens 是 prompt 中被缓存命中的部分，不计入计费消耗
+        // 有效消耗 = total_tokens - cached_tokens
+        const cachedTokens = data.prompt_tokens_details?.cached_tokens || 0
+        const tokensUsed = (data.total_tokens || 0) - cachedTokens
         const inputTokens = data.prompt_tokens || 0
         const outputTokens = data.completion_tokens || 0
-        const cost = (tokensUsed / 1_000_000) * this.tokenPricePerMillion
+
+        // 优先使用服务端提供的 cost（精确按模型实际定价计算）
+        // 否则用本地固定单价估算
+        let cost: number
+        if (typeof data.cost === 'number' && !isNaN(data.cost)) {
+          cost = data.cost
+        } else {
+          cost = (tokensUsed / 1_000_000) * this.tokenPricePerMillion
+        }
 
         this.sessionTokensUsed += tokensUsed
         this.sessionCost += cost
         this.totalTokensUsed += tokensUsed
         this.totalCost += cost
 
-        this.saveTokenStats()
-        console.log('[MindX] Token usage recorded:', { inputTokens, outputTokens, tokensUsed, cost, total: this.totalTokensUsed })
+        // 记录明细
+        this.tokenUsageRecords.push({
+          timestamp: new Date().toISOString(),
+          inputTokens,
+          outputTokens,
+          cachedTokens,
+          totalTokens: data.total_tokens || 0,
+          cost,
+          sessionId: envelope?.session_id || '',
+          title: envelope?.title
+        })
+
+        console.log('[MindX] Token usage recorded:', { inputTokens, outputTokens, cachedTokens, tokensUsed, cost, total: this.totalTokensUsed })
       }
     },
 
@@ -1116,16 +1154,14 @@ export const useChatStore = defineStore('chat', {
           cacheTokens: metaTokens?.cache_tokens || dataTokens?.cache_tokens || 0
         }
 
-        const cost = (tokensUsed / 1_000_000) * this.tokenPricePerMillion
-
-        this.sessionTokensUsed += tokensUsed
-        this.sessionCost += cost
-        this.totalTokensUsed += tokensUsed
-        this.totalCost += cost
+        // 只累计轮数，不累加 token/cost（避免与 token_usage_recorded 双重计数）
         this.totalConversations += 1
 
-        this.saveTokenStats()
-        console.log('[MindX] Token stats updated from ExecutionSummary:', { tokensUsed, cost, total: this.totalTokensUsed })
+        // 轮结束从服务端同步权威数据，修复实时统计的漂移
+        this.syncTotalTokenStats()
+        this.syncSessionTokenStats(targetSessionId)
+
+        console.log('[MindX] ExecutionSummary processed, synced from server')
       }
     },
 

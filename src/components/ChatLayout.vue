@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import Sidebar from './Sidebar.vue'
 import ChatArea from './ChatArea.vue'
 import FileBrowserDrawer from './FileBrowserDrawer.vue'
@@ -26,6 +26,11 @@ function addRef(path, name) {
   if (!fileRefs.value.some(r => r.path === path)) {
     fileRefs.value.push({ path, name })
   }
+  // 将焦点放到输入框
+  nextTick(() => {
+    const textarea = document.querySelector('.message-input textarea')
+    textarea?.focus()
+  })
 }
 
 function removeRef(path) {

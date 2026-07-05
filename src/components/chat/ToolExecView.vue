@@ -117,7 +117,7 @@ function formatParamsPreview(params?: Record<string, any>): string {
   const c = cleanParams(params)
   if (!c) return ''
   return Object.entries(c)
-    .map(([k, v]) => typeof v === 'string' ? v.substring(0, 80) : JSON.stringify(v).substring(0, 80))
+    .map(([k, v]) => typeof v === 'string' ? v.substring(0, 200) : JSON.stringify(v).substring(0, 200))
     .join(', ')
 }
 
@@ -466,9 +466,14 @@ watch(
       <span class="tool-name">{{ toolName }}</span>
 
       <!-- 参数预览（AskUser 的参数由 FormView 专业渲染，此处隐藏） -->
-      <span v-if="!isAskUser && cleanParams(start?.params)" class="params-preview">
-        {{ formatParamsPreview(start.params) }}
-      </span>
+      <el-tooltip
+        v-if="!isAskUser && cleanParams(start?.params)"
+        :content="formatParamsPreview(start.params)"
+        placement="top"
+        popper-class="params-tooltip"
+      >
+        <span class="params-preview">{{ formatParamsPreview(start.params) }}</span>
+      </el-tooltip>
 
       <!-- 状态：执行中 → spinner + 计时 / 完成 → 时长 + 详情按钮 / 失败 → 红色时长 + 错误按钮 -->
       <template v-if="status === 'executing'">
@@ -686,7 +691,7 @@ watch(
   font-size: 11px;
   color: #94a3b8;
   font-family: 'JetBrains Mono', monospace;
-  max-width: 320px;
+  max-width: 600px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -856,7 +861,7 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.meta-pill.path { max-width: 360px; }
+.meta-pill.path { max-width: 540px; }
 .meta-pill.warn {
   color: #fbbf24;
   background: rgba(245, 158, 11, 0.1);

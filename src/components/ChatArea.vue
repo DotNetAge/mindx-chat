@@ -2,7 +2,7 @@
 import { ref, nextTick, onMounted, onUnmounted, watch, computed, onErrorCaptured } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElInput } from 'element-plus'
-import { Setting } from '@element-plus/icons-vue'
+import { Setting, Close, FolderOpened } from '@element-plus/icons-vue'
 import { useChatStore, ChatMessage } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useConnectionStore } from '../stores/connectionStore'
@@ -47,6 +47,10 @@ function openSchedule() {
   scheduleStore.open()
 }
 
+function toggleFileBrowser() {
+  connectionStore.showFileBrowser = !connectionStore.showFileBrowser
+}
+
 onMounted(() => {
   timer = setInterval(updateClock, 1000)
 })
@@ -77,6 +81,38 @@ const props = defineProps({
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const connectionStore = useConnectionStore()
+
+// ── 多 Tab 会话系统 ──
+// openTabIds: 已打开的会话 Tab ID 列表（始终包含当前活跃会话）
+const openTabIds = ref<string[]>([])
+
+// 确保当前活跃会话在 tab 列表中
+function ensureActiveTab(sessionId: string) {
+  if (sessionId && !openTabIds.value.includes(sessionId)) {
+    openTabIds.value.push(sessionId)
+  }
+}
+
+// 切换会话 Tab
+async function switchSessionTab(sessionId: string) {
+  if (sessionId === sessionStore.activeSessionId) return
+  await sessionStore.switchToSession(sessionId)
+}
+
+// 关闭会话 Tab（活跃 Tab 不可关闭）
+function closeSessionTab(sessionId: string) {
+  if (sessionId === sessionStore.activeSessionId) return
+  const idx = openTabIds.value.indexOf(sessionId)
+  if (idx === -1) return
+  openTabIds.value.splice(idx, 1)
+}
+
+// 从 sessionStore 同步：当 activeSessionId 变化时，确保 tab 存在
+watch(() => sessionStore.activeSessionId, (newId) => {
+  if (newId) {
+    ensureActiveTab(newId)
+  }
+}, { immediate: true })
 const { t, locale } = useI18n()
 
 // ── 错误边界：防止子组件渲染错误破坏 TransitionGroup 内部状态 ──
@@ -555,6 +591,9 @@ function logCurrentMessages(messages: any[]) {
         <button class="nav-pill kg-btn" @click="openGraphViewer" :title="t('kgViewer.title')">
           {{ t('kgViewer.title') }}
         </button>
+        <el-button text circle class="file-browser-btn" @click="toggleFileBrowser" title="文件浏览器">
+          <el-icon><FolderOpened /></el-icon>
+        </el-button>
         <span class="header-clock" :title="now.toLocaleString()" @click="openSchedule">
           {{ headerDate }} / {{ headerTime }}
         </span>
@@ -616,6 +655,26 @@ function logCurrentMessages(messages: any[]) {
         <button class="stop-btn" @click="chatStore.cancelProcessing()" :title="t('chat.stopProcessing')">
           <el-icon><VideoPause /></el-icon>
         </button>
+      </div>
+    </div>
+
+    <!-- ── 会话 Tab 栏 ── -->
+    <div v-if="openTabIds.length > 1" class="session-tab-bar">
+      <div
+        v-for="sid in openTabIds"
+        :key="sid"
+        class="session-tab"
+        :class="{ active: sid === sessionStore.activeSessionId }"
+        @click="switchSessionTab(sid)"
+      >
+        <span class="session-tab-title">{{ sessionStore.sessions.find(s => s.session_id === sid)?.title || sid.slice(0, 8) }}</span>
+        <el-icon
+          v-if="sid !== sessionStore.activeSessionId"
+          class="session-tab-close"
+          @click.stop="closeSessionTab(sid)"
+        >
+          <Close />
+        </el-icon>
       </div>
     </div>
 
@@ -827,6 +886,61 @@ function logCurrentMessages(messages: any[]) {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* ── 会话 Tab 栏 ── */
+.session-tab-bar {
+  display: flex;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  flex-shrink: 0;
+  padding: 0 8px;
+}
+
+.session-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: all .15s;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.session-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.session-tab.active {
+  color: var(--accent-cyan);
+  border-bottom-color: var(--accent-cyan);
+  background: rgba(6,182,212,.06);
+}
+
+.session-tab-title {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-tab-close {
+  font-size: 11px;
+  border-radius: 3px;
+  padding: 1px;
+  color: var(--text-muted);
+}
+
+.session-tab-close:hover {
+  background: rgba(239,68,68,.15);
+  color: #ef4444;
 }
 
 .header-clock {

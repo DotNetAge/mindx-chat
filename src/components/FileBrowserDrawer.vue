@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Folder,
   Document,
   Plus,
   RefreshRight,
-  House,
-  Close
+  Edit,
+  Delete
 } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useConnectionStore } from '../stores/connectionStore'
-import type { FSEntry } from '../types/websocket'
+import { useFileExplorerStore } from '../stores/fileExplorerStore'
 
 const props = defineProps({
   visible: {
@@ -26,262 +27,426 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'open-file', 'add-ref'])
 
 const connectionStore = useConnectionStore()
+const fileExplorerStore = useFileExplorerStore()
 const { t } = useI18n()
 
-const currentPath = ref('')
-const entries = ref<FSEntry[]>([])
-const loading = ref(false)
-const error = ref<string | null>(null)
-
-const sortedEntries = computed(() => {
-  const dirs = entries.value.filter(e => e.is_dir).sort((a, b) => a.name.localeCompare(b.name))
-  const files = entries.value.filter(e => !e.is_dir).sort((a, b) => a.name.localeCompare(b.name))
-  return [...dirs, ...files]
+const drawerVisible = computed({
+  get: () => props.visible,
+  set: (val) => emit('update:visible', val)
 })
 
-const breadcrumbSegments = computed(() => {
-  if (!currentPath.value) return []
-  const parts = currentPath.value.split('/').filter(Boolean)
-  return parts.map((part, idx) => {
-    const fullPath = '/' + parts.slice(0, idx + 1).join('/')
-    return { label: part, path: fullPath }
-  })
-})
+// ── 目录树（懒加载）──
+const treeRef = ref<any>(null)
+const treeKey = ref(0)
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let size = bytes / 1024
-  for (const unit of units) {
-    if (size < 1024) return `${size.toFixed(size < 10 ? 1 : 0)} ${unit}`
-    size /= 1024
-  }
-  return `${size.toFixed(1)} PB`
+const treeProps = {
+  children: 'children',
+  label: 'name',
+  isLeaf: 'isLeaf',
 }
 
-function formatDate(dateStr: string): string {
+let pendingCreate: { parentPath: string; phantom: any } | null = null
+
+async function loadTreeNode(node: any, resolve: any) {
   try {
-    const date = new Date(dateStr)
-    return date.toLocaleDateString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  } catch {
-    return dateStr
-  }
-}
-
-async function fetchFSList(path: string) {
-  loading.value = true
-  error.value = null
-  try {
-    if (!connectionStore.isConnected) {
-      throw new Error(t('fileBrowser.notConnected'))
-    }
-
-    const result = await connectionStore.fetchFSList(path)
-
-    console.log('[FileBrowser] Raw response:', typeof result, Array.isArray(result), result)
-
-    if (Array.isArray(result)) {
-      entries.value = result
-    } else if (result && result.entries && Array.isArray(result.entries)) {
-      entries.value = result.entries
-    } else if (result && typeof result === 'object') {
-      entries.value = Object.values(result).filter(item =>
-        item && typeof item === 'object' && 'name' in item
-      )
+    let path: string
+    if (node.level === 0) {
+      path = props.projectDir || connectionStore.currentProjectDir || ''
+      if (!path || path === '/') {
+        path = await connectionStore.fetchFSHome()
+      }
     } else {
-      console.warn('[FileBrowser] Unexpected data format:', result)
-      entries.value = []
+      path = node.data.path
     }
+    const entries: any = await connectionStore.fetchFSList(path)
+    const arr = Array.isArray(entries) ? entries : []
+    arr.sort((a: any, b: any) => {
+      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+    const children = arr.map((e: any) => ({ ...e, isLeaf: !e.is_dir }))
 
-    currentPath.value = path
-  } catch (err: any) {
-    console.error('[FileBrowser] Failed to fetch directory:', err)
-    error.value = err?.message || t('fileBrowser.loadFailed')
-  } finally {
-    loading.value = false
-  }
-}
-
-async function handleOpen() {
-  let targetPath = props.projectDir
-
-  if (!targetPath || targetPath === '/') {
-    console.log('[FileBrowser] No project dir, fetching home directory...')
-    try {
-      targetPath = await connectionStore.fetchFSHome()
-      console.log(`[FileBrowser] ✅ Got home directory: ${targetPath}`)
-    } catch (err) {
-      console.error('[FileBrowser] Failed to fetch home:', err)
-      error.value = t('fileBrowser.cannotGetHomeDir')
-      loading.value = false
+    if (pendingCreate && pendingCreate.parentPath === path) {
+      children.unshift(pendingCreate.phantom)
+      pendingCreate = null
+      resolve(children)
+      nextTick(() => nextTick(focusEditingInput))
       return
     }
+
+    resolve(children)
+  } catch {
+    resolve([])
+  }
+}
+
+async function handleTreeNodeClick(data: any) {
+  if (!data.is_dir && !data._phantom) {
+    try {
+      fileExplorerStore.pendingSelectPath = data.path
+      await fileExplorerStore.openFile(data, connectionStore)
+      fileExplorerStore.visible = true
+    } catch (err: any) {
+      ElMessage.error('Failed to open file: ' + (err?.message || ''))
+    }
+  }
+}
+
+function refreshTree() {
+  treeKey.value++
+}
+
+// ── 右键上下文菜单 ──
+const ctxMenuVisible = ref(false)
+const ctxMenuPos = ref({ x: 0, y: 0 })
+const ctxTarget = ref<any>(null)
+
+function showCtxMenu(e: MouseEvent, data: any) {
+  if (data._phantom) return
+  e.preventDefault()
+  ctxTarget.value = data
+  ctxMenuPos.value = { x: e.clientX, y: e.clientY }
+  ctxMenuVisible.value = true
+}
+
+function closeCtxMenu() {
+  ctxMenuVisible.value = false
+}
+
+// ── 内联编辑 ──
+const editingPath = ref<string | null>(null)
+const editingValue = ref('')
+
+function startRename(data: any) {
+  cancelEdit()
+  editingPath.value = data.path
+  editingValue.value = data.name
+  closeCtxMenu()
+  nextTick(focusEditingInput)
+}
+
+function startCreate(isDir: boolean) {
+  cancelEdit()
+  const parentPath = ctxTarget.value?.is_dir
+    ? ctxTarget.value.path
+    : getParentPath(ctxTarget.value?.path || '')
+  if (!parentPath) return
+
+  const phantom: any = {
+    name: '',
+    path: parentPath + '/__new__' + Date.now(),
+    is_dir: isDir,
+    isLeaf: !isDir,
+    _phantom: true,
   }
 
-  if (targetPath) {
-    await fetchFSList(targetPath)
+  closeCtxMenu()
+
+  const parentNode = treeRef.value?.getNode(parentPath)
+  if (!parentNode) return
+
+  pendingCreate = { parentPath, phantom }
+  editingPath.value = phantom.path
+  editingValue.value = ''
+
+  if (!parentNode.loaded) {
+    parentNode.expand()
   } else {
-    error.value = t('fileBrowser.noWorkingDir')
+    parentNode.loaded = false
+    if (parentNode.expanded) {
+      parentNode.collapse()
+    }
+    parentNode.expand()
   }
 }
 
-function navigateTo(path: string) {
-  fetchFSList(path)
+function focusEditingInput() {
+  const inp = document.querySelector<HTMLInputElement>('.fe-inline-input')
+  inp?.focus()
+  inp?.select()
 }
 
-function refresh() {
-  if (currentPath.value) {
-    fetchFSList(currentPath.value)
+async function confirmEdit() {
+  const path = editingPath.value
+  const val = editingValue.value.trim()
+  if (!path || !val) {
+    cancelEdit()
+    return
+  }
+  editingPath.value = null
+
+  const node = treeRef.value?.getNode(path)
+  if (node?.data._phantom) {
+    const parentPath = getParentPath(path)
+    const fullPath = joinPath(parentPath, val)
+    const isDir = node.data.is_dir
+    try {
+      if (isDir) {
+        await connectionStore.fetchFSMkdir(fullPath)
+      } else {
+        await connectionStore.writeFile(fullPath, '')
+      }
+      treeRef.value?.remove(path)
+      const newNode = { name: val, path: fullPath, is_dir: isDir, isLeaf: !isDir }
+      treeRef.value?.append(newNode, parentPath)
+      treeRef.value?.setCurrentKey(fullPath)
+      ElMessage.success(isDir ? 'Folder created' : 'File created')
+      if (!isDir) {
+        fileExplorerStore.openFile(newNode as any, connectionStore).then(() => {
+          fileExplorerStore.visible = true
+        }).catch((err: any) => {
+          ElMessage.error('Failed to open new file: ' + (err?.message || ''))
+        })
+      }
+    } catch (err: any) {
+      ElMessage.error('Failed: ' + (err?.message || ''))
+      refreshTree()
+    }
+  } else {
+    const oldPath = path
+    const parentDir = getParentPath(oldPath)
+    const newPath = parentDir ? parentDir + '/' + val : val
+    if (newPath === oldPath) return
+    try {
+      await connectionStore.fetchFSMove(oldPath, newPath)
+
+      const oldNode = treeRef.value?.getNode(oldPath)
+      const isDir = oldNode?.data.is_dir
+      const newNode = { name: val, path: newPath, is_dir: isDir, isLeaf: !isDir }
+      treeRef.value?.remove(oldPath)
+      treeRef.value?.append(newNode, parentDir)
+      treeRef.value?.setCurrentKey(newPath)
+
+      if (isDir) {
+        fileExplorerStore.tabs.forEach(t => {
+          if (t.path.startsWith(oldPath + '/') || t.path === oldPath) {
+            t.path = newPath + t.path.slice(oldPath.length)
+          }
+        })
+      } else {
+        const tab = fileExplorerStore.tabs.find(t => t.path === oldPath)
+        if (tab) {
+          tab.path = newPath
+          tab.name = val
+        }
+      }
+
+      ElMessage.success('Renamed')
+    } catch (err: any) {
+      ElMessage.error('Rename failed: ' + (err?.message || ''))
+    }
   }
 }
 
-async function handleDirClick(entry: FSEntry) {
-  if (entry.is_dir) {
-    fetchFSList(entry.path)
+function cancelEdit() {
+  if (editingPath.value) {
+    const node = treeRef.value?.getNode(editingPath.value)
+    if (node?.data._phantom) {
+      treeRef.value?.remove(editingPath.value)
+    }
+  }
+  editingPath.value = null
+  pendingCreate = null
+}
+
+function handleNewFile() { startCreate(false) }
+function handleNewFolder() { startCreate(true) }
+
+function handleRename() {
+  const node = ctxTarget.value
+  if (!node || node._phantom) return
+  startRename(node)
+}
+
+async function handleDelete() {
+  const node = ctxTarget.value
+  if (!node || node._phantom) return
+  closeCtxMenu()
+  const parentPath = getParentPath(node.path)
+  treeRef.value?.remove(node.path)
+  const tab = fileExplorerStore.tabs.find(t => t.path === node.path)
+  if (tab) fileExplorerStore.closeTab(tab.id)
+  try {
+    await connectionStore.fetchFSRemove(node.path)
+    ElMessage.success('Deleted')
+  } catch (err: any) {
+    ElMessage.error('Delete failed: ' + (err?.message || ''))
+    refreshTree()
   }
 }
 
-function closeDrawer() {
+function getParentPath(p: string): string {
+  if (!p) return ''
+  const idx = p.lastIndexOf('/')
+  if (idx <= 0) return '/'
+  return p.slice(0, idx)
+}
+
+function joinPath(parent: string, name: string): string {
+  const p = parent.endsWith('/') ? parent.slice(0, -1) : parent
+  return (p || '/') + '/' + name
+}
+
+// ── 拖拽移动 ──
+function allowDrop(draggingNode: any, dropNode: any, type: string): boolean {
+  if (type === 'inner') return dropNode.data.is_dir === true && !dropNode.data._phantom
+  return !draggingNode.data._phantom
+}
+
+async function handleNodeDrop(draggingNode: any, dropNode: any, dropType: string) {
+  const srcPath = draggingNode.data.path
+  let targetDir: string
+  if (dropType === 'inner') {
+    targetDir = dropNode.data.path
+  } else {
+    targetDir = getParentPath(dropNode.data.path)
+  }
+  const newPath = joinPath(targetDir, draggingNode.data.name)
+  if (newPath === srcPath) return
+  try {
+    await connectionStore.fetchFSMove(srcPath, newPath)
+    draggingNode.data.path = newPath
+    const tab = fileExplorerStore.tabs.find(t => t.path === srcPath)
+    if (tab) {
+      tab.path = newPath
+    }
+    ElMessage.success('Moved')
+  } catch (err: any) {
+    ElMessage.error('Move failed: ' + (err?.message || ''))
+    refreshTree()
+  }
+}
+
+function handleAddRef(entry: any) {
+  emit('add-ref', entry.path, entry.name)
   emit('update:visible', false)
+}
+
+function onDocumentClick() {
+  if (ctxMenuVisible.value) closeCtxMenu()
 }
 
 watch(() => props.visible, (val) => {
   if (val) {
-    handleOpen()
+    treeKey.value++
   }
 })
 </script>
 
 <template>
-  <Transition name="drawer-slide">
-    <div v-if="visible" class="file-browser-drawer">
+  <el-drawer
+    v-model="drawerVisible"
+    direction="rtl"
+    size="380px"
+    :append-to-body="false"
+    @click="onDocumentClick"
+    class="fe-drawer"
+  >
+    <!-- 自定义标题 -->
+    <template #header>
       <div class="drawer-header">
         <div class="drawer-title">
           <el-icon><Folder /></el-icon>
-          <span>{{ t('fileBrowser.quickReference') }}</span>
+          <span>文件浏览器</span>
         </div>
         <div class="drawer-actions">
-          <el-button text circle @click="refresh" :loading="loading" :title="t('common.refresh')">
+          <el-button text circle @click="refreshTree" :title="t('common.refresh')">
             <el-icon><RefreshRight /></el-icon>
           </el-button>
-          <el-button text circle @click="closeDrawer" :title="t('common.close')">
-            <el-icon><Close /></el-icon>
-          </el-button>
         </div>
       </div>
+    </template>
 
-      <div class="breadcrumb-bar">
-        <el-breadcrumb separator="/">
-          <el-breadcrumb-item>
-            <a class="breadcrumb-link" @click.prevent="navigateTo(projectDir || '/')">
-              <el-icon><House /></el-icon>
-            </a>
-          </el-breadcrumb-item>
-          <el-breadcrumb-item
-            v-for="seg in breadcrumbSegments"
-            :key="seg.path"
-          >
-            <a class="breadcrumb-link" @click.prevent="navigateTo(seg.path)">{{ seg.label }}</a>
-          </el-breadcrumb-item>
-        </el-breadcrumb>
-      </div>
-
-      <div class="file-list">
-        <div v-if="loading && entries.length === 0" class="loading-state">
-          <div class="loading-spinner">
-            <el-icon class="is-loading" :size="32"><RefreshRight /></el-icon>
-          </div>
-          <div class="loading-text">
-            <span class="loading-title">{{ t('common.loading') }}...</span>
-            <span class="loading-subtitle">{{ t('fileBrowser.loadingDir') }}</span>
-          </div>
-        </div>
-
-        <div v-else-if="error && entries.length === 0" class="error-state">
-          <el-icon :size="40" color="#ef4444"><Close /></el-icon>
-          <div class="error-text">
-            <span class="error-title">{{ t('common.error') }}</span>
-            <span class="error-message">{{ error }}</span>
-          </div>
-          <el-button type="primary" size="small" @click="refresh" :loading="loading">
-            {{ t('common.retry') }}
-          </el-button>
-        </div>
-
-        <div
-          v-for="entry in sortedEntries"
-          :key="entry.path"
-          class="file-item"
-          :class="{ 'dir-item': entry.is_dir }"
-          @click="entry.is_dir && handleDirClick(entry)"
-        >
-          <div class="file-icon">
-            <el-icon v-if="entry.is_dir" :size="18"><Folder /></el-icon>
-            <el-icon v-else :size="16"><Document /></el-icon>
-          </div>
-          <div class="file-info">
-            <span class="file-name" :title="entry.name">{{ entry.name }}</span>
-            <span class="file-meta">
-              <span v-if="entry.is_dir" class="dir-tag">&lt;dir&gt;</span>
-              <template v-else>
-                <span class="file-size">{{ formatSize(entry.size) }}</span>
-                <span class="file-date">{{ formatDate(entry.mod_time) }}</span>
-              </template>
+    <!-- 目录树 -->
+    <div class="tree-container" tabindex="-1">
+      <el-tree
+        :key="treeKey"
+        ref="treeRef"
+        :props="treeProps"
+        :load="loadTreeNode"
+        lazy
+        node-key="path"
+        highlight-current
+        draggable
+        :allow-drag="() => true"
+        :allow-drop="allowDrop"
+        @node-click="handleTreeNodeClick"
+        @node-contextmenu="showCtxMenu"
+        @node-drop="handleNodeDrop"
+        class="fe-tree"
+      >
+        <template #default="{ data }">
+          <template v-if="editingPath === data.path">
+            <input
+              class="fe-inline-input"
+              v-model="editingValue"
+              @keydown.enter.prevent="confirmEdit"
+              @keydown.escape.prevent="cancelEdit"
+              @blur="confirmEdit"
+              @click.stop
+            />
+          </template>
+          <template v-else>
+            <span class="fe-tree-icon">
+              <el-icon v-if="data.is_dir"><Folder /></el-icon>
+              <el-icon v-else><Document /></el-icon>
             </span>
-          </div>
-          <div class="file-actions">
-            <el-icon class="ref-icon" :title="t('fileBrowser.addToChat')" @click.stop="emit('add-ref', entry.path, entry.name); emit('update:visible', false)">
-              <Plus />
-            </el-icon>
-          </div>
-        </div>
+            <span class="fe-tree-label" :title="data.name">{{ data.name }}</span>
+            <div class="tree-node-actions" @click.stop>
+              <el-icon
+                class="ref-icon"
+                :title="t('fileBrowser.addToChat')"
+                @click="handleAddRef(data)"
+              >
+                <Plus />
+              </el-icon>
+            </div>
+          </template>
+        </template>
+      </el-tree>
+    </div>
 
-        <div v-if="!loading && sortedEntries.length === 0" class="empty-state">
-          <el-icon :size="40"><Folder /></el-icon>
-          <span>{{ t('fileBrowser.dirEmpty') }}</span>
+    <!-- 右键菜单 -->
+    <Transition name="fade">
+      <div
+        v-if="ctxMenuVisible"
+        class="ctx-menu"
+        :style="{ left: ctxMenuPos.x + 'px', top: ctxMenuPos.y + 'px' }"
+        @click.stop
+      >
+        <div class="ctx-item" @click="handleAddRef(ctxTarget)">
+          <el-icon><Plus /></el-icon>
+          <span>{{ t('fileBrowser.addToChat') }}</span>
+        </div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-item" @click="handleNewFile">
+          <el-icon><Document /></el-icon>
+          <span>{{ t('fileExplorer.newFile') }}</span>
+        </div>
+        <div class="ctx-item" @click="handleNewFolder">
+          <el-icon><Folder /></el-icon>
+          <span>{{ t('fileExplorer.newFolder') }}</span>
+        </div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-item" @click="handleRename">
+          <el-icon><Edit /></el-icon>
+          <span>{{ t('fileExplorer.rename') }}</span>
+        </div>
+        <div class="ctx-item delete" @click="handleDelete">
+          <el-icon><Delete /></el-icon>
+          <span>{{ t('fileExplorer.delete') }}</span>
         </div>
       </div>
-    </div>
-  </Transition>
+    </Transition>
+  </el-drawer>
 </template>
 
 <style scoped>
-.file-browser-drawer {
-  width: 360px;
-  min-width: 360px;
-  height: 100vh;
-  background: var(--bg-primary);
-  border-left: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  z-index: 15;
-  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
-}
-
-.drawer-slide-enter-active,
-.drawer-slide-leave-active {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.drawer-slide-enter-from,
-.drawer-slide-leave-to {
-  transform: translateX(100%);
-}
-
 .drawer-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-secondary);
+  width: 100%;
 }
 
 .drawer-title {
@@ -298,169 +463,173 @@ watch(() => props.visible, (val) => {
   gap: 4px;
 }
 
-.breadcrumb-bar {
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-}
-
-.breadcrumb-bar :deep(.el-breadcrumb) {
-  font-size: 12px;
-}
-
-.breadcrumb-link {
-  color: var(--accent-cyan);
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.breadcrumb-link:hover {
-  text-decoration: underline;
-}
-
-.file-list {
+.tree-container {
   flex: 1;
+  height: 100%;
   overflow-y: auto;
-  padding: 4px 0;
 }
 
-.loading-state,
-.empty-state,
-.error-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 60px 20px;
-  color: var(--text-muted);
+.fe-tree {
+  background: transparent;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
-.loading-spinner {
-  margin-bottom: 8px;
-}
-
-.loading-text,
-.error-text {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-
-.loading-title,
-.error-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.loading-subtitle,
-.error-message {
-  font-size: 12px;
-  color: var(--text-muted);
-  max-width: 240px;
-  text-align: center;
-}
-
-.error-state .error-title {
-  color: #ef4444;
-}
-
-.file-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 16px;
-  cursor: pointer;
-  transition: background 0.15s ease;
+.fe-tree :deep(.el-tree-node__content) {
+  height: 30px;
+  padding: 0 8px;
   border-left: 2px solid transparent;
+  transition: all .1s;
 }
 
-.file-item:hover {
+.fe-tree :deep(.el-tree-node__content:hover) {
   background: var(--bg-hover);
+}
+
+.fe-tree :deep(.el-tree-node.is-current > .el-tree-node__content) {
+  background: rgba(6,182,212,.08);
   border-left-color: var(--accent-cyan);
 }
 
-.file-item.dir-item {
-  border-left-color: rgba(6, 182, 212, 0.2);
-}
-
-.file-item.dir-item:hover {
-  border-left-color: var(--accent-cyan);
-}
-
-.file-item.text-file .file-name {
-  color: var(--text-primary);
-}
-
-.file-icon {
-  flex-shrink: 0;
+.fe-tree :deep(.el-tree-node__expand-icon) {
   color: var(--text-muted);
+  font-size: 12px;
 }
 
-.dir-item .file-icon {
-  color: var(--accent-cyan);
+.fe-tree :deep(.el-tree-node__expand-icon.is-leaf) {
+  color: transparent;
 }
 
-.file-info {
+.fe-tree :deep(.el-draggable) {
+  cursor: grab;
+}
+
+.fe-tree-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+.fe-tree-icon .el-icon {
+  font-size: 16px;
+}
+
+.fe-tree-label {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.file-name {
-  font-size: 13px;
-  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.file-meta {
+.tree-node-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.dir-tag {
-  font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: var(--text-muted);
-}
-
-.file-size {
-  font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: var(--text-muted);
-}
-
-.file-date {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-
-.file-actions {
-  display: flex;
-  gap: 4px;
+  gap: 2px;
   opacity: 0;
   transition: opacity 0.2s ease;
+  margin-left: 4px;
 }
 
-.file-item:hover .file-actions {
+.fe-tree :deep(.el-tree-node__content:hover) .tree-node-actions {
   opacity: 1;
 }
 
-.file-actions .ref-icon {
+.tree-node-actions .ref-icon {
   color: var(--text-muted);
   cursor: pointer;
   transition: color 0.2s ease;
+  font-size: 14px;
 }
 
 .ref-icon:hover {
   color: #10b981;
+}
+
+.fe-inline-input {
+  width: 100%;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--accent-cyan);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  font-family: inherit;
+}
+
+.ctx-menu {
+  position: fixed;
+  z-index: 3100;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 6px 0;
+  min-width: 160px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background .1s;
+}
+
+.ctx-item:hover { background: var(--bg-hover); }
+
+.ctx-item .el-icon { font-size: 15px; }
+
+.ctx-item.delete { color: #ef4444; }
+.ctx-item.delete:hover { background: rgba(239,68,68,.12); }
+
+.ctx-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
+
+.fade-enter-active, .fade-leave-active {
+  transition: opacity .12s;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
+}
+</style>
+
+<!-- 全局样式覆盖 el-drawer 默认样式以匹配暗色主题 -->
+<style>
+.fe-drawer {
+  background: var(--bg-primary, #0a0e17);
+  border-left: 1px solid var(--border-color, #1e293b);
+}
+
+.fe-drawer .el-drawer__header {
+  margin-bottom: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color, #1e293b);
+  background: var(--bg-secondary, #111827);
+}
+
+.fe-drawer .el-drawer__body {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fe-drawer .el-drawer__close-btn {
+  color: var(--text-muted, #64748b);
+  font-size: 18px;
+}
+
+.fe-drawer .el-drawer__close-btn:hover {
+  color: var(--text-primary, #f1f5f9);
 }
 </style>

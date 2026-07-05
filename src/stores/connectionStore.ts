@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { getMindXClient, createMindXClient } from '../services/websocket'
 import { useChatStore } from './chatStore'
 import { useSessionStore } from './sessionStore'
-import type { AgentConfig, ModelConfig, SkillInfo, ServerSessionInfo, FSEntry, TokenUsageOverview, MonthlyUsageStats, ModelUsageSummary, TotalTokenUsage, SessionTokenUsage, ProviderInfo, ProviderCreateParams, ProviderUpdateParams, ModelCreateParams, ModelUpdateParams } from '../types/websocket'
+import type { AgentConfig, ModelConfig, SkillInfo, ServerSessionInfo, FSEntry, TokenUsageOverview, MonthlyUsageStats, ModelUsageSummary, TotalTokenUsage, SessionTokenUsage, SessionTokenDetailResponse, ProviderInfo, ProviderCreateParams, ProviderUpdateParams, ModelCreateParams, ModelUpdateParams } from '../types/websocket'
 import i18n from '../i18n'
 import { ElNotification, ElButton } from 'element-plus'
 import { h } from 'vue'
@@ -1022,6 +1022,13 @@ export const useConnectionStore = defineStore('connection', {
       if (!client) throw new Error('WebSocket client not initialized')
       const result = await client.call<SessionTokenUsage>('token.usage.session', { session_id: sessionId })
       return result || { tokens_used: 0, cost: 0 }
+    },
+
+    async fetchSessionTokenDetail(sessionId: string): Promise<SessionTokenDetailResponse> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<SessionTokenDetailResponse>('token.usage.session.detail', { session_id: sessionId })
+      return result || { session_id: sessionId, records: [] }
     },
 
     emptyMonthlyStats(year?: number, month?: number): MonthlyUsageStats {

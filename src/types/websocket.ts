@@ -219,6 +219,24 @@ export interface SessionTokenUsage {
   cost: number;
 }
 
+/** A single token usage record in token.usage.session.detail response */
+export interface SessionTokenDetailRecord {
+  timestamp: string;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+  total_tokens: number;
+  cost: number;
+  model_name: string;
+  provider_name: string;
+}
+
+/** Response from token.usage.session.detail — 单会话 token 使用明细 */
+export interface SessionTokenDetailResponse {
+  session_id: string;
+  records: SessionTokenDetailRecord[];
+}
+
 export interface ProviderInfo {
   name: string;
   title: string;

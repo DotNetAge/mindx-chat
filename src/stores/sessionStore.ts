@@ -99,6 +99,41 @@ export const useSessionStore = defineStore('session', {
       this.sessions = []
       this.activeSessionId = ''
       this.isLoadedFromServer = false
+    },
+
+    /**
+     * 切换到指定会话：设置活跃会话、加载消息历史
+     */
+    async switchToSession(sessionId: string) {
+      const chatStore = (await import('./chatStore')).useChatStore()
+      const connectionStore = useConnectionStore()
+
+      chatStore.isRestoringSession = true
+      this.setActiveSession(sessionId)
+      connectionStore.setLastSession(sessionId)
+
+      // 清空上一会话的 TokenUsage 明细记录
+      chatStore.tokenUsageRecords = []
+
+      // 从服务端同步当前 session 的 token 用量统计
+      await chatStore.syncSessionTokenStats(sessionId)
+
+      try {
+        const detail = await connectionStore.fetchSessionDetail(sessionId)
+        if (detail?.messages && detail.messages.length > 0) {
+          chatStore.restoreSessionMessages(sessionId, detail.messages)
+          chatStore.sessionRevealPending = true
+          // 异步加载子Agent 会话（不阻塞主界面渲染）
+          chatStore.loadSubtaskSessions(sessionId).catch(err => console.warn('Failed to load subtask sessions:', err))
+        } else {
+          chatStore.clearSessionMessages(sessionId)
+          chatStore.isRestoringSession = false
+        }
+      } catch (err) {
+        console.error('Failed to load session messages:', err)
+        chatStore.clearSessionMessages(sessionId)
+        chatStore.isRestoringSession = false
+      }
     }
   }
 })

@@ -352,32 +352,7 @@ async function fallbackLoadSessions(agents: any[]) {
 }
 
 async function selectSession(sessionId: string) {
-  chatStore.isRestoringSession = true
-  sessionStore.setActiveSession(sessionId)
-  connectionStore.setLastSession(sessionId)
-
-  // 从服务端同步当前 session 的 token 用量统计
-  await chatStore.syncSessionTokenStats(sessionId)
-
-  try {
-    const detail = await connectionStore.fetchSessionDetail(sessionId)
-    if (detail?.messages && detail.messages.length > 0) {
-      chatStore.restoreSessionMessages(sessionId, detail.messages)
-      // 消息已恢复，通知 ChatArea 背后渲染→滚动→揭晓骨架屏
-      chatStore.sessionRevealPending = true
-      // 异步加载子Agent 会话（不阻塞主界面渲染）
-      chatStore.loadSubtaskSessions(sessionId).catch(err => console.warn('Failed to load subtask sessions:', err))
-    } else {
-      // 服务端无消息时清空该 session 的消息
-      chatStore.clearSessionMessages(sessionId)
-      chatStore.isRestoringSession = false
-    }
-  } catch (err) {
-    console.error('Failed to load session messages:', err)
-    // 加载失败时清空该 session 的消息，避免显示旧数据
-    chatStore.clearSessionMessages(sessionId)
-    chatStore.isRestoringSession = false
-  }
+  await sessionStore.switchToSession(sessionId)
 }
 
 async function handleConnect() {

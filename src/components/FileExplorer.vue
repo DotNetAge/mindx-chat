@@ -396,6 +396,62 @@ function onContentUpdate(val: string) {
   }
 }
 
+// ── 从 drawer 打开文件后，在树中定位并高亮该节点 ──
+watch(() => store.visible, (visible) => {
+  if (visible && store.pendingSelectPath) {
+    const path = store.pendingSelectPath
+    store.pendingSelectPath = '' // 消费掉
+    navigateTreeToFile(path)
+  }
+})
+
+/**
+ * 在懒加载树中逐层展开目录，最终选中目标文件。
+ * el-tree 的节点展开是异步的（触发 lazy load），
+ * 因此采用轮询方式等待每一级节点加载完成。
+ */
+function navigateTreeToFile(targetPath: string) {
+  const rootPath = connectionStore.currentProjectDir || '/'
+  // 相对路径 segments，如 ['dir1', 'dir2', 'file.txt']
+  const rel = targetPath.startsWith(rootPath)
+    ? targetPath.slice(rootPath.length).replace(/^\//, '')
+    : targetPath
+  const segments = rel.split('/').filter(Boolean)
+  if (segments.length === 0) return
+
+  let idx = 0
+  let currentPath = rootPath
+
+  function step() {
+    if (idx >= segments.length) return
+    const nextPath = joinPath(currentPath, segments[idx])
+    const node = treeRef.value?.getNode(nextPath)
+
+    if (!node) {
+      // 节点尚未加载，等 100ms 重试
+      setTimeout(step, 100)
+      return
+    }
+
+    if (idx === segments.length - 1) {
+      // 最后一级 → 选中
+      treeRef.value?.setCurrentKey(nextPath)
+      return
+    }
+
+    // 中间目录 → 展开
+    currentPath = nextPath
+    idx++
+    if (!node.expanded) {
+      node.expand()
+    }
+    // 展开后等子节点加载完成再继续
+    setTimeout(step, 200)
+  }
+
+  step()
+}
+
 // 不使用 watch + treeKey++，因为 v-if="store.visible" 已保证每次打开时 el-tree 全新挂载
 
 function handleClose() {

@@ -597,7 +597,9 @@
     "font": "Font",
     "fontSize": "Font Size",
     "newFile": "New File",
-    "newFolder": "New Folder"
+    "newFolder": "New Folder",
+    "rename": "Rename",
+    "delete": "Delete"
   },
   "fileReview": {
     "filesModified": "{count} file(s) modified",
@@ -645,7 +647,11 @@
     "requestCount": "Request Count",
     "apiRequests": "API Requests",
     "dayTooltip": "{label}: {value}",
-    "viewDetails": "View Details"
+    "viewDetails": "View Details",
+    "monthlyReport": "Monthly Report",
+    "sessionDetail": "Session Details",
+    "time": "Time",
+    "cacheTokens": "Cached Tokens"
   },
   "tokenUsage.month": "{m}",
   "tokenUsage.dayLabel": "{label}: {value}",

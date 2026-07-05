@@ -42,6 +42,8 @@ function detectFileType(name: string): OpenTab['fileType'] {
 export interface FileExplorerState {
   visible: boolean
   pendingStartDir: string
+  /** 打开 FileExplorer 后需要高亮的文件路径 */
+  pendingSelectPath: string
   tabs: OpenTab[]
   activeTabId: string | null
   // 编辑/预览切换（markdown/html 用）
@@ -52,6 +54,7 @@ export const useFileExplorerStore = defineStore('file-explorer', {
   state: (): FileExplorerState => ({
     visible: false,
     pendingStartDir: '',
+    pendingSelectPath: '',
     tabs: [],
     activeTabId: null,
     showSource: false,
