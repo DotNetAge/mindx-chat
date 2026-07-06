@@ -103,6 +103,9 @@ export interface GraphViewerState {
   filewatchStatus: api.FilewatchStatus | null
   fileStates: api.FileStateResult | null
   fileStatesLoading: boolean
+
+  // Region scoping
+  currentProjectDir: string | null
 }
 
 export const useGraphStore = defineStore('graph', {
@@ -147,6 +150,7 @@ export const useGraphStore = defineStore('graph', {
     filewatchStatus: null,
     fileStates: null,
     fileStatesLoading: false,
+    currentProjectDir: null,
   }),
 
   getters: {
@@ -234,13 +238,15 @@ export const useGraphStore = defineStore('graph', {
   },
 
   actions: {
-    open() {
+    open(projectDir?: string) {
+      this.currentProjectDir = projectDir || null
       this.visible = true
       this.loadAllData()
     },
 
     close() {
       this.visible = false
+      this.currentProjectDir = null
       this.selectedNodeId = null
       this.neighborNodeIds.clear()
       this.clearHighlightedNodes() // also clears chunkNodeIds
@@ -329,16 +335,27 @@ export const useGraphStore = defineStore('graph', {
       this.loading = true
       this.error = null
       try {
-        // Use direct storage APIs instead of Cypher (labels(), properties(), type(), etc. are not implemented in gograph)
-        const [nodes, edges] = await Promise.all([
-          api.listAllNodes(),
-          api.listAllEdges(),
-        ])
+        let nodes: GraphNode[]
+        let edges: GraphEdge[]
+
+        const pd = this.currentProjectDir
+        if (pd) {
+          const result = await api.listNodesByRegion(pd)
+          nodes = result.nodes
+          edges = result.edges
+          console.log('[GraphStore] loaded by region, projectDir:', pd, 'nodes:', nodes.length, 'edges:', edges.length)
+        } else {
+          const [allNodes, allEdges] = await Promise.all([
+            api.listAllNodes(),
+            api.listAllEdges(),
+          ])
+          nodes = allNodes
+          edges = allEdges
+          console.log('[GraphStore] loaded global, nodes:', nodes.length, 'edges:', edges.length)
+        }
 
         this.nodes = nodes
         this.edges = edges
-        console.log('[GraphStore] nodes loaded:', this.nodes.length, 'items', this.nodes.slice(0, 3))
-        console.log('[GraphStore] edges loaded:', this.edges.length, 'items', this.edges.slice(0, 3))
 
         // Derive stats from data
         this.stats = { totalNodes: nodes.length, totalEdges: edges.length }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Folder,
@@ -18,6 +18,9 @@ import { ElMessage, ElTooltip } from 'element-plus'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useFileExplorerStore } from '../stores/fileExplorerStore'
+import IndexDetailsDialog from './IndexDetailsDialog.vue'
+import EntityTagsDialog from './EntityTagsDialog.vue'
+import { getMindXClient } from '../services/websocket'
 
 const props = defineProps({
   visible: {
@@ -37,10 +40,63 @@ const sessionStore = useSessionStore()
 const fileExplorerStore = useFileExplorerStore()
 const { t } = useI18n()
 
+// ── Manifest 路径→状态 缓存（用于树节点索引图标）──
+const manifestMap = ref<Record<string, string>>({})
+
+async function refreshManifestMap() {
+  const projectDir = sessionStore.activeSession?.project_dir
+  if (!projectDir) { manifestMap.value = {}; return }
+  try {
+    const data = await connectionStore.getIndexQueue(projectDir)
+    console.log('[FBD-DEBUG] refreshManifestMap raw:', JSON.stringify(data?.files?.slice(0, 10)))
+    const map: Record<string, string> = {}
+    if (data?.files) {
+      for (const f of data.files) {
+        // manifest 返回的路径可能不带前导 /，统一转为绝对路径以匹配 fs.list
+        const absPath = f.path.startsWith('/') ? f.path : '/' + f.path
+        if (f.state === 'done') map[absPath] = 'indexed'
+        else if (f.state === 'pending') map[absPath] = 'pending'
+        else if (f.state === 'processing') map[absPath] = 'indexing'
+      }
+    }
+    manifestMap.value = map
+    console.log('[FBD-DEBUG] refreshManifestMap built map keys:', Object.keys(map).length, 'sample:', Object.keys(map)[0])
+  } catch {
+    manifestMap.value = {}
+  }
+}
+
+// 会话切换时刷新 manifest 缓存
+watch(() => sessionStore.activeSession?.project_dir, () => {
+  refreshManifestMap()
+})
+onMounted(() => { refreshManifestMap() })
+
 const drawerVisible = computed({
   get: () => props.visible,
   set: (val) => emit('update:visible', val)
 })
+
+const showIndexDialog = ref(false)
+const showEntityTagDialog = ref(false)
+
+async function handleOpenKB() {
+  try {
+    const client = getMindXClient()
+    if (!client) {
+      showIndexDialog.value = true
+      return
+    }
+    const result = await client.call<{ types: any[] }>('entity_tags.get', {})
+    if (result?.types && result.types.length > 0) {
+      showIndexDialog.value = true
+    } else {
+      showEntityTagDialog.value = true
+    }
+  } catch {
+    showIndexDialog.value = true
+  }
+}
 
 // ── 目录树（懒加载）──
 const treeRef = ref<any>(null)
@@ -66,12 +122,20 @@ async function loadTreeNode(node: any, resolve: any) {
       path = node.data.path
     }
     const entries: any = await connectionStore.fetchFSList(path)
+    console.log('[FBD-DEBUG] loadTreeNode path:', path, 'entries:', entries.map((e: any) => ({ name: e.name, index_state: e.index_state })))
     const arr = Array.isArray(entries) ? entries : []
     arr.sort((a: any, b: any) => {
       if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
       return a.name.localeCompare(b.name)
     })
     const children = arr.map((e: any) => ({ ...e, isLeaf: !e.is_dir }))
+
+    // 从 manifest 缓存合并索引状态（确保节点图标正确）
+    for (const child of children) {
+      const st = manifestMap.value[child.path]
+      if (st) child.index_state = st
+    }
+    console.log('[FBD-DEBUG] loadTreeNode children after merge:', children.map((c: any) => ({ name: c.name, index_state: c.index_state })))
 
     if (pendingCreate && pendingCreate.parentPath === path) {
       children.unshift(pendingCreate.phantom)
@@ -137,17 +201,19 @@ async function handleIndexCtx() {
   if (!projectDir) { ElMessage.warning('No active project directory'); closeCtxMenu(); return }
   if (st === 'add') {
     try {
-      await connectionStore.addToManifest(projectDir, [data.path])
+      await connectionStore.addToIndexQueue(projectDir, [data.path])
       ElMessage.success('Added to index: ' + data.name)
       data.index_state = 'pending'
+      await refreshManifestMap()
     } catch (err: any) {
       ElMessage.error('Index error: ' + (err?.message || ''))
     }
   } else {
     try {
-      await connectionStore.removeFromManifest(projectDir, [data.path])
+      await connectionStore.removeFromIndexQueue(projectDir, [data.path])
       ElMessage.success('Removed from index: ' + data.name)
       data.index_state = 'unindexed'
+      await refreshManifestMap()
     } catch (err: any) {
       ElMessage.error('Remove error: ' + (err?.message || ''))
     }
@@ -380,19 +446,24 @@ async function handleIndexClick(data: any) {
   if (data._phantom) return
   const projectDir = sessionStore.activeSession?.project_dir
   if (!projectDir) { ElMessage.warning('No active project directory'); return }
+  console.log('[FBD-DEBUG] handleIndexClick data:', { name: data.name, path: data.path, index_state: data.index_state })
   if (data.index_state === 'unindexed') {
     try {
-      await connectionStore.addToManifest(projectDir, [data.path])
+      await connectionStore.addToIndexQueue(projectDir, [data.path])
       ElMessage.success('Added to index: ' + data.name)
       data.index_state = 'pending'
+      console.log('[FBD-DEBUG] handleIndexClick add done, refreshing manifest')
+      await refreshManifestMap()
     } catch (err: any) {
       ElMessage.error('Add to index error: ' + (err?.message || ''))
     }
   } else if (data.index_state === 'pending' || data.index_state === 'indexed') {
     try {
-      await connectionStore.removeFromManifest(projectDir, [data.path])
+      await connectionStore.removeFromIndexQueue(projectDir, [data.path])
       ElMessage.success('Removed from index: ' + data.name)
       data.index_state = 'unindexed'
+      console.log('[FBD-DEBUG] handleIndexClick remove done, refreshing manifest')
+      await refreshManifestMap()
     } catch (err: any) {
       ElMessage.error('Remove error: ' + (err?.message || ''))
     }
@@ -427,9 +498,14 @@ watch(() => props.visible, (val) => {
           <span>文件浏览器</span>
         </div>
         <div class="drawer-actions">
-          <el-button text circle @click="refreshTree" :title="t('common.refresh')">
+          <button class="action-btn" @click="handleOpenKB" title="知识库">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg>
+          </button>
+          <button class="action-btn" @click="refreshTree" :title="t('common.refresh')">
             <el-icon><RefreshRight /></el-icon>
-          </el-button>
+          </button>
         </div>
       </div>
     </template>
@@ -533,6 +609,8 @@ watch(() => props.visible, (val) => {
         </div>
       </div>
     </Transition>
+    <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="refreshManifestMap()" />
+    <EntityTagsDialog :visible="showEntityTagDialog" @update:visible="showEntityTagDialog = $event" />
   </el-drawer>
 </template>
 
@@ -555,7 +633,26 @@ watch(() => props.visible, (val) => {
 
 .drawer-actions {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 2px;
+}
+
+.action-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.action-btn:hover {
+  color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.08);
+}
+.action-btn svg {
+  display: block;
 }
 
 .tree-container {
@@ -584,6 +681,15 @@ watch(() => props.visible, (val) => {
 .fe-tree :deep(.el-tree-node.is-current > .el-tree-node__content) {
   background-color: rgba(6,182,212,.08) !important;
   border-left-color: var(--accent-cyan) !important;
+}
+
+.fe-tree :deep(.el-tree-node:focus > .el-tree-node__content) {
+  background-color: transparent !important;
+}
+
+.fe-tree :deep(.el-tree-node__content:focus-visible) {
+  outline: none !important;
+  background-color: transparent !important;
 }
 
 .fe-tree :deep(.el-tree-node__expand-icon) {

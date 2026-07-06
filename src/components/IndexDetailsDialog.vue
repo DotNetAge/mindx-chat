@@ -34,7 +34,7 @@ async function fetchManifest() {
   if (!projectDir) return
   manifestLoading.value = true
   try {
-    const result = await connectionStore.getManifest(projectDir)
+    const result = await connectionStore.getIndexQueue(projectDir)
     manifestData.value = result
   } catch (err: any) {
     console.warn('[IndexDetails] Failed to fetch manifest:', err)
@@ -227,23 +227,44 @@ async function handleFileAction(row: any) {
   try {
     if (row.state === 'pending') {
       // Remove from manifest
-      await connectionStore.removeFromManifest(projectDir, [row.path])
+      await connectionStore.removeFromIndexQueue(projectDir, [row.path])
       ElMessage.success('已从清单删除: ' + basename(row.path))
     } else if (row.state === 'error') {
       // Retry: remove and re-add to put it back in queue
-      await connectionStore.removeFromManifest(projectDir, [row.path])
-      await connectionStore.addToManifest(projectDir, [row.path])
+      await connectionStore.removeFromIndexQueue(projectDir, [row.path])
+      await connectionStore.addToIndexQueue(projectDir, [row.path])
       ElMessage.success('已重新加入队列: ' + basename(row.path))
     } else if (row.state === 'done') {
       // Re-index: remove and re-add
-      await connectionStore.removeFromManifest(projectDir, [row.path])
-      await connectionStore.addToManifest(projectDir, [row.path])
+      await connectionStore.removeFromIndexQueue(projectDir, [row.path])
+      await connectionStore.addToIndexQueue(projectDir, [row.path])
       ElMessage.success('已重新加入队列: ' + basename(row.path))
     }
     await fetchManifest()
     emit('refreshed')
   } catch (err: any) {
     ElMessage.error('操作失败: ' + (err?.message || ''))
+  } finally {
+    operating.value = { ...operating.value, [opKey]: false }
+  }
+}
+
+/** 独立索引单个文件（不触发 Region 更新） */
+async function handleIndexSingleFile(row: any) {
+  const opKey = 'idx:' + row.path
+  if (operating.value[opKey]) return
+  const projectDir = activeProjectDir.value
+  if (!projectDir) return
+
+  operating.value = { ...operating.value, [opKey]: true }
+  try {
+    const absPath = projectDir + '/' + row.path
+    await connectionStore.indexSingleFile(absPath, row.state === 'done')
+    ElMessage.success('已索引: ' + basename(row.path))
+    await fetchManifest()
+    emit('refreshed')
+  } catch (err: any) {
+    ElMessage.error('索引失败: ' + (err?.message || ''))
   } finally {
     operating.value = { ...operating.value, [opKey]: false }
   }
@@ -257,11 +278,11 @@ async function handlePauseResume() {
     if (!projectDir) { ElMessage.warning('No active project directory'); return }
 
     if (manifestData.value?.processing) {
-      await connectionStore.stopManifestProcessing(projectDir)
+      await connectionStore.stopIndexProcessing(projectDir)
       manifestData.value.processing = false
       ElMessage.success('已暂停')
     } else {
-      await connectionStore.startManifestProcessing(projectDir)
+      await connectionStore.startIndexProcessing(projectDir)
       manifestData.value.processing = true
       ElMessage.success('已恢复')
     }
@@ -340,6 +361,28 @@ async function handlePauseResume() {
                   :loading="!!operating[row.path]"
                   :icon="row.state === 'pending' ? Close : RefreshRight"
                   @click="handleFileAction(row)"
+                  class="action-btn"
+                />
+              </ElTooltip>
+            </template>
+          </ElTableColumn>
+
+          <!-- Index now column -->
+          <ElTableColumn label="索引" width="52" align="center">
+            <template #default="{ row }">
+              <ElTooltip
+                v-if="row.state !== 'processing'"
+                content="立即索引"
+                placement="left"
+                :show-after="300"
+              >
+                <ElButton
+                  size="small"
+                  circle
+                  type="primary"
+                  :loading="!!operating['idx:' + row.path]"
+                  :icon="CaretRight"
+                  @click="handleIndexSingleFile(row)"
                   class="action-btn"
                 />
               </ElTooltip>

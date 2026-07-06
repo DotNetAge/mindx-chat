@@ -22,7 +22,10 @@ import { useScheduleStore } from '../stores/scheduleStore'
 const graphStore = useGraphStore()
 const scheduleStore = useScheduleStore()
 
-function openGraphViewer() { graphStore.open() }
+function openGraphViewer() {
+  const sessionStore = useSessionStore()
+  graphStore.open(sessionStore.activeSession?.project_dir || undefined)
+}
 
 // ── Header clock ──
 const now = ref(new Date())
@@ -591,9 +594,11 @@ function logCurrentMessages(messages: any[]) {
         <button class="nav-pill kg-btn" @click="openGraphViewer" :title="t('kgViewer.title')">
           {{ t('kgViewer.title') }}
         </button>
-        <el-button text circle class="file-browser-btn" @click="toggleFileBrowser" title="文件浏览器">
-          <el-icon><FolderOpened /></el-icon>
-        </el-button>
+        <button class="action-btn file-browser-btn" @click="toggleFileBrowser" title="文件浏览器">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+        </button>
         <span class="header-clock" :title="now.toLocaleString()" @click="openSchedule">
           {{ headerDate }} / {{ headerTime }}
         </span>
@@ -1148,7 +1153,16 @@ function logCurrentMessages(messages: any[]) {
 }
 
 .action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
   color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
   transition: all 0.2s ease;
 }
 

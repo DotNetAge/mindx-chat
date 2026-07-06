@@ -10,7 +10,9 @@ import { useFileExplorerStore } from '../stores/fileExplorerStore'
 import { FolderOpened, Document, Loading, Monitor } from '@element-plus/icons-vue'
 import LogDrawer from './LogDrawer.vue'
 import IndexDetailsDialog from './IndexDetailsDialog.vue'
+import EntityTagsDialog from './EntityTagsDialog.vue'
 import TerminalDrawer from './TerminalDrawer.vue'
+import { getMindXClient } from '../services/websocket'
 
 const { t } = useI18n()
 const connectionStore = useConnectionStore()
@@ -75,6 +77,26 @@ const updateLabel = computed(() => {
 
 const indexingState = computed(() => connectionStore.indexingState)
 const showIndexDialog = ref(false)
+const showEntityTagDialog = ref(false)
+
+async function handleOpenKB() {
+  // Check if entity tags are configured
+  try {
+    const client = getMindXClient()
+    if (!client) {
+      showIndexDialog.value = true
+      return
+    }
+    const result = await client.call<{ types: any[] }>('entity_tags.get', {})
+    if (result?.types && result.types.length > 0) {
+      showIndexDialog.value = true
+    } else {
+      showEntityTagDialog.value = true
+    }
+  } catch {
+    showIndexDialog.value = true
+  }
+}
 
 // ── Manifest data for progress bar ──
 const manifestData = ref<any>(null)
@@ -85,7 +107,7 @@ async function fetchManifest() {
   if (!projectDir) return
   manifestLoading.value = true
   try {
-    manifestData.value = await connectionStore.getManifest(projectDir)
+    manifestData.value = await connectionStore.getIndexQueue(projectDir)
   } catch (err: any) {
     console.warn('[StatusBar] Failed to fetch manifest:', err)
   } finally {
@@ -213,7 +235,7 @@ function handleOpenAbout() {
         <ElTooltip content="打开知识库整理服务" placement="top" :show-after="400">
           <button
             class="kb-label-btn"
-            @click="showIndexDialog = true"
+            @click="handleOpenKB"
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
@@ -238,6 +260,7 @@ function handleOpenAbout() {
         </div>
       </div>
       <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="fetchManifest()" />
+      <EntityTagsDialog :visible="showEntityTagDialog" @update:visible="showEntityTagDialog = $event" />
     </div>
 
     <div class="status-right">

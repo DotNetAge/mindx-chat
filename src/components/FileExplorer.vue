@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElTooltip } from 'element-plus'
 import {
@@ -21,6 +21,38 @@ const sessionStore = useSessionStore()
 const store = useFileExplorerStore()
 const { md, renderMermaidInRoot } = useMarkdown()
 const editorPrefs = useEditorPreferences()
+
+// ── Manifest 路径→状态 缓存（用于树节点索引图标）──
+const manifestMap = ref<Record<string, string>>({})
+
+async function refreshManifestMap() {
+  const projectDir = sessionStore.activeSession?.project_dir
+  if (!projectDir) { manifestMap.value = {}; return }
+  try {
+    const data = await connectionStore.getIndexQueue(projectDir)
+    console.log('[FE-DEBUG] refreshManifestMap raw:', JSON.stringify(data?.files?.slice(0, 10)))
+    const map: Record<string, string> = {}
+    if (data?.files) {
+      for (const f of data.files) {
+        // manifest 返回的路径可能不带前导 /，统一转为绝对路径以匹配 fs.list
+        const absPath = f.path.startsWith('/') ? f.path : '/' + f.path
+        if (f.state === 'done') map[absPath] = 'indexed'
+        else if (f.state === 'pending') map[absPath] = 'pending'
+        else if (f.state === 'processing') map[absPath] = 'indexing'
+      }
+    }
+    manifestMap.value = map
+    console.log('[FE-DEBUG] refreshManifestMap built map keys:', Object.keys(map).length, 'sample:', Object.keys(map)[0])
+  } catch {
+    manifestMap.value = {}
+  }
+}
+
+// 会话切换时刷新 manifest 缓存
+watch(() => sessionStore.activeSession?.project_dir, () => {
+  refreshManifestMap()
+})
+onMounted(() => { refreshManifestMap() })
 
 // ── Markdown 预览（Mermaid）──
 const mdPreviewRef = ref<HTMLElement | null>(null)
@@ -87,12 +119,20 @@ async function loadTreeNode(node: any, resolve: any) {
       path = node.data.path
     }
     const entries: any = await connectionStore.fetchFSList(path)
+    console.log('[FE-DEBUG] loadTreeNode path:', path, 'entries:', entries.map((e: any) => ({ name: e.name, index_state: e.index_state })))
     const arr = Array.isArray(entries) ? entries : []
     arr.sort((a: any, b: any) => {
       if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
       return a.name.localeCompare(b.name)
     })
     const children = arr.map((e: any) => ({ ...e, isLeaf: !e.is_dir }))
+
+    // 从 manifest 缓存合并索引状态（确保节点图标正确）
+    for (const child of children) {
+      const st = manifestMap.value[child.path]
+      if (st) child.index_state = st
+    }
+    console.log('[FE-DEBUG] loadTreeNode children after merge:', children.map((c: any) => ({ name: c.name, index_state: c.index_state })))
 
     // 如果有待创建的 phantom 节点，注入到最前面
     if (pendingCreate && pendingCreate.parentPath === path) {
@@ -171,17 +211,19 @@ async function handleIndexCtx() {
   if (!projectDir) { ElMessage.warning('No active project directory'); closeCtxMenu(); return }
   if (st === 'add') {
     try {
-      await connectionStore.addToManifest(projectDir, [data.path])
+      await connectionStore.addToIndexQueue(projectDir, [data.path])
       ElMessage.success(t('fileExplorer.addedToIndex') + ': ' + data.name)
       data.index_state = 'pending'
+      await refreshManifestMap()
     } catch (err: any) {
       ElMessage.error(t('fileExplorer.indexError') + ': ' + (err?.message || ''))
     }
   } else {
     try {
-      await connectionStore.removeFromManifest(projectDir, [data.path])
+      await connectionStore.removeFromIndexQueue(projectDir, [data.path])
       ElMessage.success('Removed from index: ' + data.name)
       data.index_state = 'unindexed'
+      await refreshManifestMap()
     } catch (err: any) {
       ElMessage.error('Remove error: ' + (err?.message || ''))
     }
@@ -513,22 +555,27 @@ async function handleIndexClick(data: any) {
   if (data._phantom) return
   const projectDir = sessionStore.activeSession?.project_dir
   if (!projectDir) { ElMessage.warning('No active project directory'); return }
+  console.log('[FE-DEBUG] handleIndexClick data:', { name: data.name, path: data.path, index_state: data.index_state })
   if (data.index_state === 'unindexed') {
     try {
-      await connectionStore.addToManifest(projectDir, [data.path])
+      await connectionStore.addToIndexQueue(projectDir, [data.path])
       ElMessage.success(t('fileExplorer.addedToIndex') + ': ' + data.name)
       const node = treeRef.value?.getNode(data.path)
       if (node) { node.data.index_state = 'pending' }
+      console.log('[FE-DEBUG] handleIndexClick add done, refreshing manifest + tree')
+      await refreshManifestMap()
       refreshTree(getParentPath(data.path))
     } catch (err: any) {
       ElMessage.error(t('fileExplorer.indexError') + ': ' + (err?.message || ''))
     }
   } else if (data.index_state === 'pending' || data.index_state === 'indexed') {
     try {
-      await connectionStore.removeFromManifest(projectDir, [data.path])
+      await connectionStore.removeFromIndexQueue(projectDir, [data.path])
       ElMessage.success('Removed from index: ' + data.name)
       const node = treeRef.value?.getNode(data.path)
       if (node) { node.data.index_state = 'unindexed' }
+      console.log('[FE-DEBUG] handleIndexClick remove done, refreshing manifest + tree')
+      await refreshManifestMap()
       refreshTree(getParentPath(data.path))
     } catch (err: any) {
       ElMessage.error('Remove error: ' + (err?.message || ''))
@@ -987,6 +1034,13 @@ async function handleIndexClick(data: any) {
 .fe-tree :deep(.el-tree-node.is-current > .el-tree-node__content) {
   background-color: rgba(6,182,212,.08) !important;
   border-left-color: var(--accent-cyan) !important;
+}
+.fe-tree :deep(.el-tree-node:focus > .el-tree-node__content) {
+  background-color: transparent !important;
+}
+.fe-tree :deep(.el-tree-node__content:focus-visible) {
+  outline: none !important;
+  background-color: transparent !important;
 }
 .fe-tree :deep(.el-tree-node__expand-icon) {
   color: var(--text-muted);

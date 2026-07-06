@@ -1,15 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessageBox, ElMessage } from 'element-plus'
 import {
   Document, Collection, DataAnalysis, Search,
   RefreshLeft,
-  Link, FolderOpened
 } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
-import { filewatchRemove } from '../services/graphApi'
-import type { DirIndexState } from '../services/graphApi'
 import { useMarkdown } from '../composables/useMarkdown'
 import { getChineseLabel, getEntityColor } from '../types/entityCategories'
 import TreeSearchPanel from './TreeSearchPanel.vue'
@@ -65,48 +61,8 @@ function onChunkPageChange(page: number) {
   }
 }
 
-const indexedCount = computed(() => {
-  const idx = store.filewatchStatus?.index_state
-  if (!idx) return 0
-  return Object.values(idx).reduce((sum, s) => sum + s.indexed_files, 0)
-})
-const unindexedCount = computed(() => {
-  const idx = store.filewatchStatus?.index_state
-  if (!idx) return 0
-  const total = Object.values(idx).reduce((sum, s) => sum + s.total_files, 0)
-  const indexed = Object.values(idx).reduce((sum, s) => sum + s.indexed_files, 0)
-  return total - indexed
-})
-
-function formatIndexState(st: DirIndexState): string {
-  switch (st.state) {
-    case 'pending': return t('kgViewer.indexStatePending')
-    case 'indexing': return `${t('kgViewer.indexStateIndexing')} ${st.indexed_files}/${st.total_files}`
-    case 'completed': return t('kgViewer.indexStateCompleted')
-    case 'failed': return `${t('kgViewer.indexStateFailed')}: ${st.error || ''}`
-    default: return st.state
-  }
-}
-
-function indexStateTitle(st: DirIndexState): string {
-  const lines: string[] = ['']
-  if (st.started_at) {
-    lines.push(t('kgViewer.indexStateStartedAt') + ' ' + formatUnixTs(st.started_at))
-  }
-  if (st.completed_at) {
-    lines.push(t('kgViewer.indexStateCompletedAt') + ' ' + formatUnixTs(st.completed_at))
-  }
-  return lines.join('\n')
-}
-
-function formatUnixTs(ts: number): string {
-  const d = new Date(ts * 1000)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
 const searchInput = ref('')
-const removingDir = ref('')
+
 
 const tabs = [
   { key: 'documents' as const, icon: Document, label: t('kgViewer.documents') },
@@ -128,37 +84,6 @@ watch(searchInput, (val) => {
   if (!val) store.clearSearch()
 })
 
-// ── Watch directory management ──
-
-async function handleRemoveWatch(dir: string) {
-  console.log('[GraphSidebar] handleRemoveWatch called:', dir)
-  try {
-    await ElMessageBox.confirm(
-      t('kgViewer.removeWatchConfirm', { dir }),
-      t('kgViewer.removeWatchTitle'),
-      { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning' }
-    )
-    console.log('[GraphSidebar] user confirmed delete')
-  } catch (e) {
-    console.log('[GraphSidebar] user cancelled or dismissed:', e)
-    return // user cancelled
-  }
-
-  removingDir.value = dir
-  try {
-    console.log('[GraphSidebar] calling filewatchRemove RPC...')
-    const result = await filewatchRemove(dir)
-    console.log('[GraphSidebar] RPC success:', result)
-    ElMessage.success(t('kgViewer.removeWatchSuccess'))
-    await store.refreshFilewatchStatus()
-  } catch (e: any) {
-    console.error('[GraphSidebar] RPC failed:', e)
-    ElMessage.error(t('kgViewer.removeWatchFailed') + (e.message ? `: ${e.message}` : ''))
-  } finally {
-    removingDir.value = ''
-  }
-}
-
 // ── Helpers ──
 
 function shortenDocId(id: string): string {
@@ -177,12 +102,6 @@ function relationLabel(type: string): string {
   return label !== key ? label : type
 }
 
-/** Extract folder name (basename) from an absolute path */
-function getDirName(fullPath: string): string {
-  const parts = fullPath.replace(/\/+$/, '').split('/')
-  return parts[parts.length - 1] || fullPath
-}
-
 /** Click entity label: filter graph + open table tab (don't switch to it) */
 function handleEntityClick(item: { label: string; count: number }) {
   // Toggle label filter on graph
@@ -196,7 +115,6 @@ function handleEntityClick(item: { label: string; count: number }) {
 }
 
 onMounted(() => {
-  store.refreshFilewatchStatus()
   store.loadDefaultChunks()
 })
 
@@ -415,50 +333,6 @@ watch(() => store.defaultChunks, (chunks) => {
             <span class="stat-value">{{ store.edges.length }}</span>
             <span class="stat-label">{{ t('kgViewer.loadedEdges') }}</span>
           </div>
-          <div class="stat-card">
-            <span class="stat-value">{{ indexedCount.toLocaleString() }}</span>
-            <span class="stat-label">{{ t('kgViewer.indexedCount') }}</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-value">{{ unindexedCount.toLocaleString() }}</span>
-            <span class="stat-label">{{ t('kgViewer.unindexedCount') }}</span>
-          </div>
-        </div>
-
-        <!-- Watched directories -->
-        <div v-if="store.filewatchStatus" class="stat-section">
-          <h4>{{ t('kgViewer.watchedDirs') }}</h4>
-          <ul v-if="store.filewatchStatus.watched?.length" class="watch-dir-list">
-            <li v-for="dir in store.filewatchStatus.watched" :key="dir" class="watch-dir-item" :title="dir">
-              <el-icon :size="13"><FolderOpened /></el-icon>
-              <span class="watch-dir-name">{{ getDirName(dir) }}</span>
-              <span
-                v-if="store.filewatchStatus.index_state?.[dir]"
-                class="watch-dir-state"
-                :class="'state-' + store.filewatchStatus.index_state[dir].state"
-                :title="indexStateTitle(store.filewatchStatus.index_state[dir])"
-              >
-                {{ formatIndexState(store.filewatchStatus.index_state[dir]) }}
-              </span>
-              <button
-                class="watch-dir-remove-btn"
-                :class="{ 'is-loading': removingDir === dir }"
-                :disabled="removingDir === dir"
-                @click.stop="handleRemoveWatch(dir)"
-              >
-                <svg v-if="removingDir !== dir" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                </svg>
-                <svg v-else class="remove-spinning" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
-                  <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
-                  <line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>
-                  <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
-                </svg>
-              </button>
-            </li>
-          </ul>
-          <div v-else class="watch-dir-empty">{{ t('kgViewer.noWatchedDirs') }}</div>
         </div>
 
         <div v-if="store.levelDistribution.length" class="stat-section">
@@ -849,100 +723,6 @@ watch(() => store.defaultChunks, (chunks) => {
 .rel-count {
   font-family: 'JetBrains Mono', monospace;
   color: var(--text-muted); font-size: 11px;
-}
-
-/* ── Watched directories ── */
-
-.watch-dir-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.watch-dir-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  border-radius: 5px;
-  cursor: default;
-  transition: background .12s;
-}
-.watch-dir-item:hover {
-  background: rgba(255,255,255,.05);
-  color: var(--text-primary);
-}
-.watch-dir-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-.watch-dir-state {
-  flex-shrink: 0;
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 8px;
-  white-space: nowrap;
-}
-.watch-dir-state.state-pending {
-  color: #f59e0b;
-  background: rgba(245,158,11,.12);
-}
-.watch-dir-state.state-indexing {
-  color: #3b82f6;
-  background: rgba(59,130,246,.12);
-}
-.watch-dir-state.state-completed {
-  color: #10b981;
-  background: rgba(16,185,129,.12);
-}
-.watch-dir-state.state-failed {
-  color: #ef4444;
-  background: rgba(239,68,68,.12);
-}
-.watch-dir-remove-btn {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity .15s, background .15s, color .15s;
-  background: transparent;
-  color: var(--text-muted);
-}
-.watch-dir-item:hover .watch-dir-remove-btn {
-  opacity: 1;
-}
-.watch-dir-remove-btn:hover:not(:disabled) {
-  color: #ef4444;
-  background: rgba(239,68,68,.12);
-}
-.watch-dir-remove-btn.is-loading,
-.watch-dir-remove-btn:disabled {
-  opacity: 1 !important;
-  color: var(--text-muted) !important;
-  cursor: not-allowed;
-}
-.remove-spinning {
-  animation: remove-spin 1s linear infinite;
-}
-@keyframes remove-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-.watch-dir-empty {
-  padding: 6px 8px;
-  font-size: 12px;
-  color: var(--text-muted);
 }
 
 /* ── Footer ── */

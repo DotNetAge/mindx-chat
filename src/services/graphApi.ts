@@ -236,6 +236,11 @@ export async function listAllEdges(): Promise<GraphEdge[]> {
   return call('graph.list_edges')
 }
 
+/** List nodes and edges limited to a project directory (region) */
+export async function listNodesByRegion(projectDir: string): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+  return call('graph.list_nodes_by_region', { project_dir: projectDir })
+}
+
 /** Paginated chunk list (for document discovery) */
 export async function listChunks(page = 1, pageSize = 200): Promise<ChunksPage> {
   return call('memory.chunks', { page, page_size: pageSize, doc_id: 'all' })

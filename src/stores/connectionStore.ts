@@ -1147,36 +1147,42 @@ export const useConnectionStore = defineStore('connection', {
       return client.call('kb.stats', { project_dir: projectDir })
     },
 
-    // ── Index Manifest RPC ──
+    // ── Index Queue RPC ──
 
-    async getManifest(projectDir: string): Promise<any> {
+    async getIndexQueue(projectDir: string): Promise<any> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      return client.call('kb.manifest.get', { project_dir: projectDir })
+      return client.call('kb.index.list', { project_dir: projectDir })
     },
 
-    async addToManifest(projectDir: string, files: string[]): Promise<any> {
+    async addToIndexQueue(projectDir: string, files: string[]): Promise<any> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      return client.call('kb.manifest.add', { project_dir: projectDir, files })
+      return client.call('kb.index.add', { project_dir: projectDir, files })
     },
 
-    async removeFromManifest(projectDir: string, files: string[]): Promise<any> {
+    async removeFromIndexQueue(projectDir: string, files: string[]): Promise<any> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      return client.call('kb.manifest.remove', { project_dir: projectDir, files })
+      return client.call('kb.index.remove', { project_dir: projectDir, files })
     },
 
-    async startManifestProcessing(projectDir: string): Promise<any> {
+    async startIndexProcessing(projectDir: string): Promise<any> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      return client.call('kb.manifest.start', { project_dir: projectDir })
+      return client.call('kb.index.start', { project_dir: projectDir })
     },
 
-    async stopManifestProcessing(projectDir: string): Promise<any> {
+    async stopIndexProcessing(projectDir: string): Promise<any> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      return client.call('kb.manifest.stop', { project_dir: projectDir })
+      return client.call('kb.index.stop', { project_dir: projectDir })
+    },
+
+    async indexSingleFile(path: string, force = false): Promise<any> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('kb.index', { path, force })
     }
   }
 })
