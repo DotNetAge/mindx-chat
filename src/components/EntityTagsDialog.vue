@@ -11,6 +11,7 @@ import SchemaEditorDialog from './SchemaEditorDialog.vue'
 
 const props = defineProps<{
   visible: boolean
+  projectDir?: string
 }>()
 
 const emit = defineEmits(['update:visible'])
@@ -120,7 +121,7 @@ async function handleSave() {
       }
     }
 
-    await client.call('entity_tags.save', { types: selectedTypes })
+    await client.call('entity_tags.save', { types: selectedTypes, projectDir: props.projectDir })
     ElMessage.success(t('entityTags.saveSuccess', { n: selectedTypes.length }))
     emit('update:visible', false)
   } catch (err: any) {
@@ -156,6 +157,15 @@ watch(() => props.visible, (val) => {
             {{ t('entityTags.title') }}
           </h2>
           <span class="header-hint">{{ t('entityTags.hint') }}</span>
+          <el-alert
+            v-if="props.projectDir"
+            :title="props.projectDir"
+            type="success"
+            show-icon
+            :closable="false"
+            effect="dark"
+            class="header-region-alert"
+          />
         </div>
       </template>
 
@@ -267,6 +277,22 @@ watch(() => props.visible, (val) => {
   font-size: 12px;
   color: #64748b;
   font-weight: 400;
+}
+
+.header-region-alert {
+  margin-top: 4px;
+}
+.header-region-alert :deep(.el-alert__content) {
+  overflow: hidden;
+}
+.header-region-alert :deep(.el-alert__title) {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  direction: rtl;
+  text-align: left;
 }
 
 .dialog-body {

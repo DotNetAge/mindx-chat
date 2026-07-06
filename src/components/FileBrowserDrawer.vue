@@ -98,6 +98,10 @@ async function handleOpenKB() {
   }
 }
 
+function handleOpenEntityTags() {
+  showEntityTagDialog.value = true
+}
+
 // ── 目录树（懒加载）──
 const treeRef = ref<any>(null)
 const treeKey = ref(0)
@@ -151,7 +155,11 @@ async function loadTreeNode(node: any, resolve: any) {
   }
 }
 
+// ── 当前选中节点路径（用于知识标签配置等操作）──
+const selectedNodePath = ref('')
+
 async function handleTreeNodeClick(data: any) {
+  selectedNodePath.value = data.path
   if (!data.is_dir && !data._phantom) {
     try {
       fileExplorerStore.pendingSelectPath = data.path
@@ -476,6 +484,7 @@ function onDocumentClick() {
 
 watch(() => props.visible, (val) => {
   if (val) {
+    selectedNodePath.value = props.projectDir || connectionStore.currentProjectDir || sessionStore.activeSession?.project_dir || ''
     treeKey.value++
   }
 })
@@ -498,6 +507,12 @@ watch(() => props.visible, (val) => {
           <span>文件浏览器</span>
         </div>
         <div class="drawer-actions">
+          <button class="action-btn" @click="handleOpenEntityTags" title="知识标签配置">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2z"/>
+              <path d="M7 7h.01"/>
+            </svg>
+          </button>
           <button class="action-btn" @click="handleOpenKB" title="知识库">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
@@ -610,7 +625,7 @@ watch(() => props.visible, (val) => {
       </div>
     </Transition>
     <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="refreshManifestMap()" />
-    <EntityTagsDialog :visible="showEntityTagDialog" @update:visible="showEntityTagDialog = $event" />
+    <EntityTagsDialog :visible="showEntityTagDialog" :project-dir="selectedNodePath || sessionStore.activeSession?.project_dir" @update:visible="showEntityTagDialog = $event" />
   </el-drawer>
 </template>
 
