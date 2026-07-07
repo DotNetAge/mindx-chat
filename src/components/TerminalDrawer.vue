@@ -42,7 +42,6 @@ import '@xterm/xterm/css/xterm.css'
 import { getMindXClient } from '../services/websocket'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useSessionStore } from '../stores/sessionStore'
-import { useGraphStore } from '../stores/graphStore'
 
 const props = defineProps<{
   visible: boolean
@@ -55,8 +54,6 @@ const emit = defineEmits<{
 
 const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
-const graphStore = useGraphStore()
-
 // Resolve working directory with multiple fallbacks
 const resolvedCwd = computed(() => {
   // 1. Explicit prop from parent (StatusBar's activeProjectDir)
@@ -64,9 +61,9 @@ const resolvedCwd = computed(() => {
   // 2. Active session's project_dir
   const active = sessionStore.sessions.find(s => s.session_id === sessionStore.activeSessionId)
   if (active?.project_dir) return active.project_dir
-  // 3. First watched directory from filewatch
-  const watched = graphStore.filewatchStatus?.watched
-  if (watched && watched.length > 0) return watched[0]
+  // 3. First project directory from active session
+  const projectDirFromSession = sessionStore.activeSession?.project_dir
+  if (projectDirFromSession) return projectDirFromSession
   // 4. Fallback: current working directory of daemon process
   return ''
 })
@@ -216,7 +213,6 @@ async function initTerminal() {
   // Start PTY session on backend
   try {
     const cwd = resolvedCwd.value
-    console.log('[Terminal] Starting PTY with cwd:', cwd)
     const result = await client.call<{ session_id: string }>('terminal.start', { cwd: cwd || '' })
     sessionId = result.session_id
     connected.value = true

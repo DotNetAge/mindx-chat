@@ -268,8 +268,7 @@ export const useChatStore = defineStore('chat', {
 
     restoreSessionMessages(sessionId: string, serverMessages: SessionMessage[]) {
       if (!serverMessages || serverMessages.length === 0) {
-        console.log('[MindX Chat] restoreSessionMessages: 服务器无消息数据', { sessionId })
-        return
+          return
       }
 
       const restored: ChatMessage[] = []
@@ -336,9 +335,9 @@ export const useChatStore = defineStore('chat', {
               agentName = parsed.agent_name || ''
               taskID = parsed.task_id || ''
             } catch (e) {
-              console.warn('[MindX Chat] restoreSessionMessages: failed to parse SubAgent tool result JSON', e)
+              
             }
-            console.log('[MindX Chat] restoreSessionMessages: detected SubAgent dispatch', { agentName, taskID })
+            
             if (taskID) taskInfoMap[taskID] = { agent_name: agentName, description: toolArgs?.task || '' }
             restored.push({
               id: `restored_tool_${idx}_${msg.timestamp}`,
@@ -552,12 +551,7 @@ export const useChatStore = defineStore('chat', {
         prevTimestamp = msgTimestamp
       }
 
-      console.log('[MindX Chat] restoreSessionMessages:', {
-        sessionId,
-        totalServer: serverMessages.length,
-        totalRestored: restored.length,
-        actionCount: restored.filter(m => m.eventType === 'tool_exec' || m.eventType === 'tool_exec_start' || m.eventType === 'tool_exec_end').length
-      })
+      
 
       // 从 localStorage 恢复 token 数据
       const cachedTokens = localStorage.getItem('mindx_chat_message_tokens')
@@ -669,7 +663,6 @@ export const useChatStore = defineStore('chat', {
       if (connectionStore.canSendMessage) {
         const client = getMindXClient()
         if (client) {
-          console.log('[MindX Chat] Sending message via WebSocket...')
           client.sendMessage(text, targetSessionId)
         }
         this.isProcessing = true
@@ -1129,7 +1122,7 @@ export const useChatStore = defineStore('chat', {
           title: envelope?.title
         })
 
-        console.log('[MindX] Token usage recorded:', { inputTokens, outputTokens, cachedTokens, tokensUsed, cost, total: this.totalTokensUsed })
+        
       }
     },
 
@@ -1174,7 +1167,6 @@ export const useChatStore = defineStore('chat', {
       const msgs = this.messagesBySession[targetSessionId]
       const lastMsg = msgs?.[msgs.length - 1]
       if (lastMsg?.eventType === 'error' && lastMsg?.content === errorContent) {
-        console.log('[ChatStore] Skipped duplicate error message:', errorContent)
         this.isProcessing = false
         return
       }
@@ -1278,16 +1270,7 @@ export const useChatStore = defineStore('chat', {
         eventData: data,
         metadata: { phase: 'subtask_spawned' }
       })
-      console.log('[MindX CHAT DEBUG] handleSubtaskSpawned:', {
-        targetSessionId,
-        activeSessionId: sessionStore.activeSessionId,
-        taskId,
-        agentName,
-        activeSessionMsgsCount: (this.messagesBySession[sessionStore.activeSessionId] || []).length,
-        addedMsgId: msg.id,
-        addedMsgEventType: msg.eventType,
-        eventData: data
-      })
+      
     },
 
     handleSubtaskCompleted(data: any, opts?: { session_id?: string; title?: string }) {
@@ -1310,15 +1293,7 @@ export const useChatStore = defineStore('chat', {
         eventData: data,
         metadata: { phase: 'subtask_completed', success: data?.success }
       })
-      console.log('[MindX CHAT DEBUG] handleSubtaskCompleted:', {
-        targetSessionId,
-        activeSessionId: sessionStore.activeSessionId,
-        taskId,
-        activeSessionMsgsCount: (this.messagesBySession[sessionStore.activeSessionId] || []).length,
-        addedMsgId: msg.id,
-        addedMsgEventType: msg.eventType,
-        eventData: data
-      })
+      
     },
 
     /**

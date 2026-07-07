@@ -321,7 +321,6 @@ async function sendMessage() {
   }
 
   if (!sessionStore.activeSessionId) {
-    console.log('[MindX] No active session, attempting to create one...')
 
     if (!connectionStore.isConnected) {
       ElMessage.warning(t('chat.notConnected'))
@@ -345,7 +344,6 @@ async function sendMessage() {
         return
       }
 
-      console.log('[MindX] Session created:', sessionStore.activeSessionId)
     } catch (err: any) {
       console.error('[MindX] Failed to create session:', err)
       ElMessage.error(t('chat.createSessionFailed', { msg: err?.message || t('common.unknownError') }))
@@ -467,7 +465,6 @@ async function handleFormSubmit(data: Record<string, any>) {
 
   try {
     await connectionStore.respondToAskUser(correlationId, answers)
-    console.log('[MindX] FormView response sent:', { correlationId, answers })
     chatStore.pendingCorrelationId = null
   } catch (err) {
     console.error('[MindX] Failed to send FormView response:', err)
@@ -497,8 +494,6 @@ async function handlePermissionGrant(data: Record<string, any>) {
   try {
     // 1. 调用 execution.resume 将授权存入缓存（兼容旧路径）
     await connectionStore.resumeExecution(sessionId, toolName)
-    console.log('[MindX] Permission granted, execution.resume called:', { sessionId, toolName, remember })
-
     // 2. 清理本地 pending 状态
     chatStore.pendingPermissionToolName = ''
 
@@ -508,7 +503,6 @@ async function handlePermissionGrant(data: Record<string, any>) {
       const magicWord = remember ? 'PermissionAllowSession' : 'PermissionAllow'
       client.sendMessage(magicWord, sessionId)
       chatStore.isProcessing = true
-      console.log('[MindX] Sending permission magic word:', magicWord)
     }
   } catch (err) {
     console.error('[MindX] Failed to grant permission:', err)
@@ -527,7 +521,6 @@ async function handlePermissionDeny(_reason?: string) {
   }
 
   chatStore.pendingPermissionToolName = ''
-  console.log('[MindX] Permission denied (non-blocking, no backend call):', { toolName })
 }
 
 function handleRetry(messageId: string) {
@@ -545,16 +538,7 @@ function handleDismiss(messageId: string) {
   ]
 }
 
-// [DEBUG] Log current messages for subtask debugging
-function logCurrentMessages(messages: any[]) {
-  const subtaskMsgs = messages.filter(m => m.eventType === 'subtask_spawned' || m.eventType === 'subtask_completed')
-  if (subtaskMsgs.length > 0) {
-    console.log('[MindX CHAT DEBUG] ChatArea rendering messages with subtask events:', {
-      totalMessages: messages.length,
-      subtaskCount: subtaskMsgs.length,
-      subtaskMessages: subtaskMsgs.map(m => ({ id: m.id, eventType: m.eventType, eventData: m.eventData }))
-    })
-  }
+function logCurrentMessages(_messages: any[]) {
   return ''
 }
 </script>

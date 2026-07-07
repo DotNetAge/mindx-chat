@@ -227,7 +227,6 @@ function handleClose() {
 
 function handleEventClick(info: any) {
   const props = info.event.extendedProps
-  console.log('[Schedule] Event clicked:', info.event.title, props)
 }
 
 watch(() => store.visible, (v) => {

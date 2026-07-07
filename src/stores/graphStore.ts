@@ -4,7 +4,7 @@ import { useConnectionStore } from './connectionStore'
 import { buildSearchTree, type TreeNode } from '../utils/treeBuilder'
 
 // Re-export types for convenience
-export type { GraphNode, GraphEdge, LabelCount, RelationTypeCount, DocChunk, SearchResult, FileStateResult, FilewatchStatus, MultiHopResult, HopNode, HopEdge } from '../services/graphApi'
+export type { GraphNode, GraphEdge, LabelCount, RelationTypeCount, DocChunk, SearchResult, FileStateResult, MultiHopResult, HopNode, HopEdge } from '../services/graphApi'
 export type { TreeNode } from '../utils/treeBuilder'
 
 // ── Category color mapping (aligned with theme CSS vars) ──
@@ -100,7 +100,6 @@ export interface GraphViewerState {
   showOrphanNodes: boolean
 
   // File index status
-  filewatchStatus: api.FilewatchStatus | null
   fileStates: api.FileStateResult | null
   fileStatesLoading: boolean
 
@@ -147,7 +146,6 @@ export const useGraphStore = defineStore('graph', {
     detailChunks: [],
     detailLoading: false,
     showOrphanNodes: false,
-    filewatchStatus: null,
     fileStates: null,
     fileStatesLoading: false,
     currentProjectDir: null,
@@ -269,7 +267,6 @@ export const useGraphStore = defineStore('graph', {
       this.showOrphanNodes = false
       this.multiHopResult = null
       this.multiHopRootId = null
-      this.filewatchStatus = null
       this.activeFilePath = null
       this.fileStates = null
       this.mainTabs = [{ id: 'graph', type: 'graph', label: '图谱', closable: false }]
@@ -343,7 +340,6 @@ export const useGraphStore = defineStore('graph', {
           const result = await api.listNodesByRegion(pd)
           nodes = result.nodes
           edges = result.edges
-          console.log('[GraphStore] loaded by region, projectDir:', pd, 'nodes:', nodes.length, 'edges:', edges.length)
         } else {
           const [allNodes, allEdges] = await Promise.all([
             api.listAllNodes(),
@@ -351,7 +347,6 @@ export const useGraphStore = defineStore('graph', {
           ])
           nodes = allNodes
           edges = allEdges
-          console.log('[GraphStore] loaded global, nodes:', nodes.length, 'edges:', edges.length)
         }
 
         this.nodes = nodes
@@ -397,7 +392,6 @@ export const useGraphStore = defineStore('graph', {
         // Discover document IDs from chunks
         try {
           this.docs = await api.discoverDocs()
-          console.log('[GraphStore] docs:', JSON.stringify(this.docs))
         } catch (e) {
           console.warn('[GraphStore] discoverDocs failed:', e)
           this.docs = []
@@ -423,7 +417,6 @@ export const useGraphStore = defineStore('graph', {
       }
       this.graphVisibleNodeIds = visible
       this.graphProgressiveEnabled = true
-      console.log(`[GraphStore] visibility seeded: ${visible.size} nodes`)
     },
 
     /** 展开节点：将其直接子节点加入可见集 */
@@ -495,7 +488,6 @@ export const useGraphStore = defineStore('graph', {
       this.searchLoading = true
       try {
         this.searchResults = await api.kbSearch(query, 10)
-        console.log('[GraphStore] kbSearch results:', JSON.stringify(this.searchResults))
         // 构建搜索树 + 自动展开 Level 0 根节点
         const tree = buildSearchTree(this.searchResults)
         this.searchTree = tree
@@ -574,7 +566,6 @@ export const useGraphStore = defineStore('graph', {
 
     async loadDefaultChunks(page = 1) {
       const pageSize = 20
-      console.log('[GraphStore] loadDefaultChunks called, page=', page, 'pageSize=', pageSize)
       this.defaultChunksLoading = true
       this.chunkPage = page
       try {
@@ -587,38 +578,10 @@ export const useGraphStore = defineStore('graph', {
           filters.push({ key: 'source_file', type: 'prefix', value: conn.currentProjectDir })
         }
 
-        // 调用 kb.chunks RPC 获取原始数据并打印完整结果
-        const rawResult = await api.listKBChunks(page, pageSize, filters)
-        console.log('══════════════════════════════════════════')
-        console.log('[GraphStore] kb.chunks 原始返回:')
-        console.log('  total:     ', rawResult.total)
-        console.log('  page:      ', rawResult.page)
-        console.log('  page_size: ', rawResult.page_size)
-        console.log('  has_more:  ', rawResult.has_more)
-        console.log('  chunks数:  ', rawResult.chunks?.length ?? 0)
-        console.log('══════════════════════════════════════════')
-
-        const chunks = rawResult.chunks ?? []
-        if (chunks.length > 0) {
-          console.log('[GraphStore] --- 前3条 chunk 详情 ---')
-          for (let i = 0; i < Math.min(3, chunks.length); i++) {
-            const c = chunks[i]
-            console.log(`  chunk[${i}]: id=${c.id}, doc_id=${c.doc_id}, content_len=${c.content?.length ?? 0}`)
-            console.log(`    metadata=`, JSON.stringify(c.metadata))
-            console.log(`    chunk_meta=`, JSON.stringify(c.chunk_meta))
-          }
-          if (chunks.length > 3) {
-            console.log(`  ... 还有 ${chunks.length - 3} 条`)
-          }
-        } else {
-          console.warn('[GraphStore] ⚠️ kb.chunks 返回空! chunks 数组为空或 undefined')
-        }
-
         // 转换为 SearchResult 格式并赋值
         const result = await api.listKBChunksAsSearchResults(page, pageSize, filters)
         this.defaultChunks = result.chunks
         this.chunkTotal = result.total
-        console.log('[GraphStore] ✅ defaultChunks 已赋值: count=', this.defaultChunks.length, 'total=', this.chunkTotal)
       } catch (e: any) {
         console.error('[GraphStore] ❌ loadDefaultChunks 异常:', e.message || e)
         console.error('[GraphStack]', e.stack)
@@ -636,7 +599,6 @@ export const useGraphStore = defineStore('graph', {
       this.multiHopRootId = nodeId
       try {
         this.multiHopResult = await api.loadMultiHop(nodeId, depth)
-        console.log('[GraphStore] multiHopResult nodes:', this.multiHopResult.nodes.length, 'edges:', this.multiHopResult.edges.length)
       } catch (e: any) {
         console.warn('[GraphStore] Multi-hop load failed:', e)
         this.multiHopResult = null
@@ -648,40 +610,6 @@ export const useGraphStore = defineStore('graph', {
     clearMultiHop() {
       this.multiHopResult = null
       this.multiHopRootId = null
-    },
-
-    // ── File index control ──
-
-    async refreshFilewatchStatus() {
-      try {
-        this.filewatchStatus = await api.filewatchStatus()
-        console.log('[GraphStore] filewatchStatus:', JSON.stringify(this.filewatchStatus))
-      } catch (e: any) {
-        console.warn('[GraphStore] Failed to get filewatch status:', e)
-        this.filewatchStatus = null
-      }
-    },
-
-    async startFilewatch() {
-      try {
-        const res = await api.filewatchStart()
-        if (res.status === 'started' || res.status === 'already_running') {
-          await this.refreshFilewatchStatus()
-        }
-      } catch (e: any) {
-        console.warn('[GraphStore] Failed to start filewatch:', e)
-      }
-    },
-
-    async stopFilewatch() {
-      try {
-        const res = await api.filewatchStop()
-        if (res.status === 'stopped' || res.status === 'already_stopped') {
-          await this.refreshFilewatchStatus()
-        }
-      } catch (e: any) {
-        console.warn('[GraphStore] Failed to stop filewatch:', e)
-      }
     },
 
     async refreshFileStates(projectDir: string) {

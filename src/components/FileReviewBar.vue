@@ -27,7 +27,6 @@ async function confirmAll() {
   confirming.value = true
   try {
     const confirmed = await connectionStore.confirmFiles(sessionId)
-    console.log('[FileReviewBar] Files confirmed:', confirmed)
     chatStore.pendingFileModifications = []
     ElMessage.success(t('fileReview.confirmed', { count: confirmed.length }))
   } catch (err: any) {
@@ -46,7 +45,6 @@ async function rollbackAll() {
   rollingBack.value = true
   try {
     const rolledBack = await connectionStore.rollbackFiles(sessionId)
-    console.log('[FileReviewBar] Files rolled back:', rolledBack)
     chatStore.pendingFileModifications = []
     ElMessage.success(t('fileReview.rollbackSuccess', { count: rolledBack.length }))
   } catch (err: any) {

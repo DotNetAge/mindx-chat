@@ -210,10 +210,8 @@ function getRequestAreaPath(modelName: string): string {
 }
 
 async function loadData() {
-  console.log('[TOKEN-REPORT-DEBUG] loadData called', { isConnected: connectionStore.isConnected, visible: props.visible })
   if (!connectionStore.isConnected) {
     error.value = t('tokenUsage.connectFirst')
-    console.log('[TOKEN-REPORT-DEBUG] not connected, aborting')
     return
   }
 
@@ -221,11 +219,8 @@ async function loadData() {
   error.value = null
 
   try {
-    console.log('[TOKEN-REPORT-DEBUG] calling fetchTokenUsageMonthly', currentYear.value, currentMonth.value)
     const data = await connectionStore.fetchTokenUsageMonthly(currentYear.value, currentMonth.value)
-    console.log('[TOKEN-REPORT-DEBUG] received data', JSON.stringify(data))
     monthlyData.value = data
-    console.log('[TOKEN-REPORT-DEBUG] monthlyData set', { total_cost: data?.total_cost, total_tokens: data?.total_tokens })
   } catch (err: any) {
     console.error('[TokenUsageReport] Failed to load:', err)
     error.value = err.message || t('common.error')

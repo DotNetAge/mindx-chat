@@ -143,9 +143,7 @@ const displayLines = computed<DisplayLine[]>(() => {
 })
 
 async function loadPage(offset: number): Promise<{ lines: string[]; total: number; returned: number; offset: number; has_more: boolean; path: string; stream: LogStream }> {
-  console.log(`[LogDrawer] 📥 loadPage(offset=${offset}, limit=${PAGE_SIZE}, stream=${currentStream.value})`)
   const res = await connectionStore.fetchLogs(offset, PAGE_SIZE, currentStream.value)
-  console.log(`[LogDrawer] 📥 loadPage response:`, JSON.parse(JSON.stringify(res)))
   return res
 }
 
@@ -162,7 +160,6 @@ async function loadLatest() {
     currentOffset.value = res.returned
     currentPageIndex.value = 0
     hasMore.value = res.has_more
-    console.log(`[LogDrawer] ✅ loadLatest done: total=${totalLines.value}, loaded=${lines.value.length}, offset=${currentOffset.value}, hasMore=${hasMore.value}`)
     await nextTick()
     scrollToBottom()
   } catch (e: any) {
@@ -216,7 +213,6 @@ function scrollToBottom() {
 // 滚动事件：接近顶部时加载更多
 function onScroll(e: Event) {
   const el = e.target as HTMLElement
-  console.log(`[LogDrawer] 📜 onScroll: scrollTop=${el.scrollTop}, scrollHeight=${el.scrollHeight}, clientHeight=${el.clientHeight}, loadingMore=${loadingMore.value}, hasMore=${hasMore.value}`)
   if (el.scrollTop < 100 && !loadingMore.value && hasMore.value) {
     loadOlder()
   }
@@ -329,7 +325,6 @@ onBeforeUnmount(() => {
 
 // 下载当前日志
 function downloadCurrent() {
-  console.log(`[LogDrawer] ⬇ download: stream=${currentStream.value}`)
   connectionStore.triggerLogDownload(currentStream.value)
 }
 

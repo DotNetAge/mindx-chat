@@ -109,7 +109,7 @@ async function fetchManifest() {
   try {
     manifestData.value = await connectionStore.getIndexQueue(projectDir)
   } catch (err: any) {
-    console.warn('[StatusBar] Failed to fetch manifest:', err)
+    console.error('[StatusBar] Failed to fetch manifest:', err)
   } finally {
     manifestLoading.value = false
   }
@@ -120,6 +120,13 @@ watch(() => sessionStore.activeSession?.project_dir, (projectDir) => {
     fetchManifest()
   } else {
     manifestData.value = null
+  }
+})
+
+// Auto-refresh progress when manifest changes (socket events)
+watch(() => connectionStore.manifestVersion, () => {
+  if (activeProjectDir.value && connectionStore.isConnected) {
+    fetchManifest()
   }
 })
 
@@ -135,13 +142,13 @@ const indexProgress = computed(() => {
 let progressTimer: ReturnType<typeof setInterval> | null = null
 watch(indexingState, (s) => {
   if (s.active && !progressTimer) {
-    console.log('[STATUSBAR] Starting 2s manifest polling timer')
+    
     progressTimer = setInterval(() => {
       fetchManifest()
       chatStore.syncTotalTokenStats()
     }, 2000)
   } else if (!s.active && progressTimer) {
-    console.log('[STATUSBAR] Stopping 2s manifest polling timer')
+    
     clearInterval(progressTimer)
     progressTimer = null
   }

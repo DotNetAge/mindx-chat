@@ -121,13 +121,13 @@ onMounted(() => {
 // Debug: log Documents tab state changes
 watch(() => store.activeTab, (tab) => {
   if (tab === 'documents') {
-    console.log('[GraphSidebar] documents tab active, defaultChunks:', store.defaultChunks.length, 'loading:', store.defaultChunksLoading)
+    
   }
   // 切换 Tab 时清空搜索框文字
   searchInput.value = ''
 })
 watch(() => store.defaultChunks, (chunks) => {
-  console.log('[GraphSidebar] defaultChunks updated:', chunks.length, 'items')
+  
 })
 
 </script>

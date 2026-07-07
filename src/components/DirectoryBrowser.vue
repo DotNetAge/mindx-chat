@@ -122,11 +122,8 @@ async function fetchFSList(path: string) {
     if (!connectionStore.isConnected) {
       throw new Error(t('directoryBrowser.notConnected'))
     }
-    console.log('[DBG] fetchFSList calling connectionStore.fetchFSList with:', JSON.stringify(path))
     entries.value = await connectionStore.fetchFSList(path)
-    console.log('[DBG] fetchFSList got entries count:', entries.value?.length)
     currentPath.value = path
-    console.log('[DBG] fetchFSList currentPath set to:', JSON.stringify(currentPath.value), 'homePrefix:', JSON.stringify(homePrefix.value), 'displayPath:', JSON.stringify(displayPath.value))
     emit('update:currentSelection', path)
   } catch (err: any) {
     ElMessage.error({ message: err?.message || t('directoryBrowser.cannotAccessPath'), duration: 3000 })
@@ -142,16 +139,13 @@ async function handleOpen() {
       throw new Error(t('directoryBrowser.notConnected'))
     }
     let homeDir = props.initialPath
-    console.log('[DBG] handleOpen initialPath:', JSON.stringify(homeDir))
     if (!homeDir) {
       homeDir = await connectionStore.fetchFSHome()
-      console.log('[DBG] handleOpen fetchFSHome result:', JSON.stringify(homeDir))
     }
     if (homeDir) {
       // 确保 homeDir 没有尾部斜杠
       homeDir = homeDir.replace(/\/+$/, '')
       homePrefix.value = homeDir
-      console.log('[DBG] handleOpen about to fetchFSList with:', JSON.stringify(homeDir))
       await fetchFSList(homeDir)
     } else {
       ElMessage.error({ message: t('directoryBrowser.cannotGetHomeDir'), duration: 3000 })

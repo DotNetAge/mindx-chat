@@ -30,16 +30,6 @@ const props = defineProps({
 const componentType = computed(() => {
   const et = props.message.eventType
 
-  // [DEBUG] Log when we receive subtask events
-  if (et === 'subtask_spawned' || et === 'subtask_completed') {
-    console.log('[MindX ROUTER DEBUG] componentType computation:', {
-      eventType: et,
-      eventData: props.message.eventData,
-      eventTitle: props.message.eventTitle,
-      content: props.message.content?.substring(0, 100)
-    })
-  }
-
   if (et === 'thinking_delta' || et === 'thinking_done') return 'thinking'
   if (et === 'content_delta' || et === 'markdown') return 'output'
   if (et === 'tool_use_delta') return 'output'

@@ -14,14 +14,12 @@ import EntityTagsDialog from './EntityTagsDialog.vue'
 import AgentSelectorDialog from './AgentSelectorDialog.vue'
 import FileExplorer from './FileExplorer.vue'
 import { useFileExplorerStore } from '../stores/fileExplorerStore'
-import { useGraphStore } from '../stores/graphStore'
 import { useI18n } from 'vue-i18n'
 import { useMarkdown } from '../composables/useMarkdown'
 
 const { t, locale } = useI18n()
 const currentLocale = ref(locale.value)
 const fileExplorerStore = useFileExplorerStore()
-const graphStore = useGraphStore()
 
 const langOptions = [
   { value: 'zh', label: '简体中文' },
@@ -105,7 +103,6 @@ async function checkForUpdates() {
     const client = getMindXClient()
     if (client) {
       const result = await client.call('server.check_update', {})
-      console.log('[MindX] Update check result:', result)
       if (result && !result.update_available) {
         isLatestVersion.value = true
       } else if (result && result.update_available) {
@@ -465,7 +462,7 @@ async function handleDeleteSession(sessionId: string, event: Event) {
       if (!connectionStore.isOfflineMode) {
         await connectionStore.deleteSession(sessionId)
         // Refresh filewatch status to reflect removed watch dir
-        graphStore.refreshFilewatchStatus()
+
       }
     } catch (serverErr) {
       console.warn('[MindX] 服务端删除失败，继续从本地移除:', serverErr)

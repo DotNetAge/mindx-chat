@@ -61,7 +61,10 @@ export const useConnectionStore = defineStore('connection', {
       active: boolean
       fileName: string
       message: string
-    }
+    },
+    /** Monotonic counter incremented on file_indexing events that affect manifest.
+     *  Components watch this to know when to refresh their manifest cache. */
+    manifestVersion: 0
   }),
 
   getters: {
@@ -542,13 +545,6 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('subtask_spawned', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
-        console.log('[MindX CONN DEBUG] subtask_spawned handler invoked:', {
-          targetSessionId,
-          activeSessionId: sessionStore.activeSessionId,
-          agent_name: envelope.agent_name,
-          title: envelope.title,
-          data: envelope.data
-        })
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
         chatStore.handleSubtaskSpawned(envelope.data, {
           session_id: targetSessionId,
@@ -558,13 +554,6 @@ export const useConnectionStore = defineStore('connection', {
 
       client.on('subtask_completed', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
-        console.log('[MindX CONN DEBUG] subtask_completed handler invoked:', {
-          targetSessionId,
-          activeSessionId: sessionStore.activeSessionId,
-          agent_name: envelope.agent_name,
-          title: envelope.title,
-          data: envelope.data
-        })
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
         chatStore.handleSubtaskCompleted(envelope.data, {
           session_id: targetSessionId,
@@ -734,7 +723,10 @@ export const useConnectionStore = defineStore('connection', {
         const state = data?.state || ''
         const fileName = data?.file || ''
         console.log('[MindX] file_indexing event:', JSON.stringify({ state, fileName, data }))
-        console.log('[INDEXING-DEBUG] setting indexingState:', { active: state === 'indexing' || state === 'indexed', state, fileName })
+        // Notify manifest cache watchers of state changes
+        if (['added', 'removed', 'indexing', 'indexed', 'error'].includes(state)) {
+          this.manifestVersion++
+        }
         if (state === 'indexing') {
           this.indexingState = { active: true, fileName, message: t('sidebar.indexing.inProgress', { file: fileName }) }
         } else if (state === 'indexed') {
@@ -846,9 +838,7 @@ export const useConnectionStore = defineStore('connection', {
     async fetchFSList(path: string): Promise<FSEntry[]> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      console.log('[DBG] connectionStore.fetchFSList SENDING path:', JSON.stringify(path))
       const result = await client.call<any>('fs.list', { path })
-      console.log('[DBG] connectionStore.fetchFSList response:', JSON.stringify(result).slice(0, 500))
       if (Array.isArray(result)) return result
       if (result && Array.isArray(result.entries)) return result.entries
       return []
@@ -992,11 +982,8 @@ export const useConnectionStore = defineStore('connection', {
     async fetchTokenUsageMonthly(year: number, month: number): Promise<MonthlyUsageStats> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      console.log('[TOKEN-REPORT-DEBUG] fetchTokenUsageMonthly called', { year, month, isConnected: this.isConnected })
       const result = await client.call<MonthlyUsageStats>('token.usage.monthly', { year, month })
-      console.log('[TOKEN-REPORT-DEBUG] RPC response', JSON.stringify(result))
       const final = result || this.emptyMonthlyStats(year, month)
-      console.log('[TOKEN-REPORT-DEBUG] final result', JSON.stringify(final))
       return final
     },
 
@@ -1167,22 +1154,20 @@ export const useConnectionStore = defineStore('connection', {
       return client.call('kb.index.remove', { project_dir: projectDir, files })
     },
 
-    async startIndexProcessing(projectDir: string): Promise<any> {
+    async enqueueAll(projectDir: string): Promise<any> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      return client.call('kb.index.start', { project_dir: projectDir })
+      return client.call('kb.index.enqueue', { project_dir: projectDir })
     },
 
-    async stopIndexProcessing(projectDir: string): Promise<any> {
+    async indexSingleFile(projectDir: string, path: string, force = false): Promise<any> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
-      return client.call('kb.index.stop', { project_dir: projectDir })
+      if (force) {
+        await client.call('kb.index.remove', { project_dir: projectDir, files: [path] })
+      }
+      await client.call('kb.index.add', { project_dir: projectDir, files: [path] })
+      return client.call('kb.index.enqueue', { project_dir: projectDir, files: [path] })
     },
-
-    async indexSingleFile(path: string, force = false): Promise<any> {
-      const client = getMindXClient()
-      if (!client) throw new Error('WebSocket client not initialized')
-      return client.call('kb.index', { path, force })
-    }
   }
 })

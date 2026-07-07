@@ -12,7 +12,8 @@ import {
   CircleCheck,
   CircleClose,
   Remove,
-  Loading
+  Loading,
+  Clock
 } from '@element-plus/icons-vue'
 import { ElMessage, ElTooltip } from 'element-plus'
 import { useConnectionStore } from '../stores/connectionStore'
@@ -43,32 +44,59 @@ const { t } = useI18n()
 // ── Manifest 路径→状态 缓存（用于树节点索引图标）──
 const manifestMap = ref<Record<string, string>>({})
 
-async function refreshManifestMap() {
-  const projectDir = sessionStore.activeSession?.project_dir
+function normalizeDir(dir: string): string {
+  return dir.replace(/\/+$/, '')
+}
+
+async function refreshManifestMap(targetDir?: string) {
+  const projectDir = normalizeDir(targetDir || props.projectDir || sessionStore.activeSession?.project_dir || connectionStore.currentProjectDir)
+  console.log('[DEBUG refreshManifestMap] projectDir=', projectDir)
   if (!projectDir) { manifestMap.value = {}; return }
   try {
     const data = await connectionStore.getIndexQueue(projectDir)
-    console.log('[FBD-DEBUG] refreshManifestMap raw:', JSON.stringify(data?.files?.slice(0, 10)))
+    console.log('[DEBUG refreshManifestMap] kb.index.list response=', data)
     const map: Record<string, string> = {}
     if (data?.files) {
       for (const f of data.files) {
-        // manifest 返回的路径可能不带前导 /，统一转为绝对路径以匹配 fs.list
-        const absPath = f.path.startsWith('/') ? f.path : '/' + f.path
-        if (f.state === 'done') map[absPath] = 'indexed'
-        else if (f.state === 'pending') map[absPath] = 'pending'
-        else if (f.state === 'processing') map[absPath] = 'indexing'
+        // kb.index.list 现在统一返回绝对路径
+        if (f.state === 'done') map[f.path] = 'indexed'
+        else if (f.state === 'pending') map[f.path] = 'pending'
+        else if (f.state === 'enqueued') map[f.path] = 'enqueued'
+        else if (f.state === 'processing') map[f.path] = 'indexing'
       }
     }
+    console.log('[DEBUG refreshManifestMap] built map=', map)
     manifestMap.value = map
-    console.log('[FBD-DEBUG] refreshManifestMap built map keys:', Object.keys(map).length, 'sample:', Object.keys(map)[0])
-  } catch {
+  } catch (err: any) {
+    console.error('[DEBUG refreshManifestMap] error=', err)
     manifestMap.value = {}
   }
+}
+
+// 收到 file_indexing 事件时更新已加载树节点状态（manifestMap 已更新）
+function syncNodesFromManifest() {
+  const nodesMap = treeRef.value?.store?.nodesMap
+  if (!nodesMap) return
+  const map = manifestMap.value
+  nodesMap.forEach((node: any) => {
+    if (!node?.data || node.data._phantom || node.data.is_dir) return
+    const st = map[node.data.path]
+    if (st !== undefined && node.data.index_state !== st) {
+      node.data.index_state = st
+    } else if (st === undefined && node.data.index_state !== 'unindexed') {
+      node.data.index_state = 'unindexed'
+    }
+  })
 }
 
 // 会话切换时刷新 manifest 缓存
 watch(() => sessionStore.activeSession?.project_dir, () => {
   refreshManifestMap()
+})
+// 收到 file_indexing 事件时自动刷新
+watch(() => connectionStore.manifestVersion, () => {
+  refreshManifestMap()
+  syncNodesFromManifest()
 })
 onMounted(() => { refreshManifestMap() })
 
@@ -126,7 +154,6 @@ async function loadTreeNode(node: any, resolve: any) {
       path = node.data.path
     }
     const entries: any = await connectionStore.fetchFSList(path)
-    console.log('[FBD-DEBUG] loadTreeNode path:', path, 'entries:', entries.map((e: any) => ({ name: e.name, index_state: e.index_state })))
     const arr = Array.isArray(entries) ? entries : []
     arr.sort((a: any, b: any) => {
       if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
@@ -134,12 +161,32 @@ async function loadTreeNode(node: any, resolve: any) {
     })
     const children = arr.map((e: any) => ({ ...e, isLeaf: !e.is_dir }))
 
-    // 从 manifest 缓存合并索引状态（确保节点图标正确）
-    for (const child of children) {
-      const st = manifestMap.value[child.path]
-      if (st) child.index_state = st
+    // 确保 manifestMap 已加载（项目目录下才需要索引图标）
+    const projectDir = normalizeDir(props.projectDir || sessionStore.activeSession?.project_dir || connectionStore.currentProjectDir)
+    const inProject = projectDir && (path === projectDir || path.startsWith(projectDir + '/'))
+    console.log('[DEBUG loadTreeNode] path=', path, 'projectDir=', projectDir, 'inProject=', inProject, 'manifestMap empty=', Object.keys(manifestMap.value).length === 0)
+    if (inProject && Object.keys(manifestMap.value).length === 0) {
+      await refreshManifestMap(projectDir)
     }
-    console.log('[FBD-DEBUG] loadTreeNode children after merge:', children.map((c: any) => ({ name: c.name, index_state: c.index_state })))
+
+    // 从 manifest 缓存合并索引状态（项目目录下默认 unindexed）
+    if (inProject) {
+      console.log('[DEBUG loadTreeNode] manifestMap keys=', Object.keys(manifestMap.value))
+      for (const child of children) {
+        const st = manifestMap.value[child.path]
+        if (st) {
+          child.index_state = st
+          console.log('[DEBUG loadTreeNode] child=', child.path, 'state=', st)
+        } else if (child.is_dir) {
+          const prefix = child.path + '/'
+          const hasIndexed = Object.keys(manifestMap.value).some(p => p.startsWith(prefix))
+          child.index_state = hasIndexed ? 'indexed' : 'unindexed'
+        } else {
+          child.index_state = 'unindexed'
+          console.log('[DEBUG loadTreeNode] child=', child.path, 'state=unindexed (not in manifest)')
+        }
+      }
+    }
 
     if (pendingCreate && pendingCreate.parentPath === path) {
       children.unshift(pendingCreate.phantom)
@@ -196,7 +243,7 @@ function closeCtxMenu() {
 function indexCtxState(): string {
   const st = ctxTarget.value?.index_state
   if (st === 'unindexed') return 'add'
-  if (st === 'pending' || st === 'indexed') return 'remove'
+  if (st === 'pending' || st === 'enqueued' || st === 'indexed') return 'remove'
   return ''
 }
 
@@ -207,21 +254,26 @@ async function handleIndexCtx() {
   if (!st) { closeCtxMenu(); return }
   const projectDir = sessionStore.activeSession?.project_dir
   if (!projectDir) { ElMessage.warning('No active project directory'); closeCtxMenu(); return }
+  console.log('[DEBUG handleIndexCtx] action=', st, 'projectDir=', projectDir, 'path=', data.path)
   if (st === 'add') {
     try {
-      await connectionStore.addToIndexQueue(projectDir, [data.path])
+      const res = await connectionStore.addToIndexQueue(projectDir, [data.path])
+      console.log('[DEBUG handleIndexCtx] add response=', res)
       ElMessage.success('Added to index: ' + data.name)
       data.index_state = 'pending'
       await refreshManifestMap()
+      refreshTree()
     } catch (err: any) {
       ElMessage.error('Index error: ' + (err?.message || ''))
     }
   } else {
     try {
-      await connectionStore.removeFromIndexQueue(projectDir, [data.path])
+      const res = await connectionStore.removeFromIndexQueue(projectDir, [data.path])
+      console.log('[DEBUG handleIndexCtx] remove response=', res)
       ElMessage.success('Removed from index: ' + data.name)
       data.index_state = 'unindexed'
       await refreshManifestMap()
+      refreshTree()
     } catch (err: any) {
       ElMessage.error('Remove error: ' + (err?.message || ''))
     }
@@ -446,6 +498,7 @@ function manifestTooltipKey(state: string): string {
     unindexed: 'addToKB',
     indexed: 'inKB',
     pending: 'removeFromKB',
+    enqueued: 'removeFromKB',
   }
   return map[state] || ''
 }
@@ -454,23 +507,22 @@ async function handleIndexClick(data: any) {
   if (data._phantom) return
   const projectDir = sessionStore.activeSession?.project_dir
   if (!projectDir) { ElMessage.warning('No active project directory'); return }
-  console.log('[FBD-DEBUG] handleIndexClick data:', { name: data.name, path: data.path, index_state: data.index_state })
   if (data.index_state === 'unindexed') {
     try {
-      await connectionStore.addToIndexQueue(projectDir, [data.path])
+      console.log('[FileBrowser] handleIndexClick add: projectDir=', projectDir, 'path=', data.path)
+      const res = await connectionStore.addToIndexQueue(projectDir, [data.path])
+      console.log('[FileBrowser] addToIndexQueue response=', res)
       ElMessage.success('Added to index: ' + data.name)
       data.index_state = 'pending'
-      console.log('[FBD-DEBUG] handleIndexClick add done, refreshing manifest')
       await refreshManifestMap()
     } catch (err: any) {
       ElMessage.error('Add to index error: ' + (err?.message || ''))
     }
-  } else if (data.index_state === 'pending' || data.index_state === 'indexed') {
+  } else if (data.index_state === 'pending' || data.index_state === 'enqueued' || data.index_state === 'indexed') {
     try {
       await connectionStore.removeFromIndexQueue(projectDir, [data.path])
       ElMessage.success('Removed from index: ' + data.name)
       data.index_state = 'unindexed'
-      console.log('[FBD-DEBUG] handleIndexClick remove done, refreshing manifest')
       await refreshManifestMap()
     } catch (err: any) {
       ElMessage.error('Remove error: ' + (err?.message || ''))
@@ -482,9 +534,11 @@ function onDocumentClick() {
   if (ctxMenuVisible.value) closeCtxMenu()
 }
 
-watch(() => props.visible, (val) => {
+watch(() => props.visible, async (val) => {
   if (val) {
     selectedNodePath.value = props.projectDir || connectionStore.currentProjectDir || sessionStore.activeSession?.project_dir || ''
+    manifestMap.value = {}
+    await refreshManifestMap()
     treeKey.value++
   }
 })
@@ -567,6 +621,7 @@ watch(() => props.visible, (val) => {
                 <el-icon v-else-if="data.index_state === 'unindexed'" :size="15"><CirclePlus /></el-icon>
                 <el-icon v-else-if="data.index_state === 'indexed'" :size="15"><CircleCheck /></el-icon>
                 <el-icon v-else-if="data.index_state === 'pending'" :size="15"><CircleClose /></el-icon>
+                <el-icon v-else-if="data.index_state === 'enqueued'" :size="15"><Clock /></el-icon>
               </ElTooltip>
             </span>
             <span class="fe-tree-label" :title="data.name">{{ data.name }}</span>
@@ -624,7 +679,7 @@ watch(() => props.visible, (val) => {
         </div>
       </div>
     </Transition>
-    <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="refreshManifestMap()" />
+    <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="refreshManifestMap().then(refreshTree)" />
     <EntityTagsDialog :visible="showEntityTagDialog" :project-dir="selectedNodePath || sessionStore.activeSession?.project_dir" @update:visible="showEntityTagDialog = $event" />
   </el-drawer>
 </template>
@@ -855,6 +910,13 @@ watch(() => props.visible, (val) => {
   color: #fbbf24;
 }
 .fe-index-icon.idx-pending:hover {
+  background: rgba(239,68,68,.08);
+  color: #f87171;
+}
+.fe-index-icon.idx-enqueued {
+  color: #f59e0b;
+}
+.fe-index-icon.idx-enqueued:hover {
   background: rgba(239,68,68,.08);
   color: #f87171;
 }

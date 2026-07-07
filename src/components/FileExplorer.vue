@@ -6,7 +6,7 @@ import {
   Close, Folder, Document,
   RefreshRight, Setting, Edit, Reading, Link,
   Plus, Delete, Monitor,
-  CirclePlus, CircleCheck, CircleClose, Remove, Loading
+  CirclePlus, CircleCheck, CircleClose, Clock, Remove, Loading
 } from '@element-plus/icons-vue'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useSessionStore } from '../stores/sessionStore'
@@ -25,32 +25,53 @@ const editorPrefs = useEditorPreferences()
 // ── Manifest 路径→状态 缓存（用于树节点索引图标）──
 const manifestMap = ref<Record<string, string>>({})
 
-async function refreshManifestMap() {
-  const projectDir = sessionStore.activeSession?.project_dir
+async function refreshManifestMap(targetDir?: string) {
+  const projectDir = (targetDir || sessionStore.activeSession?.project_dir || connectionStore.currentProjectDir || '').replace(/\/+$/, '')
   if (!projectDir) { manifestMap.value = {}; return }
   try {
     const data = await connectionStore.getIndexQueue(projectDir)
-    console.log('[FE-DEBUG] refreshManifestMap raw:', JSON.stringify(data?.files?.slice(0, 10)))
+
     const map: Record<string, string> = {}
     if (data?.files) {
       for (const f of data.files) {
-        // manifest 返回的路径可能不带前导 /，统一转为绝对路径以匹配 fs.list
-        const absPath = f.path.startsWith('/') ? f.path : '/' + f.path
-        if (f.state === 'done') map[absPath] = 'indexed'
-        else if (f.state === 'pending') map[absPath] = 'pending'
-        else if (f.state === 'processing') map[absPath] = 'indexing'
+        // kb.index.list 现在统一返回绝对路径
+        if (f.state === 'done') map[f.path] = 'indexed'
+        else if (f.state === 'pending') map[f.path] = 'pending'
+        else if (f.state === 'enqueued') map[f.path] = 'enqueued'
+        else if (f.state === 'processing') map[f.path] = 'indexing'
       }
     }
     manifestMap.value = map
-    console.log('[FE-DEBUG] refreshManifestMap built map keys:', Object.keys(map).length, 'sample:', Object.keys(map)[0])
+
   } catch {
     manifestMap.value = {}
   }
 }
 
+// 收到 file_indexing 事件时更新已加载树节点状态
+function syncNodesFromManifest() {
+  const nodesMap = treeRef.value?.store?.nodesMap
+  if (!nodesMap) return
+  const map = manifestMap.value
+  nodesMap.forEach((node: any) => {
+    if (!node?.data || node.data._phantom || node.data.is_dir) return
+    const st = map[node.data.path]
+    if (st !== undefined && node.data.index_state !== st) {
+      node.data.index_state = st
+    } else if (st === undefined && node.data.index_state !== 'unindexed') {
+      node.data.index_state = 'unindexed'
+    }
+  })
+}
+
 // 会话切换时刷新 manifest 缓存
 watch(() => sessionStore.activeSession?.project_dir, () => {
   refreshManifestMap()
+})
+// 收到 file_indexing 事件时自动刷新
+watch(() => connectionStore.manifestVersion, () => {
+  refreshManifestMap()
+  syncNodesFromManifest()
 })
 onMounted(() => { refreshManifestMap() })
 
@@ -118,8 +139,15 @@ async function loadTreeNode(node: any, resolve: any) {
     } else {
       path = node.data.path
     }
+
+    // 根节点首次加载前确保 manifestMap 已就绪（和 onMounted 不重复请求）
+    const projectDir = (connectionStore.currentProjectDir || '').replace(/\/+$/, '')
+    if (node.level === 0 && projectDir && Object.keys(manifestMap.value).length === 0) {
+      await refreshManifestMap(projectDir)
+    }
+
     const entries: any = await connectionStore.fetchFSList(path)
-    console.log('[FE-DEBUG] loadTreeNode path:', path, 'entries:', entries.map((e: any) => ({ name: e.name, index_state: e.index_state })))
+
     const arr = Array.isArray(entries) ? entries : []
     arr.sort((a: any, b: any) => {
       if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
@@ -127,12 +155,23 @@ async function loadTreeNode(node: any, resolve: any) {
     })
     const children = arr.map((e: any) => ({ ...e, isLeaf: !e.is_dir }))
 
-    // 从 manifest 缓存合并索引状态（确保节点图标正确）
-    for (const child of children) {
-      const st = manifestMap.value[child.path]
-      if (st) child.index_state = st
+    // 从 manifest 缓存合并索引状态（项目目录下默认 unindexed）
+    const inProject = projectDir && (path === projectDir || path.startsWith(projectDir + '/'))
+    if (inProject) {
+      for (const child of children) {
+        const st = manifestMap.value[child.path]
+        if (st) {
+          child.index_state = st
+        } else if (child.is_dir) {
+          const prefix = child.path + '/'
+          const hasIndexed = Object.keys(manifestMap.value).some(p => p.startsWith(prefix))
+          child.index_state = hasIndexed ? 'indexed' : 'unindexed'
+        } else {
+          child.index_state = 'unindexed'
+        }
+      }
     }
-    console.log('[FE-DEBUG] loadTreeNode children after merge:', children.map((c: any) => ({ name: c.name, index_state: c.index_state })))
+    
 
     // 如果有待创建的 phantom 节点，注入到最前面
     if (pendingCreate && pendingCreate.parentPath === path) {
@@ -198,7 +237,7 @@ function closeCtxMenu() {
 function indexCtxState(): string {
   const st = ctxTarget.value?.index_state
   if (st === 'unindexed') return 'add'
-  if (st === 'pending' || st === 'indexed') return 'remove'
+  if (st === 'pending' || st === 'enqueued' || st === 'indexed') return 'remove'
   return ''
 }
 
@@ -215,6 +254,7 @@ async function handleIndexCtx() {
       ElMessage.success(t('fileExplorer.addedToIndex') + ': ' + data.name)
       data.index_state = 'pending'
       await refreshManifestMap()
+      refreshTree()
     } catch (err: any) {
       ElMessage.error(t('fileExplorer.indexError') + ': ' + (err?.message || ''))
     }
@@ -224,6 +264,7 @@ async function handleIndexCtx() {
       ElMessage.success('Removed from index: ' + data.name)
       data.index_state = 'unindexed'
       await refreshManifestMap()
+      refreshTree()
     } catch (err: any) {
       ElMessage.error('Remove error: ' + (err?.message || ''))
     }
@@ -547,6 +588,7 @@ function manifestTooltipKey(state: string): string {
     unindexed: 'addToKB',
     indexed: 'inKB',
     pending: 'removeFromKB',
+    enqueued: 'removeFromKB',
   }
   return map[state] || ''
 }
@@ -555,26 +597,26 @@ async function handleIndexClick(data: any) {
   if (data._phantom) return
   const projectDir = sessionStore.activeSession?.project_dir
   if (!projectDir) { ElMessage.warning('No active project directory'); return }
-  console.log('[FE-DEBUG] handleIndexClick data:', { name: data.name, path: data.path, index_state: data.index_state })
+  
   if (data.index_state === 'unindexed') {
     try {
       await connectionStore.addToIndexQueue(projectDir, [data.path])
       ElMessage.success(t('fileExplorer.addedToIndex') + ': ' + data.name)
       const node = treeRef.value?.getNode(data.path)
       if (node) { node.data.index_state = 'pending' }
-      console.log('[FE-DEBUG] handleIndexClick add done, refreshing manifest + tree')
+      
       await refreshManifestMap()
       refreshTree(getParentPath(data.path))
     } catch (err: any) {
       ElMessage.error(t('fileExplorer.indexError') + ': ' + (err?.message || ''))
     }
-  } else if (data.index_state === 'pending' || data.index_state === 'indexed') {
+  } else if (data.index_state === 'pending' || data.index_state === 'enqueued' || data.index_state === 'indexed') {
     try {
       await connectionStore.removeFromIndexQueue(projectDir, [data.path])
       ElMessage.success('Removed from index: ' + data.name)
       const node = treeRef.value?.getNode(data.path)
       if (node) { node.data.index_state = 'unindexed' }
-      console.log('[FE-DEBUG] handleIndexClick remove done, refreshing manifest + tree')
+      
       await refreshManifestMap()
       refreshTree(getParentPath(data.path))
     } catch (err: any) {
@@ -711,6 +753,7 @@ async function handleIndexClick(data: any) {
                     <el-icon v-else-if="data.index_state === 'unindexed'" :size="15"><CirclePlus /></el-icon>
                     <el-icon v-else-if="data.index_state === 'indexed'" :size="15"><CircleCheck /></el-icon>
                     <el-icon v-else-if="data.index_state === 'pending'" :size="15"><CircleClose /></el-icon>
+                    <el-icon v-else-if="data.index_state === 'enqueued'" :size="15"><Clock /></el-icon>
                   </ElTooltip>
                 </span>
                 <template v-if="editingPath === data.path">

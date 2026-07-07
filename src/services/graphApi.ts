@@ -123,46 +123,6 @@ export interface FileStateResult {
   }
 }
 
-// ── Filewatch types ──
-
-export interface FailedFileRecord {
-  path: string
-  error: string
-  timestamp: number
-  elapsed_ms: number
-}
-
-export interface CompletedFileRecord {
-  path: string
-  chunks: number
-  elapsed_ms: number
-  timestamp: number
-}
-
-export interface DirIndexState {
-  dir: string
-  state: string       // pending | indexing | completed | failed
-  total_files: number
-  indexed_files: number
-  error?: string
-  started_at: number
-  completed_at?: number
-  entities_created?: number
-  rels_created?: number
-  total_elapsed_ms?: number
-  failed_files?: FailedFileRecord[]
-  completed_files?: CompletedFileRecord[]
-  ignored_files?: string[]
-}
-
-export interface FilewatchStatus {
-  available: boolean
-  running: boolean
-  watched: string[]
-  cache_dir?: string
-  index_state?: Record<string, DirIndexState>
-}
-
 // ── Multi-hop graph types ──
 
 export interface HopNode {
@@ -334,7 +294,6 @@ export async function discoverDocs(page = 1, pageSize = 500): Promise<string[]> 
 /** Semantic search across the knowledge base via GraphIndexer (kb.search) */
 export async function kbSearch(query: string, limit = 10, minScore = 0): Promise<SearchResult[]> {
   const records = await call<any[]>('kb.search', { query, limit, min_score: minScore })
-  console.log('[graphApi] kbSearch raw:', JSON.stringify(records, null, 2))
   return (records ?? []).map((r: any) => {
     const meta = r.metadata || {}
     return {
@@ -359,7 +318,6 @@ export async function kbSearch(query: string, limit = 10, minScore = 0): Promise
 /** Semantic search across memory (memory.query) */
 export async function semanticSearch(query: string, limit = 5, minScore = 0): Promise<SearchResult[]> {
   const records = await call<any[]>('memory.query', { query, limit, min_score: minScore })
-  console.log('[graphApi] semanticSearch raw:', JSON.stringify(records, null, 2))
   return (records ?? []).map((r: any) => {
     const meta = r.metadata || r.chunk_meta || {}
     return {
@@ -437,38 +395,6 @@ export async function listKBChunksAsSearchResults(page = 1, pageSize = 20, filte
     }
   })
   return { chunks, total: result.total ?? 0, has_more: result.has_more ?? false }
-}
-
-// ── File index state ──
-
-/** Start filewatch indexing service */
-export async function filewatchStart(): Promise<{ status: string }> {
-  return call('filewatch.start')
-}
-
-/** Stop filewatch indexing service */
-export async function filewatchStop(): Promise<{ status: string }> {
-  return call('filewatch.stop')
-}
-
-/** Get filewatch service status */
-export async function filewatchStatus(): Promise<FilewatchStatus> {
-  return call('filewatch.status')
-}
-
-/** Remove a directory from the filewatch watchlist */
-export async function filewatchRemove(dir: string): Promise<{ status: string; dir: string }> {
-  return call('filewatch.remove', { dir })
-}
-
-/** Retry indexing failed files. Returns { status, indexed, errors }. */
-export async function filewatchRetryFailed(dir: string, files: string[]): Promise<{ status: string; indexed?: number; errors?: number }> {
-  return call('filewatch.retry-failed', { dir, files })
-}
-
-/** Mark failed files as ignored (hides them from the UI, won't retry). */
-export async function filewatchIgnoreFailed(dir: string, files: string[]): Promise<{ status: string }> {
-  return call('filewatch.ignore-failed', { dir, files })
 }
 
 /** Scan project directory for file states (read-only, no indexing) */

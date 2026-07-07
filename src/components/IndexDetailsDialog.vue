@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElDialog, ElMessage, ElTag, ElButton, ElTooltip, ElTable, ElTableColumn, ElTabs, ElTabPane, ElCheckbox, ElInput } from 'element-plus'
-import { Loading, Refresh, Setting, Close, VideoPause, CaretRight, RefreshRight } from '@element-plus/icons-vue'
+import { Loading, Refresh, Setting, Close, CaretRight, RefreshRight } from '@element-plus/icons-vue'
 import { useSessionStore } from '../stores/sessionStore'
 import { useConnectionStore } from '../stores/connectionStore'
 import { readFileContent, writeFileContent } from '../services/graphApi'
@@ -19,7 +19,7 @@ const emit = defineEmits<{
   (e: 'refreshed'): void
 }>()
 
-const toggling = ref(false)
+const enqueuing = ref(false)
 const operating = ref<Record<string, boolean>>({}) // per-file operation loading state
 
 /** Current active project directory. */
@@ -31,13 +31,17 @@ const manifestLoading = ref(false)
 
 async function fetchManifest() {
   const projectDir = activeProjectDir.value
-  if (!projectDir) return
+  console.log('[IndexDetails] fetchManifest projectDir=', projectDir)
+  if (!projectDir) { console.warn('[IndexDetails] No projectDir, returning'); return }
   manifestLoading.value = true
   try {
     const result = await connectionStore.getIndexQueue(projectDir)
+    console.log('[IndexDetails] kb.index.list response=', JSON.stringify(result, null, 2))
+    console.log('[IndexDetails] files array:', result?.files)
+    console.log('[IndexDetails] files.length:', result?.files?.length)
     manifestData.value = result
   } catch (err: any) {
-    console.warn('[IndexDetails] Failed to fetch manifest:', err)
+    console.error('[IndexDetails] Failed to fetch manifest:', err)
   } finally {
     manifestLoading.value = false
   }
@@ -45,7 +49,17 @@ async function fetchManifest() {
 
 // Watch for dialog open + session changes to auto-fetch
 watch(() => props.visible, (val) => {
-  if (val) fetchManifest()
+  if (val) {
+    manifestData.value = null // 清除旧数据避免重开时闪现旧状态
+    fetchManifest()
+  }
+})
+
+// Auto-refresh when manifest changes (socket events)
+watch(() => connectionStore.manifestVersion, () => {
+  if (props.visible && activeProjectDir.value) {
+    fetchManifest()
+  }
 })
 
 // -- .mindxignore configurator --
@@ -180,23 +194,25 @@ async function saveIgnoreConfig() {
 
 // -- Progress derived from manifest data --
 const totalProgress = computed(() => {
-  if (!manifestData.value) return { total: 0, indexed: 0, failed: 0, pending: 0, percent: 0 }
-  const total = manifestData.value.total_files || 0
-  const indexed = manifestData.value.indexed_files || 0
-  const failed = (manifestData.value.failed_files || []).length
+  if (!manifestData.value) return { total: 0, indexed: 0, failed: 0, pending: 0, enqueued: 0, percent: 0 }
+  const files: any[] = manifestData.value.files || []
+  const total = files.length
+  const indexed = files.filter((f: any) => f.state === 'done').length
+  const failed = files.filter((f: any) => f.state === 'failed').length
+  const pending = files.filter((f: any) => f.state === 'pending').length
+  const enqueued = files.filter((f: any) => f.state === 'enqueued').length
   return {
     total,
     indexed,
     failed,
-    pending: (manifestData.value.pending_files || []).length,
+    pending,
+    enqueued,
     percent: total > 0 ? Math.round((indexed / total) * 100) : 0
   }
 })
 
 const currentFile = computed(() => manifestData.value?.current_file || '')
 const isIndexing = computed(() => !!currentFile.value)
-const isProcessing = computed(() => manifestData.value?.processing || false)
-const showToggle = computed(() => totalProgress.value.pending > 0 || !!currentFile.value)
 
 // -- Helpers --
 function basename(filePath: string): string {
@@ -225,7 +241,7 @@ async function handleFileAction(row: any) {
 
   operating.value = { ...operating.value, [opKey]: true }
   try {
-    if (row.state === 'pending') {
+    if (row.state === 'pending' || row.state === 'enqueued') {
       // Remove from manifest
       await connectionStore.removeFromIndexQueue(projectDir, [row.path])
       ElMessage.success('已从清单删除: ' + basename(row.path))
@@ -258,9 +274,9 @@ async function handleIndexSingleFile(row: any) {
 
   operating.value = { ...operating.value, [opKey]: true }
   try {
-    const absPath = projectDir + '/' + row.path
-    await connectionStore.indexSingleFile(absPath, row.state === 'done')
-    ElMessage.success('已索引: ' + basename(row.path))
+    // row.path 始终是绝对路径（后端 kb.index.list 统一返回）
+    await connectionStore.indexSingleFile(projectDir, row.path, row.state === 'done')
+    ElMessage.success('已加入队列: ' + basename(row.path))
     await fetchManifest()
     emit('refreshed')
   } catch (err: any) {
@@ -270,26 +286,21 @@ async function handleIndexSingleFile(row: any) {
   }
 }
 
-async function handlePauseResume() {
-  if (toggling.value) return
-  toggling.value = true
+async function handleEnqueueAll() {
+  if (enqueuing.value) return
+  enqueuing.value = true
   try {
     const projectDir = activeProjectDir.value
     if (!projectDir) { ElMessage.warning('No active project directory'); return }
 
-    if (manifestData.value?.processing) {
-      await connectionStore.stopIndexProcessing(projectDir)
-      manifestData.value.processing = false
-      ElMessage.success('已暂停')
-    } else {
-      await connectionStore.startIndexProcessing(projectDir)
-      manifestData.value.processing = true
-      ElMessage.success('已恢复')
-    }
+    await connectionStore.enqueueAll(projectDir)
+    ElMessage.success('已启动')
     await fetchManifest()
     emit('refreshed')
+  } catch (err: any) {
+    ElMessage.error('启动失败: ' + (err?.message || ''))
   } finally {
-    toggling.value = false
+    enqueuing.value = false
   }
 }
 </script>
@@ -329,6 +340,10 @@ async function handlePauseResume() {
           <span class="summary-label">待索引：</span>
           <span class="summary-value pending-count">{{ totalProgress.pending }}</span>
         </div>
+        <div class="summary-row" v-if="totalProgress.enqueued > 0">
+          <span class="summary-label">队列中：</span>
+          <span class="summary-value pending-count">{{ totalProgress.enqueued }}</span>
+        </div>
       </div>
 
       <!-- All files table (the entire index manifest) -->
@@ -350,7 +365,7 @@ async function handlePauseResume() {
               </div>
               <ElTooltip
                 v-else
-                :content="row.state === 'pending' ? '从清单删除' : row.state === 'error' ? '重新索引' : '重新索引'"
+                :content="row.state === 'pending' || row.state === 'enqueued' ? '从清单删除' : row.state === 'error' ? '重新索引' : '重新索引'"
                 placement="left"
                 :show-after="300"
               >
@@ -359,7 +374,7 @@ async function handlePauseResume() {
                   circle
                   :type="row.state === 'error' ? 'danger' : 'default'"
                   :loading="!!operating[row.path]"
-                  :icon="row.state === 'pending' ? Close : RefreshRight"
+                  :icon="row.state === 'pending' || row.state === 'enqueued' ? Close : RefreshRight"
                   @click="handleFileAction(row)"
                   class="action-btn"
                 />
@@ -372,7 +387,7 @@ async function handlePauseResume() {
             <template #default="{ row }">
               <ElTooltip
                 v-if="row.state !== 'processing'"
-                content="立即索引"
+                content="马上整理"
                 placement="left"
                 :show-after="300"
               >
@@ -400,11 +415,11 @@ async function handlePauseResume() {
           <ElTableColumn prop="state" label="状态" width="72" align="center">
             <template #default="{ row }">
               <ElTag
-                :type="row.state === 'done' ? 'success' : row.state === 'error' ? 'danger' : row.state === 'processing' ? 'warning' : 'info'"
+                :type="row.state === 'done' ? 'success' : row.state === 'error' ? 'danger' : row.state === 'processing' ? 'warning' : row.state === 'enqueued' ? 'warning' : 'info'"
                 size="small"
                 effect="plain"
               >
-                {{ row.state === 'pending' ? '待索引' : row.state === 'processing' ? '处理中' : row.state === 'done' ? '已完成' : '失败' }}
+                {{ row.state === 'pending' ? '待索引' : row.state === 'enqueued' ? '队列中' : row.state === 'processing' ? '处理中' : row.state === 'done' ? '已完成' : '失败' }}
               </ElTag>
             </template>
           </ElTableColumn>
@@ -460,22 +475,16 @@ async function handlePauseResume() {
       <!-- Footer: control bar -->
       <template #footer>
         <div class="dialog-footer-bar">
-          <div class="footer-left">
-            <span class="footer-label">服务状态：</span>
-            <ElTag :type="isProcessing ? 'success' : 'info'" size="small">
-              {{ isProcessing ? '处理中' : '已暂停' }}
-            </ElTag>
-          </div>
+          <div class="footer-left" />
           <div class="footer-right">
             <ElButton
-              v-if="showToggle"
               size="small"
-              :type="isProcessing ? 'danger' : 'success'"
-              :loading="toggling"
-              @click="handlePauseResume"
+              type="primary"
+              :loading="enqueuing"
+              @click="handleEnqueueAll"
             >
-              <el-icon><component :is="isProcessing ? VideoPause : CaretRight" /></el-icon>
-              {{ isProcessing ? '暂停' : '启动' }}
+              <el-icon><CaretRight /></el-icon>
+              启动
             </ElButton>
             <ElButton
               size="small"
