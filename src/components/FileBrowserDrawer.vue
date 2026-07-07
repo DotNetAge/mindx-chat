@@ -43,6 +43,7 @@ const { t } = useI18n()
 
 // ── Manifest 路径→状态 缓存（用于树节点索引图标）──
 const manifestMap = ref<Record<string, string>>({})
+let refreshSerial = 0 // monotonic counter for stale response protection
 
 function normalizeDir(dir: string): string {
   return dir.replace(/\/+$/, '')
@@ -52,8 +53,10 @@ async function refreshManifestMap(targetDir?: string) {
   const projectDir = normalizeDir(targetDir || props.projectDir || sessionStore.activeSession?.project_dir || connectionStore.currentProjectDir)
   console.log('[DEBUG refreshManifestMap] projectDir=', projectDir)
   if (!projectDir) { manifestMap.value = {}; return }
+  const serial = ++refreshSerial
   try {
     const data = await connectionStore.getIndexQueue(projectDir)
+    if (serial !== refreshSerial) return // discard stale response
     console.log('[DEBUG refreshManifestMap] kb.index.list response=', data)
     const map: Record<string, string> = {}
     if (data?.files) {
@@ -68,6 +71,7 @@ async function refreshManifestMap(targetDir?: string) {
     console.log('[DEBUG refreshManifestMap] built map=', map)
     manifestMap.value = map
   } catch (err: any) {
+    if (serial !== refreshSerial) return
     console.error('[DEBUG refreshManifestMap] error=', err)
     manifestMap.value = {}
   }

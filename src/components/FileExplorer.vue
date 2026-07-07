@@ -24,12 +24,15 @@ const editorPrefs = useEditorPreferences()
 
 // ── Manifest 路径→状态 缓存（用于树节点索引图标）──
 const manifestMap = ref<Record<string, string>>({})
+let refreshSerial = 0 // monotonic counter for stale response protection
 
 async function refreshManifestMap(targetDir?: string) {
   const projectDir = (targetDir || sessionStore.activeSession?.project_dir || connectionStore.currentProjectDir || '').replace(/\/+$/, '')
   if (!projectDir) { manifestMap.value = {}; return }
+  const serial = ++refreshSerial
   try {
     const data = await connectionStore.getIndexQueue(projectDir)
+    if (serial !== refreshSerial) return // discard stale response
 
     const map: Record<string, string> = {}
     if (data?.files) {
@@ -44,6 +47,7 @@ async function refreshManifestMap(targetDir?: string) {
     manifestMap.value = map
 
   } catch {
+    if (serial !== refreshSerial) return
     manifestMap.value = {}
   }
 }

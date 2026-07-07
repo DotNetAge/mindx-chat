@@ -28,22 +28,29 @@ const activeProjectDir = computed(() => sessionStore.activeSession?.project_dir 
 // -- Manifest data (current session only) --
 const manifestData = ref<any>(null)
 const manifestLoading = ref(false)
+let fetchSerial = 0 // monotonic counter to discard stale responses
 
 async function fetchManifest() {
   const projectDir = activeProjectDir.value
   console.log('[IndexDetails] fetchManifest projectDir=', projectDir)
   if (!projectDir) { console.warn('[IndexDetails] No projectDir, returning'); return }
+  const serial = ++fetchSerial
   manifestLoading.value = true
   try {
     const result = await connectionStore.getIndexQueue(projectDir)
+    if (serial !== fetchSerial) {
+      console.log('[IndexDetails] ignoring stale fetchManifest response, serial=', serial, 'current=', fetchSerial)
+      return // discard stale response from a previous call
+    }
     console.log('[IndexDetails] kb.index.list response=', JSON.stringify(result, null, 2))
     console.log('[IndexDetails] files array:', result?.files)
     console.log('[IndexDetails] files.length:', result?.files?.length)
     manifestData.value = result
   } catch (err: any) {
+    if (serial !== fetchSerial) return
     console.error('[IndexDetails] Failed to fetch manifest:', err)
   } finally {
-    manifestLoading.value = false
+    if (serial === fetchSerial) manifestLoading.value = false
   }
 }
 

@@ -101,17 +101,22 @@ async function handleOpenKB() {
 // ── Manifest data for progress bar ──
 const manifestData = ref<any>(null)
 const manifestLoading = ref(false)
+let fetchSerial = 0 // monotonic counter to discard stale responses
 
 async function fetchManifest() {
   const projectDir = activeProjectDir.value
   if (!projectDir) return
+  const serial = ++fetchSerial
   manifestLoading.value = true
   try {
-    manifestData.value = await connectionStore.getIndexQueue(projectDir)
+    const result = await connectionStore.getIndexQueue(projectDir)
+    if (serial !== fetchSerial) return // discard stale response
+    manifestData.value = result
   } catch (err: any) {
+    if (serial !== fetchSerial) return
     console.error('[StatusBar] Failed to fetch manifest:', err)
   } finally {
-    manifestLoading.value = false
+    if (serial === fetchSerial) manifestLoading.value = false
   }
 }
 
