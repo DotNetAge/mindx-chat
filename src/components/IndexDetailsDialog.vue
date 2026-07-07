@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElDialog, ElMessage, ElTag, ElButton, ElTooltip, ElTable, ElTableColumn, ElTabs, ElTabPane, ElCheckbox, ElInput } from 'element-plus'
 import { Loading, Refresh, Setting, Close, CaretRight, RefreshRight } from '@element-plus/icons-vue'
@@ -59,6 +59,9 @@ watch(() => props.visible, (val) => {
   if (val) {
     manifestData.value = null // 清除旧数据避免重开时闪现旧状态
     fetchManifest()
+    startPolling()
+  } else {
+    stopPolling()
   }
 })
 
@@ -205,7 +208,7 @@ const totalProgress = computed(() => {
   const files: any[] = manifestData.value.files || []
   const total = files.length
   const indexed = files.filter((f: any) => f.state === 'done').length
-  const failed = files.filter((f: any) => f.state === 'failed').length
+  const failed = files.filter((f: any) => f.state === 'error').length
   const pending = files.filter((f: any) => f.state === 'pending').length
   const enqueued = files.filter((f: any) => f.state === 'enqueued').length
   return {
@@ -220,6 +223,37 @@ const totalProgress = computed(() => {
 
 const currentFile = computed(() => manifestData.value?.current_file || '')
 const isIndexing = computed(() => !!currentFile.value)
+
+// -- Polling fallback: when there is active work, refresh every 2s --
+let refreshInterval: ReturnType<typeof setInterval> | null = null
+
+const shouldAutoRefresh = computed(() => {
+  return props.visible && activeProjectDir.value && (
+    totalProgress.value.pending > 0 ||
+    totalProgress.value.enqueued > 0 ||
+    !!currentFile.value
+  )
+})
+
+function startPolling() {
+  if (refreshInterval) return
+  refreshInterval = setInterval(() => {
+    if (shouldAutoRefresh.value) {
+      fetchManifest()
+    }
+  }, 2000)
+}
+
+function stopPolling() {
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+    refreshInterval = null
+  }
+}
+
+onUnmounted(() => {
+  stopPolling()
+})
 
 // -- Helpers --
 function basename(filePath: string): string {
@@ -422,7 +456,7 @@ async function handleEnqueueAll() {
           <ElTableColumn prop="state" label="状态" width="72" align="center">
             <template #default="{ row }">
               <ElTag
-                :type="row.state === 'done' ? 'success' : row.state === 'error' ? 'danger' : row.state === 'processing' ? 'warning' : row.state === 'enqueued' ? 'warning' : 'info'"
+                :type="row.state === 'done' ? 'success' : row.state === 'error' ? 'danger' : row.state === 'processing' ? 'primary' : row.state === 'enqueued' ? 'warning' : 'info'"
                 size="small"
                 effect="plain"
               >
@@ -456,14 +490,9 @@ async function handleEnqueueAll() {
               <span class="table-token-value">{{ formatCount(row.output_tokens) }}</span>
             </template>
           </ElTableColumn>
-          <ElTableColumn prop="cache_tokens" label="缓存(T)" width="110" align="right" sortable>
+          <ElTableColumn prop="cost" label="费用" width="90" align="right" sortable>
             <template #default="{ row }">
-              <span class="table-token-value">{{ formatCount(row.cache_tokens) }}</span>
-            </template>
-          </ElTableColumn>
-          <ElTableColumn prop="cost" label="费用" width="76" align="right" sortable>
-            <template #default="{ row }">
-              <span class="table-cost-value">{{ row.cost ? '$' + row.cost.toFixed(6) : '-' }}</span>
+              <span class="table-cost-value">{{ row.cost > 0 ? row.cost.toFixed(6) : '-' }}</span>
             </template>
           </ElTableColumn>
           <ElTableColumn prop="elapsed_ms" label="耗时" width="72" align="right" sortable>

@@ -81,7 +81,8 @@ async function loadSaved() {
   try {
     const client = getMindXClient()
     if (!client) throw new Error('WebSocket client not initialized')
-    const result = await client.call<{ types: { name: string; title: string; desc: string }[] }>('entity_tags.get', {})
+    const params = props.projectDir ? { projectDir: props.projectDir } : {}
+    const result = await client.call<{ types: { name: string; title: string; desc: string }[] }>('entity_tags.get', params)
     if (result?.types) {
       selectedValues.value = result.types.map(t => t.name)
     }
@@ -251,6 +252,7 @@ watch(() => props.visible, (val) => {
       :category="schemaEditorCategory"
       :type-name="schemaEditorTypeName"
       :type-label="schemaEditorTypeLabel"
+      :project-dir="props.projectDir"
       @saved="loadSaved()"
     />
   </div>

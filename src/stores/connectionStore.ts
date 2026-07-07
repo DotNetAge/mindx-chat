@@ -724,7 +724,7 @@ export const useConnectionStore = defineStore('connection', {
         const fileName = data?.file || ''
         console.log('[MindX] file_indexing event:', JSON.stringify({ state, fileName, data }))
         // Notify manifest cache watchers of state changes
-        if (['added', 'removed', 'indexing', 'indexed', 'error'].includes(state)) {
+        if (['added', 'removed', 'enqueued', 'indexing', 'indexed', 'error'].includes(state)) {
           this.manifestVersion++
         }
         if (state === 'indexing') {

@@ -13,6 +13,7 @@ const props = defineProps<{
   category: string
   typeName: string
   typeLabel: string
+  projectDir?: string
 }>()
 
 const emit = defineEmits(['update:visible', 'saved'])
@@ -55,9 +56,11 @@ async function loadSchema() {
   try {
     const client = getMindXClient()
     if (!client) throw new Error('WebSocket client not initialized')
+    const getParams: any = { category: props.category, name: props.typeName }
+    if (props.projectDir) getParams.projectDir = props.projectDir
     const result = await client.call<{ category: string; name: string; schema: Record<string, any> }>(
       'schema.get',
-      { category: props.category, name: props.typeName }
+      getParams
     )
     const schema = result.schema
     description.value = schema.description || ''
@@ -187,11 +190,13 @@ async function handleSave() {
     if (!client) throw new Error('WebSocket client not initialized')
 
     const schema = buildSchema()
-    await client.call('schema.save', {
+    const saveParams: any = {
       category: props.category,
       name: props.typeName,
       schema,
-    })
+    }
+    if (props.projectDir) saveParams.projectDir = props.projectDir
+    await client.call('schema.save', saveParams)
     ElMessage.success(t('schemaEditor.saveSuccess'))
     changed.value = false
     emit('saved')

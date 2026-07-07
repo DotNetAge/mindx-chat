@@ -119,7 +119,9 @@ async function handleOpenKB() {
       showIndexDialog.value = true
       return
     }
-    const result = await client.call<{ types: any[] }>('entity_tags.get', {})
+    const projectDir = selectedNodePath.value || props.projectDir || connectionStore.currentProjectDir || ''
+    const params = projectDir ? { projectDir } : {}
+    const result = await client.call<{ types: any[] }>('entity_tags.get', params)
     if (result?.types && result.types.length > 0) {
       showIndexDialog.value = true
     } else {
