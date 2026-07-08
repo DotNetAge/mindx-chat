@@ -183,16 +183,24 @@ export const useGraphStore = defineStore('graph', {
         }
         // If orphan switch is ON, keep all matching nodes (including orphans)
       } else {
-        // No label filter: exclude isolated nodes (keep only the largest connected component)
-        const filteredIds = new Set(result.map(n => n.id))
-        const connectedIds = new Set<string>()
-        for (const e of state.edges) {
-          if (filteredIds.has(e.from_node_id) && filteredIds.has(e.to_node_id)) {
-            connectedIds.add(e.from_node_id)
-            connectedIds.add(e.to_node_id)
+        // No label filter: only exclude isolated nodes when there are edges.
+        // If edges data is empty/incomplete (e.g. region fallback mode), skip
+        // this filter so nodes still appear in the graph.
+        if (state.edges.length > 0) {
+          const filteredIds = new Set(result.map(n => n.id))
+          const connectedIds = new Set<string>()
+          for (const e of state.edges) {
+            if (filteredIds.has(e.from_node_id) && filteredIds.has(e.to_node_id)) {
+              connectedIds.add(e.from_node_id)
+              connectedIds.add(e.to_node_id)
+            }
           }
+          // Only apply the filter when we can compute connected components
+          if (connectedIds.size > 0) {
+            result = result.filter(n => connectedIds.has(n.id))
+          }
+          // If connectedIds is empty (no edges connect known nodes), keep all nodes
         }
-        result = result.filter(n => connectedIds.has(n.id))
       }
 
       if (state.searchQuery.trim()) {
@@ -406,15 +414,33 @@ export const useGraphStore = defineStore('graph', {
 
     /* ── 力导图渐进加载 ──────────────────────────────── */
 
-    /** 种子化可见节点：仅显示 Region + Document */
+    /** 种子化可见节点：显示 Region + Document + Region 的直接子节点。
+     *
+     * 这样初始加载时用户能看到 Region → Document 的完整树结构，
+     * 实体（Term/Concept）仍被隐藏，需点击 + 展开。
+     */
     seedGraphVisibility() {
       if (this.nodes.length === 0) return
       const visible = new Set<string>()
+
+      // 1. Seed: Region + Document 节点
       for (const n of this.nodes) {
         if (n.labels.includes('Region') || n.labels.includes('Document')) {
           visible.add(n.id)
         }
       }
+
+      // 2. 自动展开 Region 的直接子节点（无论它们是什么标签）
+      for (const n of this.nodes) {
+        if (n.labels.includes('Region')) {
+          for (const e of this.edges) {
+            if (e.from_node_id === n.id) {
+              visible.add(e.to_node_id)
+            }
+          }
+        }
+      }
+
       this.graphVisibleNodeIds = visible
       this.graphProgressiveEnabled = true
     },

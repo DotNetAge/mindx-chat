@@ -306,10 +306,10 @@ function formatCount(val: number | undefined): string {
   return val.toLocaleString()
 }
 
-/** 是否显示「马上整理」按钮：仅对尚未入队、处理中、或已完成的文件显示。
- * 已完成文件的重新索引统一通过动作列的「重新索引」按钮操作。 */
+/** 是否显示「马上整理」按钮：仅对从未入队的文件（pending）显示。
+ * 已入队或已索引过的文件（包含失败状态）统一通过动作列的按钮操作。 */
 function showIndexNowButton(row: any): boolean {
-  return row.state === 'pending' || row.state === 'error'
+  return row.state === 'pending'
 }
 
 // -- Per-file actions --

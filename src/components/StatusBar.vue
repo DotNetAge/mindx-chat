@@ -301,7 +301,7 @@ function handleOpenAbout() {
           </span>
         </div>
       </div>
-      <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="fetchManifest()" />
+      <IndexDetailsDialog :visible="showIndexDialog" @update:visible="showIndexDialog = $event" @refreshed="fetchManifest(); checkRegionHealth()" />
       <EntityTagsDialog :visible="showEntityTagDialog" @update:visible="showEntityTagDialog = $event" />
     </div>
 
