@@ -2,7 +2,7 @@
 import { computed, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElDialog, ElMessage, ElTag, ElButton, ElTooltip, ElTable, ElTableColumn, ElTabs, ElTabPane, ElCheckbox, ElInput } from 'element-plus'
-import { Loading, Refresh, Setting, Close, CaretRight, RefreshRight } from '@element-plus/icons-vue'
+import { Loading, Refresh, Setting, Close, CaretRight, RefreshRight, WarningFilled } from '@element-plus/icons-vue'
 import { useSessionStore } from '../stores/sessionStore'
 import { useConnectionStore } from '../stores/connectionStore'
 import { readFileContent, writeFileContent } from '../services/graphApi'
@@ -21,6 +21,38 @@ const emit = defineEmits<{
 
 const enqueuing = ref(false)
 const operating = ref<Record<string, boolean>>({}) // per-file operation loading state
+
+// -- Region health --
+const regionHealth = ref<'no_data' | 'healthy' | 'needs_repair' | null>(null)
+const repairing = ref(false)
+
+async function checkRegionHealth() {
+  const projectDir = activeProjectDir.value
+  if (!projectDir) { regionHealth.value = null; return }
+  try {
+    const result = await connectionStore.checkRegionHealth(projectDir)
+    regionHealth.value = result.health
+  } catch {
+    regionHealth.value = null
+  }
+}
+
+async function handleRepairRegion() {
+  const projectDir = activeProjectDir.value
+  if (!projectDir) { ElMessage.warning('No active project directory'); return }
+  repairing.value = true
+  try {
+    const result = await connectionStore.repairRegion(projectDir)
+    ElMessage.success('知识库修复完成，分片数: ' + (result.chunks ?? 0))
+    regionHealth.value = 'healthy'
+    await fetchManifest()
+    emit('refreshed')
+  } catch (err: any) {
+    ElMessage.error('修复失败: ' + (err?.message || ''))
+  } finally {
+    repairing.value = false
+  }
+}
 
 /** Current active project directory. */
 const activeProjectDir = computed(() => sessionStore.activeSession?.project_dir || '')
@@ -59,6 +91,7 @@ watch(() => props.visible, (val) => {
   if (val) {
     manifestData.value = null // 清除旧数据避免重开时闪现旧状态
     fetchManifest()
+    checkRegionHealth()
     startPolling()
   } else {
     stopPolling()
@@ -273,6 +306,12 @@ function formatCount(val: number | undefined): string {
   return val.toLocaleString()
 }
 
+/** 是否显示「马上整理」按钮：仅对尚未入队、处理中、或已完成的文件显示。
+ * 已完成文件的重新索引统一通过动作列的「重新索引」按钮操作。 */
+function showIndexNowButton(row: any): boolean {
+  return row.state === 'pending' || row.state === 'error'
+}
+
 // -- Per-file actions --
 async function handleFileAction(row: any) {
   const opKey = row.path
@@ -290,11 +329,13 @@ async function handleFileAction(row: any) {
       // Retry: remove and re-add to put it back in queue
       await connectionStore.removeFromIndexQueue(projectDir, [row.path])
       await connectionStore.addToIndexQueue(projectDir, [row.path])
+      await connectionStore.enqueueFiles(projectDir, [row.path])
       ElMessage.success('已重新加入队列: ' + basename(row.path))
     } else if (row.state === 'done') {
       // Re-index: remove and re-add
       await connectionStore.removeFromIndexQueue(projectDir, [row.path])
       await connectionStore.addToIndexQueue(projectDir, [row.path])
+      await connectionStore.enqueueFiles(projectDir, [row.path])
       ElMessage.success('已重新加入队列: ' + basename(row.path))
     }
     await fetchManifest()
@@ -387,6 +428,31 @@ async function handleEnqueueAll() {
         </div>
       </div>
 
+      <!-- Region chain broken alert -->
+      <div v-if="regionHealth === 'needs_repair'" class="region-alert">
+        <el-icon class="region-alert-icon"><WarningFilled /></el-icon>
+        <span class="region-alert-text">
+          发现知识库中有知识链条断裂或索引异常，点击下方按钮修复。
+        </span>
+        <ElButton
+          size="small"
+          type="danger"
+          :loading="repairing"
+          @click="handleRepairRegion"
+          class="region-repair-btn"
+        >
+          修复知识库
+        </ElButton>
+      </div>
+
+      <!-- Error summary banner -->
+      <div v-if="totalProgress.failed > 0" class="error-summary">
+        <el-icon class="error-summary-icon"><WarningFilled /></el-icon>
+        <span class="error-summary-text">
+          {{ totalProgress.failed }} 个文件索引失败，将鼠标悬停在状态列的「失败」标签上查看详情。
+        </span>
+      </div>
+
       <!-- All files table (the entire index manifest) -->
       <div class="table-section">
         <ElTable
@@ -427,7 +493,7 @@ async function handleEnqueueAll() {
           <ElTableColumn label="索引" width="52" align="center">
             <template #default="{ row }">
               <ElTooltip
-                v-if="row.state !== 'processing'"
+                v-if="showIndexNowButton(row)"
                 content="马上整理"
                 placement="left"
                 :show-after="300"
@@ -455,7 +521,22 @@ async function handleEnqueueAll() {
           <!-- State -->
           <ElTableColumn prop="state" label="状态" width="72" align="center">
             <template #default="{ row }">
+              <ElTooltip
+                v-if="row.state === 'error' && row.error"
+                :content="row.error"
+                placement="right"
+                :show-after="200"
+              >
+                <ElTag
+                  type="danger"
+                  size="small"
+                  effect="plain"
+                >
+                  失败
+                </ElTag>
+              </ElTooltip>
               <ElTag
+                v-else
                 :type="row.state === 'done' ? 'success' : row.state === 'error' ? 'danger' : row.state === 'processing' ? 'primary' : row.state === 'enqueued' ? 'warning' : 'info'"
                 size="small"
                 effect="plain"
@@ -490,9 +571,14 @@ async function handleEnqueueAll() {
               <span class="table-token-value">{{ formatCount(row.output_tokens) }}</span>
             </template>
           </ElTableColumn>
-          <ElTableColumn prop="cost" label="费用" width="90" align="right" sortable>
+          <ElTableColumn prop="cache_tokens" label="缓存(T)" width="100" align="right" sortable>
             <template #default="{ row }">
-              <span class="table-cost-value">{{ row.cost > 0 ? row.cost.toFixed(6) : '-' }}</span>
+              <span class="table-cache-value">{{ formatCount(row.cache_tokens) }}</span>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn prop="cost" label="费用" width="100" align="right" sortable>
+            <template #default="{ row }">
+              <span class="table-cost-value">{{ row.cost > 0 ? '¥' + row.cost.toFixed(2) : '-' }}</span>
             </template>
           </ElTableColumn>
           <ElTableColumn prop="elapsed_ms" label="耗时" width="72" align="right" sortable>
@@ -639,6 +725,54 @@ async function handleEnqueueAll() {
   color: #f59e0b;
 }
 
+/* ── Error summary banner ── */
+.error-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 6px 4px 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.error-summary-icon {
+  font-size: 16px;
+  color: #ef4444;
+  flex-shrink: 0;
+}
+.error-summary-text {
+  color: #fca5a5;
+  line-height: 1.4;
+}
+
+/* ── Region alert ── */
+.region-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 6px 4px 8px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.region-alert-icon {
+  font-size: 16px;
+  color: #f59e0b;
+  flex-shrink: 0;
+}
+.region-alert-text {
+  color: #fcd34d;
+  line-height: 1.4;
+  flex: 1;
+}
+.region-repair-btn {
+  flex-shrink: 0;
+}
+
 /* ── Table section ── */
 .table-section {
   flex: 1;
@@ -671,6 +805,11 @@ async function handleEnqueueAll() {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   color: #94a3b8;
+}
+.table-cache-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: #a78bfa;
 }
 .table-metric-value {
   font-family: 'JetBrains Mono', monospace;
@@ -896,5 +1035,32 @@ async function handleEnqueueAll() {
 .ignore-config-dialog .el-dialog__footer {
   padding: 8px 24px 18px;
   border-top: 1px solid rgba(55, 65, 81, 0.3);
+}
+
+/* ── State tag colors ── */
+.index-details-dialog .el-tag--success {
+  --el-tag-bg-color: rgba(52, 211, 153, 0.15);
+  --el-tag-border-color: rgba(52, 211, 153, 0.4);
+  --el-tag-text-color: #34d399;
+}
+.index-details-dialog .el-tag--danger {
+  --el-tag-bg-color: rgba(239, 68, 68, 0.15);
+  --el-tag-border-color: rgba(239, 68, 68, 0.4);
+  --el-tag-text-color: #ef4444;
+}
+.index-details-dialog .el-tag--primary {
+  --el-tag-bg-color: rgba(96, 165, 250, 0.15);
+  --el-tag-border-color: rgba(96, 165, 250, 0.4);
+  --el-tag-text-color: #60a5fa;
+}
+.index-details-dialog .el-tag--warning {
+  --el-tag-bg-color: rgba(251, 191, 36, 0.15);
+  --el-tag-border-color: rgba(251, 191, 36, 0.4);
+  --el-tag-text-color: #fbbf24;
+}
+.index-details-dialog .el-tag--info {
+  --el-tag-bg-color: rgba(100, 116, 139, 0.15);
+  --el-tag-border-color: rgba(100, 116, 139, 0.4);
+  --el-tag-text-color: #94a3b8;
 }
 </style>

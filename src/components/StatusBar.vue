@@ -98,6 +98,27 @@ async function handleOpenKB() {
   }
 }
 
+// ── Region health check ──
+const regionHealth = ref<'no_data' | 'healthy' | 'needs_repair' | null>(null)
+const regionChecking = ref(false)
+
+async function checkRegionHealth() {
+  const projectDir = activeProjectDir.value
+  if (!projectDir || !connectionStore.isConnected) {
+    regionHealth.value = null
+    return
+  }
+  regionChecking.value = true
+  try {
+    const result = await connectionStore.checkRegionHealth(projectDir)
+    regionHealth.value = result.health
+  } catch {
+    regionHealth.value = null
+  } finally {
+    regionChecking.value = false
+  }
+}
+
 // ── Manifest data for progress bar ──
 const manifestData = ref<any>(null)
 const manifestLoading = ref(false)
@@ -123,8 +144,10 @@ async function fetchManifest() {
 watch(() => sessionStore.activeSession?.project_dir, (projectDir) => {
   if (projectDir && connectionStore.isConnected) {
     fetchManifest()
+    checkRegionHealth()
   } else {
     manifestData.value = null
+    regionHealth.value = null
   }
 })
 
@@ -244,17 +267,24 @@ function handleOpenAbout() {
 
       <!-- 知识库索引 -->
       <div class="kb-section" v-if="activeProjectDir">
-        <ElTooltip content="打开知识库整理服务" placement="top" :show-after="400">
-          <button
-            class="kb-label-btn"
-            @click="handleOpenKB"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-            </svg>
-            <span class="kb-label">知识库</span>
-          </button>
-        </ElTooltip>
+        <ElBadge
+          :value="'!'"
+          :hidden="regionHealth !== 'needs_repair'"
+          type="danger"
+          class="region-badge"
+        >
+          <ElTooltip content="打开知识库整理服务" placement="top" :show-after="400">
+            <button
+              class="kb-label-btn"
+              @click="handleOpenKB"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
+              <span class="kb-label">知识库</span>
+            </button>
+          </ElTooltip>
+        </ElBadge>
 
         <!-- Indexing Progress Bar -->
         <div
@@ -431,6 +461,22 @@ function handleOpenAbout() {
   line-height: 15px;
   min-width: 15px;
   border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+/* Region badge */
+.region-badge {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+.region-badge :deep(sup.el-badge__content) {
+  font-size: 9px;
+  padding: 0 4px;
+  height: 15px;
+  line-height: 15px;
+  min-width: 15px;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  transform: translate(25%, -25%);
 }
 
 /* Project directory */

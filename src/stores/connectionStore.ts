@@ -1160,6 +1160,12 @@ export const useConnectionStore = defineStore('connection', {
       return client.call('kb.index.enqueue', { project_dir: projectDir })
     },
 
+    async enqueueFiles(projectDir: string, files: string[]): Promise<any> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('kb.index.enqueue', { project_dir: projectDir, files })
+    },
+
     async indexSingleFile(projectDir: string, path: string, force = false): Promise<any> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
@@ -1168,6 +1174,20 @@ export const useConnectionStore = defineStore('connection', {
       }
       await client.call('kb.index.add', { project_dir: projectDir, files: [path] })
       return client.call('kb.index.enqueue', { project_dir: projectDir, files: [path] })
+    },
+
+    // ── Region Health RPC ──
+
+    async checkRegionHealth(projectDir: string): Promise<{ health: 'no_data' | 'healthy' | 'needs_repair' }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('kb.check_region_health', { project_dir: projectDir })
+    },
+
+    async repairRegion(projectDir: string): Promise<{ status: string; chunks?: number; region_file?: string }> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      return client.call('kb.repair_region', { project_dir: projectDir })
     },
   }
 })
