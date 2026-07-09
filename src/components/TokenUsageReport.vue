@@ -52,7 +52,7 @@ async function loadSessionDetail() {
       inputTokens: r.input_tokens,
       outputTokens: r.output_tokens,
       cachedTokens: r.cached_tokens,
-      totalTokens: r.total_tokens,
+      totalTokens: Math.max(r.input_tokens + r.output_tokens - r.cached_tokens, 0),
       cost: r.cost,
       sessionId
     }))
@@ -91,6 +91,20 @@ const formatCost = (cost: number): string => {
   if (cost < 0.01) return '¥0.00'
   return '¥' + cost.toFixed(2)
 }
+
+const sessionAverages = computed(() => {
+  const records = sessionRecords.value
+  if (!records.length) return null
+  const n = records.length
+  const sum = (fn: (r: typeof records[0]) => number) => records.reduce((a, r) => a + fn(r), 0)
+  return {
+    inputAvg: Math.round(sum(r => r.inputTokens) / n),
+    outputAvg: Math.round(sum(r => r.outputTokens) / n),
+    cacheAvg: Math.round(sum(r => r.cachedTokens) / n),
+    totalAvg: Math.round(sum(r => r.inputTokens + r.outputTokens - r.cachedTokens) / n),
+    costAvg: sum(r => r.cost) / n,
+  }
+})
 
 const formatNumber = (num: number): string => {
   return num.toLocaleString('zh-CN')
@@ -360,6 +374,14 @@ onMounted(() => {
             <p>{{ t('tokenUsage.noRecord') }}</p>
           </div>
           <div v-else class="session-records-table-wrapper">
+            <div v-if="sessionAverages" class="session-averages">
+              <span class="avg-label">{{ t('tokenUsage.averageStats') }}</span>
+              <span class="avg-item">{{ t('tokenUsage.inputTokens') }} {{ formatCompactNumber(sessionAverages.inputAvg) }}</span>
+              <span class="avg-item">{{ t('tokenUsage.outputTokens') }} {{ formatCompactNumber(sessionAverages.outputAvg) }}</span>
+              <span class="avg-item">{{ t('tokenUsage.cacheTokens') }} {{ formatCompactNumber(sessionAverages.cacheAvg) }}</span>
+              <span class="avg-item">{{ t('tokenUsage.totalTokens') }} {{ formatCompactNumber(sessionAverages.totalAvg) }}</span>
+              <span class="avg-item">{{ t('tokenUsage.cost') }} {{ formatCost(sessionAverages.costAvg) }}</span>
+            </div>
             <table class="session-records-table">
               <thead>
                 <tr>
@@ -637,6 +659,15 @@ onMounted(() => {
 /* Session Detail Table */
 .session-detail-section { background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(55, 65, 81, 0.4); border-radius: 12px; padding: 20px 24px; }
 .section-title { font-size: 15px; font-weight: 700; color: #e2e8f0; margin: 0 0 16px 0; }
+.session-averages {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 12px; margin-bottom: 12px;
+  background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 8px; font-size: 12px;
+}
+.avg-label { font-weight: 700; color: #60a5fa; white-space: nowrap; }
+.avg-item { color: #e2e8f0; font-family: 'JetBrains Mono', monospace; }
+.avg-item + .avg-label { margin-left: 4px; }
 .session-records-table-wrapper { overflow-x: auto; }
 .session-records-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .session-records-table thead th {

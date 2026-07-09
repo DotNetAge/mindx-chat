@@ -12,6 +12,7 @@ import TokenUsageReport from './TokenUsageReport.vue'
 import RuleEditor from './RuleEditor.vue'
 import EntityTagsDialog from './EntityTagsDialog.vue'
 import AgentSelectorDialog from './AgentSelectorDialog.vue'
+import MCPExplorer from './MCPExplorer.vue'
 import FileExplorer from './FileExplorer.vue'
 import { useFileExplorerStore } from '../stores/fileExplorerStore'
 import { useI18n } from 'vue-i18n'
@@ -66,6 +67,7 @@ const showRuleEditor = ref(false)
 const showEntityTags = inject('showEntityTags', ref(false))
 const restarting = ref(false)
 const showAgentSelector = ref(false)
+const showMCPExplorer = ref(false)
 const showAbout = ref(false)
 const showDirBrowser = ref(false)
 const currentRelease = ref<any>(null)
@@ -666,6 +668,23 @@ watch(showTokenReport, (val) => {
             </el-button>
           </div>
 
+          <!-- MCP Explorer -->
+          <div class="setting-row">
+            <div class="setting-row-info">
+              <el-icon class="setting-row-icon"><Link /></el-icon>
+              <div class="setting-row-text">
+                <div class="setting-row-title">{{ t('sidebar.mcp') }}</div>
+                <div class="setting-row-desc">{{ t('sidebar.mcpDesc') }}</div>
+              </div>
+            </div>
+            <el-button
+              size="small"
+              @click="showMCPExplorer = true"
+            >
+              {{ t('sidebar.configure') }}
+            </el-button>
+          </div>
+
           <!-- Restart Service -->
           <div class="setting-row">
             <div class="setting-row-info">
@@ -1043,6 +1062,7 @@ watch(showTokenReport, (val) => {
     </el-dialog>
 
     <AgentSelectorDialog v-model:visible="showAgentSelector" />
+    <MCPExplorer v-model:visible="showMCPExplorer" />
     <FileExplorer />
   </aside>
 </template>

@@ -42,20 +42,6 @@ const filteredSchedules = computed(() => {
   return schedules.value.filter(s => s.agent === filterAgent.value)
 })
 
-// ── 双击检测（FullCalendar 无原生双击事件） ──
-const lastClick = ref<{ date: string; time: number } | null>(null)
-
-function handleDateClick(info: { dateStr: string; date: Date }) {
-  const now = Date.now()
-  if (lastClick.value && lastClick.value.date === info.dateStr && now - lastClick.value.time < 500) {
-    // 双击同一日期 → 打开创建表单
-    openCreateDialog(info.dateStr)
-    lastClick.value = null
-  } else {
-    lastClick.value = { date: info.dateStr, time: now }
-  }
-}
-
 // ── 根据当前语言选择 meta 中的对应字段 ──
 function getAgentLocaleName(agent: { name: string; meta?: Record<string, any> }): string {
   if (!agent.meta) return agent.name
@@ -66,6 +52,14 @@ function getAgentLocaleName(agent: { name: string; meta?: Record<string, any> })
   else return agent.name
   const v = agent.meta[key]
   return v != null ? String(v) : agent.name
+}
+
+// ── FullCalendar 原生 dblclick（通过 dayCellDidMount 绑定） ──
+function handleDayCellDidMount(info: any) {
+  info.el.addEventListener('dblclick', () => {
+    const dateStr = info.date.toISOString().slice(0, 10)
+    openCreateDialog(dateStr)
+  })
 }
 
 // ── 创建任务表单 ──
@@ -204,7 +198,7 @@ const calendarOptions = computed(() => ({
   },
   noEventsText: t('schedule.empty'),
   moreLinkText: (n: number) => `+${n}`,
-  dateClick: handleDateClick,
+  dayCellDidMount: handleDayCellDidMount,
 }))
 
 async function loadSchedules() {
@@ -282,7 +276,6 @@ watch(() => store.visible, (v) => {
             <FullCalendar
               ref="calendarRef"
               :options="calendarOptions"
-              @date-click="handleDateClick"
               @event-click="handleEventClick"
             />
           </div>

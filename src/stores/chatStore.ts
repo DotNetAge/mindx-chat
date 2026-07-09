@@ -1464,7 +1464,7 @@ export const useChatStore = defineStore('chat', {
       const inputTokens = opts?.meta?.input_tokens || data?.token_usage?.input_tokens || data?.input_tokens || 0
       const outputTokens = opts?.meta?.output_tokens || data?.token_usage?.output_tokens || data?.output_tokens || 0
       const cacheTokens = opts?.meta?.cache_tokens || data?.token_usage?.cache_tokens || data?.cache_tokens || 0
-      const totalTokens = typeof data === 'object' ? (data.token_usage?.total_tokens || data.total_tokens || inputTokens + outputTokens) : inputTokens + outputTokens
+      const totalTokens = Math.max(0, inputTokens + outputTokens - cacheTokens)
 
       this.addMessage(targetSessionId, {
         role: 'assistant',

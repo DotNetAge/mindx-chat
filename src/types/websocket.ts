@@ -174,6 +174,7 @@ export interface DailyUsage {
   date: string;
   input_tokens: number;
   output_tokens: number;
+  cached_tokens?: number;
   total_tokens: number;
   cost: number;
   request_count: number;
@@ -186,6 +187,7 @@ export interface ModelUsageSummary {
   total_tokens: number;
   input_tokens: number;
   output_tokens: number;
+  cached_tokens?: number;
   total_cost: number;
   request_count: number;
   avg_tokens_per_request: number;

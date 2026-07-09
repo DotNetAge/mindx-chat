@@ -47,6 +47,12 @@ const saveDialogVisible = ref(false)
 const saveFilename = ref('')
 const saveSuccess = ref(false)
 
+function formatCompactNumber(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`
+  return String(n)
+}
+
 // 共享的 markdown-it + hljs + mermaid 实例（与 ToolExecView 共用同一份配置）
 const { md, renderMermaidInRoot } = useMarkdown()
 
@@ -208,10 +214,10 @@ watch(
     <pre v-else class="raw-content"><code>{{ content }}</code></pre>
 
     <div class="meta" v-if="tokensOut > 0 || duration">
-      <span v-if="tokensIn > 0" class="meta-item">{{ t('outputView.tokensIn', { n: tokensIn }) }}</span>
-      <span v-if="tokensOut > 0" class="meta-item">{{ t('outputView.tokensOut', { n: tokensOut }) }}</span>
-      <span v-if="tokensCache > 0" class="meta-item">{{ t('outputView.tokensCache', { n: tokensCache }) }}</span>
-      <span v-if="tokensIn > 0 || tokensOut > 0" class="meta-item">{{ t('outputView.tokensTotal', { n: tokensIn + tokensOut - tokensCache }) }}</span>
+      <span v-if="tokensIn > 0" class="meta-item">{{ t('outputView.tokensIn', { n: formatCompactNumber(tokensIn) }) }}</span>
+      <span v-if="tokensOut > 0" class="meta-item">{{ t('outputView.tokensOut', { n: formatCompactNumber(tokensOut) }) }}</span>
+      <span v-if="tokensIn > 0 || tokensOut > 0" class="meta-item">{{ t('outputView.tokensCache', { n: formatCompactNumber(tokensCache) }) }}</span>
+      <span v-if="tokensIn > 0 || tokensOut > 0" class="meta-item">{{ t('outputView.tokensTotal', { n: formatCompactNumber(tokensIn + tokensOut - tokensCache) }) }}</span>
       <span v-if="duration" class="meta-item">{{ duration }}ms</span>
     </div>
 
