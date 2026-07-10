@@ -347,6 +347,8 @@
       "TeamList": "列出团队",
       "TeamGetTasks": "获取团队任务",
       "AgentTalk": "悄悄话",
+      "Cron": "计划任务",
+      "SendMessage": "发送消息",
       "LocalSearch": "搜索知识库",
       "Sleep": "等待",
       "Skill": "激活技能",
@@ -1053,7 +1055,9 @@
       "TeamDelete": "删除团队",
       "TeamList": "团队列表",
       "TeamGetTasks": "团队任务",
-      "AgentTalk": "Agent 对话"
+      "AgentTalk": "Agent 对话",
+      "Cron": "计划任务",
+      "SendMessage": "发送通知"
     },
     "toolDescs": {
       "Grep": "具有强大而且高速的全文搜索能力",
@@ -1074,7 +1078,9 @@
       "TeamCreate": "创建一组 Agent 协作处理任务",
       "TeamDelete": "删除团队并清理相关数据",
       "TeamList": "列出所有团队及其成员和状态",
-      "TeamGetTasks": "获取分配给团队的所有任务"
+      "TeamGetTasks": "获取分配给团队的所有任务",
+      "Cron": "按指定的 cron 表达式定时执行任务",
+      "SendMessage": "向用户发送通知或消息"
     },
     "groupNames": {
       "task": "任务分解",

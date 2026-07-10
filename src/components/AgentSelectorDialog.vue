@@ -45,6 +45,8 @@ const TOOLS: ToolDef[] = [
   { name: 'TeamDelete', desc: 'Delete a team and clean up its associated data' },
   { name: 'TeamList', desc: 'List all teams with their members and status' },
   { name: 'TeamGetTasks', desc: 'Get all tasks assigned to a team' },
+  { name: 'Cron', desc: 'Schedule tasks to run at specified times using cron expressions' },
+  { name: 'SendMessage', desc: 'Send notifications or messages to users' },
 ]
 
 // ── 工具组定义（用户看到的抽象能力） ──

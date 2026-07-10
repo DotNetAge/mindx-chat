@@ -348,7 +348,9 @@
       "LocalSearch": "Search Knowledge Base",
       "Sleep": "Wait",
       "Skill": "Activate Skill",
-      "Introspect": "Introspect"
+      "Introspect": "Introspect",
+      "Cron": "Scheduled Task",
+      "SendMessage": "Send Notification"
     }
   },
   "diff": { "added": "Added", "modified": "View changes" },
@@ -1050,7 +1052,9 @@
       "TeamDelete": "TeamDelete",
       "TeamList": "TeamList",
       "TeamGetTasks": "TeamGetTasks",
-      "AgentTalk": "AgentTalk"
+      "AgentTalk": "AgentTalk",
+      "Cron": "Cron",
+      "SendMessage": "SendMessage"
     },
     "toolDescs": {
       "Grep": "A powerful search tool built on ripgrep",
@@ -1073,7 +1077,9 @@
       "TeamCreate": "Create a team of agents that work together on a task",
       "TeamDelete": "Delete a team and clean up its associated data",
       "TeamList": "List all teams with their members and status",
-      "TeamGetTasks": "Get all tasks assigned to a team"
+      "TeamGetTasks": "Get all tasks assigned to a team",
+      "Cron": "Schedule tasks to run at specified times using cron expressions",
+      "SendMessage": "Send notifications or messages to users"
     },
     "groupNames": {
       "task": "Task Decomposition",

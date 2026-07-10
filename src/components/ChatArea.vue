@@ -86,26 +86,44 @@ const sessionStore = useSessionStore()
 const connectionStore = useConnectionStore()
 
 // ── 多 Tab 会话系统 ──
-// openTabIds: 已打开的会话 Tab ID 列表（始终包含当前活跃会话）
-const openTabIds = ref<string[]>([])
+// openTabIds: 已打开的会话 Tab 列表（始终包含当前活跃会话）
+// 缓存 agentName/title，避免 syncServerSessions 替换后查找不到
+interface TabInfo {
+  sessionId: string
+  agentName: string
+  title: string
+}
+const openTabIds = ref<TabInfo[]>([])
 
 // 确保当前活跃会话在 tab 列表中
 function ensureActiveTab(sessionId: string) {
-  if (sessionId && !openTabIds.value.includes(sessionId)) {
-    openTabIds.value.push(sessionId)
+  if (sessionId && !openTabIds.value.some(t => t.sessionId === sessionId)) {
+    const agentName = sessionStore.activeSession?.agent_name || ''
+    const title = sessionStore.activeSession?.title || sessionId.slice(0, 8)
+    openTabIds.value.push({ sessionId, agentName, title })
   }
 }
 
 // 切换会话 Tab
 async function switchSessionTab(sessionId: string) {
   if (sessionId === sessionStore.activeSessionId) return
+
+  // 从 tab 缓存中获取 agentName（不依赖 sessionStore.sessions，可能已被替换）
+  const tab = openTabIds.value.find(t => t.sessionId === sessionId)
+  if (tab?.agentName && tab.agentName !== connectionStore.currentAgent?.name) {
+    // 先更新 lastSession，使 Sidebar watcher 自动选中的仍是此会话，避免循环
+    connectionStore.setLastSession(sessionId)
+    connectionStore.setLastAgent(tab.agentName)
+    connectionStore.setCurrentAgent(tab.agentName)
+  }
+
   await sessionStore.switchToSession(sessionId)
 }
 
 // 关闭会话 Tab（活跃 Tab 不可关闭）
 function closeSessionTab(sessionId: string) {
   if (sessionId === sessionStore.activeSessionId) return
-  const idx = openTabIds.value.indexOf(sessionId)
+  const idx = openTabIds.value.findIndex(t => t.sessionId === sessionId)
   if (idx === -1) return
   openTabIds.value.splice(idx, 1)
 }
@@ -650,17 +668,17 @@ function logCurrentMessages(_messages: any[]) {
     <!-- ── 会话 Tab 栏 ── -->
     <div v-if="openTabIds.length > 1" class="session-tab-bar">
       <div
-        v-for="sid in openTabIds"
-        :key="sid"
+        v-for="tab in openTabIds"
+        :key="tab.sessionId"
         class="session-tab"
-        :class="{ active: sid === sessionStore.activeSessionId }"
-        @click="switchSessionTab(sid)"
+        :class="{ active: tab.sessionId === sessionStore.activeSessionId }"
+        @click="switchSessionTab(tab.sessionId)"
       >
-        <span class="session-tab-title">{{ sessionStore.sessions.find(s => s.session_id === sid)?.title || sid.slice(0, 8) }}</span>
+        <span class="session-tab-title">{{ tab.title }}</span>
         <el-icon
-          v-if="sid !== sessionStore.activeSessionId"
+          v-if="tab.sessionId !== sessionStore.activeSessionId"
           class="session-tab-close"
-          @click.stop="closeSessionTab(sid)"
+          @click.stop="closeSessionTab(tab.sessionId)"
         >
           <Close />
         </el-icon>

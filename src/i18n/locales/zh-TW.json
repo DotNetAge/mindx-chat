@@ -341,7 +341,9 @@
       "LocalSearch": "搜尋知識庫",
       "Sleep": "等待",
       "Skill": "激活技能",
-      "Introspect": "内省"
+      "Introspect": "内省",
+      "Cron": "計畫任務",
+      "SendMessage": "發送通知"
     }
   },
   "diff": { "added": "新增", "modified": "查看修改" },
@@ -1046,7 +1048,9 @@
       "TeamDelete": "刪除團隊",
       "TeamList": "團隊列表",
       "TeamGetTasks": "團隊任務",
-      "AgentTalk": "Agent 對話"
+      "AgentTalk": "Agent 對話",
+      "Cron": "計畫任務",
+      "SendMessage": "發送通知"
     },
     "toolDescs": {
       "Grep": "具有强大而且高速的全文搜索能力",
@@ -1067,7 +1071,9 @@
       "TeamCreate": "创建一组 Agent 协作处理任务",
       "TeamDelete": "删除团队并清理相关数据",
       "TeamList": "列出所有团队及其成员和状态",
-      "TeamGetTasks": "获取分配给团队的所有任务"
+      "TeamGetTasks": "获取分配给团队的所有任务",
+      "Cron": "按指定的 cron 表达式定时执行任务",
+      "SendMessage": "向用户发送通知或消息"
     },
     "groupNames": {
       "task": "任務分解",
