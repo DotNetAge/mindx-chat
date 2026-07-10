@@ -70,6 +70,9 @@ const diffHtml = computed(() => {
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(6, 182, 212, 0.08);
   margin: 6px 0;
+  /* Contain absolutely positioned diff2html line numbers and clip them
+     to the rounded block, preventing them from escaping to the outer chat scroller. */
+  position: relative;
 }
 
 .diff-header {
@@ -204,12 +207,16 @@ const diffHtml = computed(() => {
   font-size: 11px;
   line-height: 1.5;
   color: #e2e8f0;
+  /* Establish a positioning context so the absolutely positioned
+     diff2html line number stays anchored to its own line. */
+  position: relative;
 }
 
 .diff-body :deep(.d2h-code-side-line) {
   font-size: 11px;
   line-height: 1.5;
   color: #e2e8f0;
+  position: relative;
 }
 
 .diff-body :deep(.d2h-code-line-ctn) {

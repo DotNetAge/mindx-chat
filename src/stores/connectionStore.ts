@@ -586,6 +586,24 @@ export const useConnectionStore = defineStore('connection', {
       client.on('permission_request', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          // 设置 pendingPermissionToolName 供 grant/deny 使用
+          const toolName = envelope.data?.tool_name || envelope.data?.toolName || ''
+          if (toolName) {
+            chatStore.pendingPermissionToolName = toolName
+          }
+          chatStore.addSubtaskMessage(targetSessionId, subtaskId, {
+            role: 'system',
+            content: '',
+            eventType: 'permission_request',
+            eventTitle: envelope.title || '🔒 ' + t('message.permissionRequest'),
+            eventData: envelope.data,
+            agentName: envelope.agent_name,
+            metadata: { phase: 'permission' }
+          })
+          return
+        }
         chatStore.handlePermissionRequest(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -595,6 +613,19 @@ export const useConnectionStore = defineStore('connection', {
       client.on('permission_denied', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          chatStore.addSubtaskMessage(targetSessionId, subtaskId, {
+            role: 'system',
+            content: envelope.data || t('message.permissionDenied'),
+            eventType: 'permission_denied',
+            eventTitle: t('message.permissionDenied'),
+            eventData: envelope.data,
+            agentName: envelope.agent_name,
+            metadata: { phase: 'permission_denied' }
+          })
+          return
+        }
         chatStore.handlePermissionDenied(envelope.data, {
           session_id: targetSessionId
         })
@@ -603,6 +634,19 @@ export const useConnectionStore = defineStore('connection', {
       client.on('form', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          chatStore.addSubtaskMessage(targetSessionId, subtaskId, {
+            role: 'system',
+            content: '',
+            eventType: 'form',
+            eventTitle: envelope.title || '💬 ' + t('message.clarification'),
+            eventData: envelope.data,
+            agentName: envelope.agent_name,
+            metadata: { phase: 'clarify' }
+          })
+          return
+        }
         chatStore.handleAskUserRequest(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title
@@ -688,6 +732,25 @@ export const useConnectionStore = defineStore('connection', {
       client.on('file_modified', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
+        const rawFiles: any[] = envelope.data?.files || []
+        const files = rawFiles.map((f: any) =>
+          typeof f === 'string'
+            ? { path: f, diff: '', additions: 0, deletions: 0, isNew: false }
+            : {
+              path: f.path || '',
+              diff: f.diff || '',
+              additions: f.additions || 0,
+              deletions: f.deletions || 0,
+              isNew: f.isNew || false
+            }
+        )
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+        if (subtaskId && targetSessionId) {
+          for (const file of files) {
+            chatStore.upsertSubtaskFileModified(targetSessionId, subtaskId, file, envelope.agent_name)
+          }
+          return
+        }
         chatStore.handleFileModified(envelope.data, {
           session_id: targetSessionId,
           title: envelope.title

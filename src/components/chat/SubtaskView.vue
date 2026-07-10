@@ -7,6 +7,11 @@ import { useConnectionStore } from '../../stores/connectionStore'
 import ThinkingView from './ThinkingView.vue'
 import ToolExecView from './ToolExecView.vue'
 import OutputView from './OutputView.vue'
+import ErrorView from './ErrorView.vue'
+import PermissionBar from './PermissionBar.vue'
+import DiffView from './DiffView.vue'
+import FormView from './FormView.vue'
+import AskUserView from './AskUserView.vue'
 
 const { t, locale } = useI18n()
 const chatStore = useChatStore()
@@ -67,27 +72,51 @@ const rawSubMessages = computed(() => {
 
 // Process raw messages into display blocks:
 //   - Consecutive thinking_delta + following thinking_done → merged into one thinking block
-//   - tool_exec, markdown, content_delta, final_answer, error → passed through
+//   - Consecutive content_delta / markdown → merged into one output block
+//   - tool_use_delta → filtered out (params already merged into tool_exec, same as main flow)
+//   - tool_exec, final_answer, error, permission_request, file_modified, form → passed through
 const displayBlocks = computed(() => {
   const raw = rawSubMessages.value
   const blocks: Array<{ type: string; data: any }> = []
   let thinkingAccum = ''
+  let contentAccum = ''
+
+  function flushContent() {
+    if (contentAccum) {
+      blocks.push({ type: 'content_delta', data: { content: contentAccum } })
+      contentAccum = ''
+    }
+  }
 
   for (const msg of raw) {
+    // tool_use_delta: 不独立渲染，参数已合并到 tool_exec（与主对话流一致）
+    if (msg.eventType === 'tool_use_delta') {
+      continue
+    }
     if (msg.eventType === 'thinking_delta') {
+      flushContent()
       thinkingAccum += msg.content || ''
     } else if (msg.eventType === 'thinking_done') {
+      flushContent()
       // Merge accumulated delta with final content (prefer the larger one)
       const finalC = msg.content || ''
       const merged = (thinkingAccum.length > finalC.length) ? thinkingAccum : finalC
       blocks.push({ type: 'thinking_done', data: { content: merged } })
       thinkingAccum = ''
-    } else {
-      // Flush any pending thinking
+    } else if (msg.eventType === 'content_delta' || msg.eventType === 'markdown') {
+      // Flush any pending thinking before starting content accumulation
       if (thinkingAccum) {
         blocks.push({ type: 'thinking_delta', data: { content: thinkingAccum } })
         thinkingAccum = ''
       }
+      contentAccum += msg.content || ''
+    } else {
+      // Flush any pending thinking and content
+      if (thinkingAccum) {
+        blocks.push({ type: 'thinking_delta', data: { content: thinkingAccum } })
+        thinkingAccum = ''
+      }
+      flushContent()
       blocks.push({ type: msg.eventType, data: msg })
     }
   }
@@ -95,6 +124,7 @@ const displayBlocks = computed(() => {
   if (thinkingAccum) {
     blocks.push({ type: 'thinking_delta', data: { content: thinkingAccum } })
   }
+  flushContent()
 
   return blocks
 })
@@ -118,6 +148,31 @@ const displayAgentName = computed(() => {
 
 function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
+}
+
+async function handlePermissionGrant(data: Record<string, any>) {
+  const toolName = chatStore.pendingPermissionToolName
+  if (!toolName) return
+  const sessionId = sessionStore.activeSessionId
+  if (!sessionId) return
+  const remember = data?.remember === true
+  try {
+    await connStore.resumeExecution(sessionId, toolName)
+    chatStore.pendingPermissionToolName = ''
+    const { getMindXClient } = await import('../../services/websocket')
+    const client = getMindXClient()
+    if (client) {
+      const magicWord = remember ? 'PermissionAllowSession' : 'PermissionAllow'
+      client.sendMessage(magicWord, sessionId)
+      chatStore.isProcessing = true
+    }
+  } catch (err) {
+    console.error('[SubtaskView] Failed to grant permission:', err)
+  }
+}
+
+function handlePermissionDeny() {
+  chatStore.pendingPermissionToolName = ''
 }
 </script>
 
@@ -207,19 +262,17 @@ function toggleCollapse() {
             <template v-for="(block, idx) in displayBlocks" :key="idx">
               <!-- Thinking (streaming) -->
               <div v-if="block.type === 'thinking_delta'" class="conv-msg msg-thinking">
-                <div class="msg-header">
-                  <span class="msg-dot thinking-dot"></span>
-                  <span class="msg-type-label">{{ t('chat.thinking') }}</span>
-                </div>
-                <div class="thinking-text pending">{{ block.data.content }}</div>
+                <ThinkingView
+                  :content="''"
+                  :pending="block.data.content"
+                  :isActive="true"
+                  :isComplete="false"
+                  :durationMs="0"
+                />
               </div>
 
               <!-- Thinking (complete) -->
               <div v-else-if="block.type === 'thinking_done'" class="conv-msg msg-thinking">
-                <div class="msg-header">
-                  <span class="msg-dot thinking-dot done"></span>
-                  <span class="msg-type-label">{{ t('message.thinking') }}</span>
-                </div>
                 <ThinkingView
                   :content="block.data.content"
                   :pending="''"
@@ -248,21 +301,8 @@ function toggleCollapse() {
                 />
               </div>
 
-              <!-- Tool Use Delta (accumulated) -->
-              <div v-else-if="block.type === 'tool_use_delta'" class="conv-msg msg-tool-delta">
-                <div class="msg-header">
-                  <span class="msg-dot delta-dot"></span>
-                  <span class="msg-type-label">{{ block.data.eventData?.name || block.data.agentName || t('message.toolUse') }}</span>
-                </div>
-                <div class="delta-content">{{ block.data.content }}</div>
-              </div>
-
               <!-- Final Answer -->
               <div v-else-if="block.type === 'final_answer'" class="conv-msg msg-output">
-                <div class="msg-header">
-                  <span class="msg-dot output-dot"></span>
-                  <span class="msg-type-label">{{ block.data.eventTitle || t('message.finalAnswer') }}</span>
-                </div>
                 <OutputView
                   :content="block.data.content"
                   :title="block.data.eventTitle"
@@ -272,11 +312,44 @@ function toggleCollapse() {
 
               <!-- Error -->
               <div v-else-if="block.type === 'error'" class="conv-msg msg-error-block">
-                <div class="msg-header">
-                  <span class="msg-dot error-dot"></span>
-                  <span class="msg-type-label error-label">{{ t('common.error') }}</span>
-                </div>
-                <div class="error-content">{{ block.data.content }}</div>
+                <ErrorView
+                  :message="block.data.content || t('message.error')"
+                  :code="block.data.eventData?.code || ''"
+                  :details="typeof block.data.eventData === 'string' ? block.data.eventData : JSON.stringify(block.data.eventData, null, 2)"
+                  :isRecoverable="false"
+                />
+              </div>
+
+              <!-- Permission Request -->
+              <div v-else-if="block.type === 'permission_request'" class="conv-msg msg-permission">
+                <PermissionBar
+                  :toolName="block.data.eventData?.tool_name || block.data.eventData?.toolName || ''"
+                  :params="block.data.eventData?.params || block.data.eventData?.Params || {}"
+                  :reason="block.data.eventData?.reason || block.data.eventData?.Reason || ''"
+                  :securityLevel="String(block.data.eventData?.security_level || block.data.eventData?.SecurityLevel || 'medium')"
+                  @grant="handlePermissionGrant"
+                  @deny="handlePermissionDeny"
+                />
+              </div>
+
+              <!-- File Modified Diff -->
+              <div v-else-if="block.type === 'file_modified'" class="conv-msg msg-diff">
+                <DiffView
+                  :filePath="block.data.eventTitle || ''"
+                  :diff="block.data.eventData?.diff || ''"
+                  :additions="block.data.eventData?.additions || 0"
+                  :deletions="block.data.eventData?.deletions || 0"
+                  :isNew="block.data.eventData?.isNew || false"
+                />
+              </div>
+
+              <!-- Form / AskUser -->
+              <div v-else-if="block.type === 'form'" class="conv-msg msg-form">
+                <AskUserView :formData="block.data.eventData || {}" />
+              </div>
+
+              <div v-else-if="block.type === 'clarify_needed'" class="conv-msg msg-form">
+                <FormView v-bind="block.data.eventData || {}" />
               </div>
 
               <!-- Fallback -->
@@ -631,7 +704,7 @@ function toggleCollapse() {
   margin-top: 2px;
 }
 
-/* ===== Message Header ===== */
+/* ===== Message Header (Fallback only) ===== */
 
 .msg-header {
   display: flex;
@@ -648,22 +721,6 @@ function toggleCollapse() {
   flex-shrink: 0;
 }
 
-.thinking-dot {
-  background: #22d3ee;
-}
-
-.thinking-dot.done {
-  background: #2dd4bf;
-}
-
-.output-dot {
-  background: #a78bfa;
-}
-
-.error-dot {
-  background: #f87171;
-}
-
 .msg-type-label {
   font-size: 11px;
   font-weight: 600;
@@ -671,30 +728,12 @@ function toggleCollapse() {
   letter-spacing: 0.2px;
 }
 
-.error-label {
-  color: #f87171;
-}
-
 /* ===== Thinking Messages ===== */
 
 .msg-thinking {
-  padding: 10px 12px;
-  background: rgba(6, 182, 212, 0.04);
-  border: 1px solid rgba(6, 182, 212, 0.1);
-  border-radius: 10px;
-}
-
-.thinking-text {
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.thinking-text.pending {
-  color: var(--text-muted);
-  font-style: italic;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 /* ===== Tool Execution ===== */
@@ -717,53 +756,36 @@ function toggleCollapse() {
   background: transparent;
 }
 
-.msg-output .msg-header {
-  padding: 0 12px;
-}
+/* ===== Error Block ===== */
 
-/* ===== Tool Use Delta ===== */
-
-.msg-tool-delta {
-  padding: 8px 12px;
+.msg-error-block {
+  padding: 0;
   border: none;
   background: transparent;
 }
 
-.msg-tool-delta .msg-header {
+/* ===== Permission Block ===== */
+
+.msg-permission {
   padding: 0;
+  border: none;
+  background: transparent;
 }
 
-.delta-dot {
-  background: #8b5cf6;
+/* ===== Diff Block ===== */
+
+.msg-diff {
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
-.delta-content {
-  font-size: 11px;
-  line-height: 1.5;
-  color: #a5b4fc;
-  font-family: 'JetBrains Mono', monospace;
-  white-space: pre-wrap;
-  word-break: break-all;
-  margin-top: 4px;
-  opacity: 0.9;
-}
+/* ===== Form Block ===== */
 
-/* ===== Error Block ===== */
-
-.msg-error-block {
-  padding: 10px 12px;
-  background: rgba(239, 68, 68, 0.04);
-  border: 1px solid rgba(239, 68, 68, 0.12);
-  border-radius: 10px;
-}
-
-.error-content {
-  font-size: 12px;
-  line-height: 1.6;
-  color: #fca5a5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: 'JetBrains Mono', monospace;
+.msg-form {
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 /* ===== Fallback Raw ===== */

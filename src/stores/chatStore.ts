@@ -1083,7 +1083,18 @@ export const useChatStore = defineStore('chat', {
 
       this.pendingFileModifications = files
 
+      const sessionMessages = this.messagesBySession[targetSessionId] || []
       for (const file of files) {
+        // Deduplicate: if a file_modified message for this path already exists,
+        // update it in place instead of appending another DiffView.
+        const existingIdx = sessionMessages.findIndex(
+          m => m.eventType === 'file_modified' && (m.eventTitle || m.eventData?.path) === file.path
+        )
+        if (existingIdx >= 0) {
+          sessionMessages[existingIdx].eventTitle = file.path
+          sessionMessages[existingIdx].eventData = file
+          continue
+        }
         this.addMessage(targetSessionId, {
           role: 'system',
           content: '',
@@ -1253,6 +1264,43 @@ export const useChatStore = defineStore('chat', {
       }
       this.subtaskMessagesBySession[sessionId][taskId].push(newMsg)
       return newMsg
+    },
+
+    // Upsert a file_modified message inside a subtask, deduplicating by file path.
+    upsertSubtaskFileModified(
+      sessionId: string,
+      taskId: string,
+      file: { path: string; diff: string; additions: number; deletions: number; isNew: boolean },
+      agentName: string
+    ): void {
+      if (!this.subtaskMessagesBySession[sessionId]) {
+        this.subtaskMessagesBySession[sessionId] = {}
+      }
+      if (!this.subtaskMessagesBySession[sessionId][taskId]) {
+        this.subtaskMessagesBySession[sessionId][taskId] = []
+      }
+      const msgs = this.subtaskMessagesBySession[sessionId][taskId]
+      const existingIdx = msgs.findIndex(
+        m => m.eventType === 'file_modified' && (m.eventTitle || m.eventData?.path) === file.path
+      )
+      if (existingIdx >= 0) {
+        msgs[existingIdx].eventTitle = file.path
+        msgs[existingIdx].eventData = file
+        return
+      }
+      const newMsg: ChatMessage = {
+        role: 'system',
+        content: '',
+        eventType: 'file_modified',
+        eventTitle: file.path,
+        eventData: file,
+        agentName,
+        metadata: { phase: 'file_modified' },
+        id: `subtask_${taskId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: new Date().toISOString(),
+        sessionId
+      }
+      msgs.push(newMsg)
     },
 
     // 获取某个 subtask 的子消息

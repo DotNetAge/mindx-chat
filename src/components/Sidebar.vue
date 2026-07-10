@@ -14,13 +14,12 @@ import EntityTagsDialog from './EntityTagsDialog.vue'
 import AgentSelectorDialog from './AgentSelectorDialog.vue'
 import MCPExplorer from './MCPExplorer.vue'
 import FileExplorer from './FileExplorer.vue'
-import { useFileExplorerStore } from '../stores/fileExplorerStore'
 import { useI18n } from 'vue-i18n'
+import { revealInFileManager } from '../services/graphApi'
 import { useMarkdown } from '../composables/useMarkdown'
 
 const { t, locale } = useI18n()
 const currentLocale = ref(locale.value)
-const fileExplorerStore = useFileExplorerStore()
 
 const langOptions = [
   { value: 'zh', label: '简体中文' },
@@ -809,7 +808,7 @@ watch(showTokenReport, (val) => {
             <button 
               v-if="!isCollapsed" 
               class="browse-session-btn"
-              @click="fileExplorerStore.open(session.projectDir)"
+              @click="revealInFileManager(session.projectDir)"
               :title="t('sidebar.browseSessionDir')"
             >
               <el-icon><FolderOpened /></el-icon>
