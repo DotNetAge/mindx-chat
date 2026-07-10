@@ -345,12 +345,15 @@
       "TeamList": "List Teams",
       "TeamGetTasks": "Get Team Tasks",
       "AgentTalk": "Whisper",
-      "LocalSearch": "Search Knowledge Base",
+      "QuickSearch": "Semantic Search",
+      "QuickExplore": "Browse Structure",
+      "FindRelation": "Find Relations",
       "Sleep": "Wait",
       "Skill": "Activate Skill",
       "Introspect": "Introspect",
       "Cron": "Scheduled Task",
-      "SendMessage": "Send Notification"
+      "SendMessage": "Send Notification",
+      "ToolSelector": "Select Tool"
     }
   },
   "diff": { "added": "Added", "modified": "View changes" },

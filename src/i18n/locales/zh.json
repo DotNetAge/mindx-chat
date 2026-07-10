@@ -349,10 +349,13 @@
       "AgentTalk": "悄悄话",
       "Cron": "计划任务",
       "SendMessage": "发送消息",
-      "LocalSearch": "搜索知识库",
+      "QuickSearch": "语义搜索",
+      "QuickExplore": "浏览结构",
+      "FindRelation": "查找关联",
       "Sleep": "等待",
       "Skill": "激活技能",
-      "Introspect": "内省"
+      "Introspect": "内省",
+      "ToolSelector": "选择工具"
     }
   },
   "diff": { "added": "新增", "modified": "查看修改" },

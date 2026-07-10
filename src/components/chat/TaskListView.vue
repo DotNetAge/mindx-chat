@@ -1,23 +1,76 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChatStore, type TaskItem } from '../../stores/chatStore'
 import { useSessionStore } from '../../stores/sessionStore'
 
 /**
- * TaskListView — TaskXXX 工具系列的持久 Todo List 视图
- *
- * 数据来源：chatStore.tasksBySession[sessionId]，由 TaskCreate/TaskUpdate/TaskList
- * 工具事件自动 ingest 维护。整个会话只渲染一个持久块（由 MessageComponentRouter
- * 根据第一条 TaskXXX 消息锚定），后续 TaskXXX 调用只更新本视图，不再生成独立块。
- *
- * 设计目标：直观展示"当前正在处理哪一项"，in_progress 项置顶高亮。
+ * TaskListView — TaskXXX 工具系列的持久 Todo List 视图，右侧浮窗内渲染。
+ * 头部可拖动让用户自由停靠面板。
  */
 const { t } = useI18n()
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 
-const isCollapsed = ref(false)
+const rootEl = ref<HTMLElement | null>(null)
+
+// ── 拖拽 ──
+const dragging = ref(false)
+let dragPanel: HTMLElement | null = null
+let dragStartX = 0, dragStartY = 0
+let panelStartLeft = 0, panelStartTop = 0
+
+function onHeaderPointerDown(e: PointerEvent) {
+  const target = e.target as HTMLElement
+  if (target.closest('button')) return
+
+  const panel = rootEl.value?.parentElement as HTMLElement | null
+  if (!panel) return
+
+  dragging.value = true
+  dragPanel = panel
+  dragStartX = e.clientX
+  dragStartY = e.clientY
+
+  // 当前面板相对 .chat-area 的位置
+  const container = panel.offsetParent as HTMLElement
+  const panelRect = panel.getBoundingClientRect()
+  const containerRect = container ? container.getBoundingClientRect() : { left: 0, top: 0 }
+  panelStartLeft = panelRect.left - containerRect.left
+  panelStartTop = panelRect.top - containerRect.top
+
+  panel.style.transition = 'none'
+  panel.style.right = 'auto'
+
+  document.addEventListener('pointermove', onDocPointerMove)
+  document.addEventListener('pointerup', onDocPointerUp)
+  e.preventDefault()
+}
+
+function onDocPointerMove(e: PointerEvent) {
+  if (!dragPanel) return
+  const dx = e.clientX - dragStartX
+  const dy = e.clientY - dragStartY
+  dragPanel.style.left = `${panelStartLeft + dx}px`
+  dragPanel.style.top = `${panelStartTop + dy}px`
+}
+
+function onDocPointerUp() {
+  if (!dragPanel) return
+  dragPanel.style.transition = ''
+  dragPanel = null
+  dragging.value = false
+  document.removeEventListener('pointermove', onDocPointerMove)
+  document.removeEventListener('pointerup', onDocPointerUp)
+}
+
+onBeforeUnmount(() => {
+  if (autoDismissTimer) clearTimeout(autoDismissTimer)
+  if (dragPanel) {
+    document.removeEventListener('pointermove', onDocPointerMove)
+    document.removeEventListener('pointerup', onDocPointerUp)
+  }
+})
 
 const tasks = computed<TaskItem[]>(() => {
   const sid = sessionStore.activeSessionId
@@ -60,14 +113,51 @@ const sortedTasks = computed(() => {
   })
 })
 
-function toggleCollapse() {
-  isCollapsed.value = !isCollapsed.value
+/** 手动关闭：标记并记住关闭状态（同标签页刷新不恢复） */
+function dismiss() {
+  const sid = sessionStore.activeSessionId
+  if (!sid) return
+  // 标记所有未完成/已取消任务为 cancelled（保留给历史查看）
+  const map = chatStore.tasksBySession[sid]
+  if (map) {
+    for (const task of Object.values(map)) {
+      if (task.status !== 'completed' && task.status !== 'cancelled') {
+        chatStore.tasksBySession[sid][task.id] = { ...task, status: 'cancelled' }
+      }
+    }
+  }
+  // 记录关闭状态，刷新后不再恢复
+  sessionStorage.setItem(`task-list-dismissed:${sid}`, '1')
 }
+
+// ── 全部完成时 2 秒后自动关闭 ──
+let autoDismissTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(progressPct, (pct) => {
+  if (pct === 100 && stats.value.total > 0) {
+    if (!autoDismissTimer) {
+      autoDismissTimer = setTimeout(() => {
+        const sid = sessionStore.activeSessionId
+        if (sid) delete chatStore.tasksBySession[sid]
+        autoDismissTimer = null
+      }, 2000)
+    }
+  } else {
+    if (autoDismissTimer) {
+      clearTimeout(autoDismissTimer)
+      autoDismissTimer = null
+    }
+  }
+})
 </script>
 
 <template>
-  <div class="task-list-view" :class="{ 'has-active': stats.inProgress > 0, 'is-done': isAllDone }">
-    <div class="tl-header" @click="toggleCollapse">
+  <div ref="rootEl" class="task-list-view" :class="{ 'has-active': stats.inProgress > 0 }">
+    <div
+      class="tl-header"
+      :class="{ dragging }"
+      @pointerdown="onHeaderPointerDown"
+    >
       <div class="tl-header-left">
         <div class="tl-icon" :class="{ active: stats.inProgress > 0, done: stats.total > 0 && stats.completed === stats.total }">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -90,23 +180,22 @@ function toggleCollapse() {
       </div>
       <div class="tl-header-right">
         <span class="tl-progress-pill" v-if="stats.total > 0">{{ progressPct }}%</span>
-        <button class="tl-collapse-btn" @click.stop="toggleCollapse">
-          <el-icon :size="14"><ArrowUp v-if="!isCollapsed" /><ArrowDown v-else /></el-icon>
+        <button class="tl-dismiss-btn" @click="dismiss" :title="t('common.close')">
+          <el-icon :size="14"><Close /></el-icon>
         </button>
       </div>
     </div>
 
-    <transition name="tl-collapse">
-      <div class="tl-body" v-show="!isCollapsed">
-        <!-- 进度条 -->
-        <div class="tl-progress-bar" v-if="stats.total > 0">
-          <div class="tl-progress-fill" :style="{ width: progressPct + '%' }"></div>
-        </div>
+    <div class="tl-body">
+      <!-- 进度条 -->
+      <div class="tl-progress-bar" v-if="stats.total > 0">
+        <div class="tl-progress-fill" :style="{ width: progressPct + '%' }"></div>
+      </div>
 
-        <!-- 空状态 -->
-        <div v-if="stats.total === 0" class="tl-empty">
-          {{ t('taskList.empty') }}
-        </div>
+      <!-- 空状态 -->
+      <div v-if="stats.total === 0" class="tl-empty">
+        {{ t('taskList.empty') }}
+      </div>
 
         <!-- 任务列表 -->
         <ul v-else class="tl-items">
@@ -150,38 +239,24 @@ function toggleCollapse() {
           </li>
         </ul>
       </div>
-    </transition>
   </div>
 </template>
 
 <style scoped>
 .task-list-view {
-  width: 100%;
-  border-radius: 12px;
-  overflow: hidden;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(139, 92, 246, 0.04));
-  border: 1px solid rgba(99, 102, 241, 0.22);
-  transition: all 0.3s ease;
-  /* 任务未完成时，列表粘在消息流容器顶部，让用户继续往下阅读时仍能跟踪进度。
-     任务全部完成（is-done）后改为 static，回到正常流式位置。 */
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  /* 防止 sticky 时背景透明导致下方消息透出 */
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  transition: none;
 }
 
 .task-list-view.has-active {
-  border-color: rgba(59, 130, 246, 0.35);
-  box-shadow: 0 0 24px rgba(59, 130, 246, 0.08);
-}
-
-/* 任务全部完成后取消 sticky，让消息流自然滚动 */
-.task-list-view.is-done {
-  position: static;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .tl-header {
@@ -189,9 +264,13 @@ function toggleCollapse() {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  cursor: pointer;
+  cursor: grab;
   user-select: none;
   transition: background 0.2s ease;
+}
+
+.tl-header.dragging {
+  cursor: grabbing;
 }
 
 .tl-header:hover {
@@ -293,7 +372,7 @@ function toggleCollapse() {
   border-radius: 999px;
 }
 
-.tl-collapse-btn {
+.tl-dismiss-btn {
   width: 28px;
   height: 28px;
   border-radius: 6px;
@@ -307,13 +386,16 @@ function toggleCollapse() {
   transition: all 0.2s ease;
 }
 
-.tl-collapse-btn:hover {
-  background: rgba(99, 102, 241, 0.15);
-  color: #a5b4fc;
+.tl-dismiss-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
 }
 
 .tl-body {
   padding: 4px 16px 16px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 /* 进度条 */
@@ -488,20 +570,5 @@ function toggleCollapse() {
   color: #fbbf24;
   background: rgba(245, 158, 11, 0.1);
   border-color: rgba(245, 158, 11, 0.25);
-}
-
-/* 折叠动画 */
-.tl-collapse-enter-active,
-.tl-collapse-leave-active {
-  transition: all 0.3s ease;
-  overflow: hidden;
-}
-
-.tl-collapse-enter-from,
-.tl-collapse-leave-to {
-  opacity: 0;
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
 }
 </style>

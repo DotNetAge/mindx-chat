@@ -338,12 +338,15 @@
       "TeamList": "列出團隊",
       "TeamGetTasks": "取得團隊任務",
       "AgentTalk": "悄悄話",
-      "LocalSearch": "搜尋知識庫",
+      "QuickSearch": "語意搜尋",
+      "QuickExplore": "瀏覽結構",
+      "FindRelation": "查找關聯",
       "Sleep": "等待",
       "Skill": "激活技能",
       "Introspect": "内省",
       "Cron": "計畫任務",
-      "SendMessage": "發送通知"
+      "SendMessage": "發送通知",
+      "ToolSelector": "選擇工具"
     }
   },
   "diff": { "added": "新增", "modified": "查看修改" },

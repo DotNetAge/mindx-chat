@@ -3,11 +3,12 @@ import { ref, nextTick, onMounted, onUnmounted, watch, computed, onErrorCaptured
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElInput } from 'element-plus'
 import { Setting, Close, FolderOpened } from '@element-plus/icons-vue'
-import { useChatStore, ChatMessage } from '../stores/chatStore'
+import { useChatStore, ChatMessage, isTaskTool } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useConnectionStore } from '../stores/connectionStore'
 import { getMindXClient } from '../services/websocket'
 import MessageComponentRouter from './chat/MessageComponentRouter.vue'
+import TaskListView from './chat/TaskListView.vue'
 import ProviderModelPicker from './chat/ProviderModelPicker.vue'
 import ScheduleView from './chat/ScheduleView.vue'
 import SkeletonChat from './chat/SkeletonChat.vue'
@@ -262,8 +263,14 @@ watch(
 const selectedModel = ref(connectionStore.currentModel?.name || '')
 const showProviderPicker = ref(false)
 
-/** 只看答案模式：按消息类型过滤 */
+/** 只看答案模式 + TaskXXX 隐藏：按消息类型过滤 */
 const shouldShowMessage = (msg: ChatMessage): boolean => {
+  // TaskXXX 工具调用：不占消息流——由 pinned TaskListView 独立渲染
+  if (msg.eventType === 'tool_exec') {
+    const toolName = msg.eventTitle || msg.eventData?.start?.tool_name || ''
+    if (isTaskTool(toolName)) return false
+  }
+
   if (!chatStore.showAnswerOnly) return true
   const et = msg.eventType
   if (et === 'thinking_delta' || et === 'thinking_done') return false
@@ -738,6 +745,15 @@ function logCurrentMessages(_messages: any[]) {
     <!-- File Review Bar -->
     <FileReviewBar />
 
+    <!-- Task Panel：右侧浮窗，不阻挡对话流 -->
+    <div
+      v-if="chatStore.hasActiveTaskList"
+      class="task-side-panel"
+      :class="{ collapsed: false }"
+    >
+      <TaskListView />
+    </div>
+
     <!-- Input Area -->
     <footer class="chat-input-area">
       <div class="input-container" :class="{ 'is-recording': isRecording }">
@@ -860,7 +876,6 @@ function logCurrentMessages(_messages: any[]) {
   position: relative;
   z-index: 5;
   min-width: 0;
-  overflow: hidden;
 }
 
 .chat-area.sidebar-collapsed .chat-header {
@@ -873,6 +888,33 @@ function logCurrentMessages(_messages: any[]) {
 
 .chat-area.sidebar-collapsed .input-container {
   margin: 0 12px 12px;
+}
+
+/* ── 右侧任务浮窗 ── */
+.task-side-panel {
+  position: absolute;
+  right: 0;
+  top: 48px;
+  width: 400px;
+  height: 50vh;
+  max-height: calc(100vh - 140px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: rgba(15, 23, 42, 0.96);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(99, 102, 241, 0.1);
+  animation: task-panel-slide 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+@keyframes task-panel-slide {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }
 
 /* Header */

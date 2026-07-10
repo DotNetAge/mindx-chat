@@ -128,6 +128,8 @@ export const useChatStore = defineStore('chat', {
 
     // TaskXXX 工具系列 — 会话级 task map（taskId → TaskItem），由 TaskCreate/Update/List 工具事件驱动
     tasksBySession: {} as Record<string, Record<string, TaskItem>>,
+    // 会话级最后一次 TaskCreate 时间戳（ms），用于判断新一轮
+    _lastTaskCreateTs: {} as Record<string, number>,
     // 每个会话第一条 TaskXXX 工具消息 id，作为持久 Todo List 块的渲染锚点
     firstTaskToolMessageIdBySession: {} as Record<string, string>,
 
@@ -170,6 +172,17 @@ export const useChatStore = defineStore('chat', {
 
     hasPendingFiles(): boolean {
       return this.pendingFileModifications.length > 0
+    },
+
+    /** 当前会话是否有活跃任务（未完成的任务列表） */
+    hasActiveTaskList(): boolean {
+      const sessionStore = useSessionStore()
+      const sid = sessionStore.activeSessionId
+      // 用户手动关闭后，sessionStorage 记录防止刷新恢复
+      if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem(`task-list-dismissed:${sid}`)) return false
+      const map = this.tasksBySession[sid]
+      if (!map) return false
+      return Object.values(map).some(t => t.status !== 'completed' && t.status !== 'cancelled')
     },
   },
 
@@ -975,7 +988,16 @@ export const useChatStore = defineStore('chat', {
       if (toolName === 'TaskCreate') {
         const id = parsed.task_id
         if (!id) return
-        map[id] = {
+
+        // 距上次 TaskCreate 超过 3 秒 → 新一轮，清空旧列表
+        const now = Date.now()
+        const lastTs = this._lastTaskCreateTs[sessionId] || 0
+        if (lastTs > 0 && now - lastTs > 3000) {
+          this.tasksBySession[sessionId] = {}
+        }
+        this._lastTaskCreateTs[sessionId] = now
+
+        this.tasksBySession[sessionId][id] = {
           id,
           subject: parsed.subject || startParams?.subject || '',
           description: parsed.description || startParams?.description || '',
