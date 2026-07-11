@@ -551,7 +551,9 @@ export const useConnectionStore = defineStore('connection', {
           const toolMsg = msgs?.findLast(m => m.eventType === 'tool_exec' && m.eventData?.status === 'executing')
           if (toolMsg && toolMsg.eventData) {
             toolMsg.eventData.end = envelope.data
-            toolMsg.eventData.status = envelope.data?.success !== false ? 'done' : 'failed'
+            // 失败判定：后端显式返回 success=false，或 error 字段非空
+            const failed = envelope.data?.success === false || !!envelope.data?.error
+            toolMsg.eventData.status = failed ? 'failed' : 'done'
           }
           return
         }

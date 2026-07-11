@@ -944,7 +944,9 @@ export const useChatStore = defineStore('chat', {
       const toolMsg = messages?.findLast(m => m.eventType === 'tool_exec' && m.eventData?.status === 'executing')
       if (toolMsg && toolMsg.eventData) {
         toolMsg.eventData.end = data
-        toolMsg.eventData.status = data?.success !== false ? 'done' : 'failed'
+        // 失败判定：后端显式返回 success=false，或 error 字段非空
+        const failed = data?.success === false || !!data?.error
+        toolMsg.eventData.status = failed ? 'failed' : 'done'
 
         // TaskXXX 工具：将结果 ingest 到会话级 task map
         const endToolName = data?.tool_name || toolMsg.eventTitle || ''
@@ -954,7 +956,7 @@ export const useChatStore = defineStore('chat', {
             endToolName,
             toolMsg.eventData.start?.params,
             data?.result,
-            data?.success !== false
+            !failed
           )
         }
 
@@ -1469,10 +1471,13 @@ export const useChatStore = defineStore('chat', {
                   params = { arguments: tc.arguments }
                 }
               }
+              // 后端持久化失败结果格式：[<tool_name>] error: <msg> / [<tool_name>] skipped: <msg>
+              const content = sm.content || ''
+              const isFailed = /^\[[^\]]+\]\s+(error|skipped):/i.test(content)
               subMsgs.push({
                 id: `subtask_restored_${taskID}_${sm.timestamp}_tool`,
                 role: 'tool',
-                content: sm.content,
+                content,
                 eventType: 'tool_exec',
                 eventTitle: tc?.name || '',
                 eventData: {
@@ -1481,8 +1486,13 @@ export const useChatStore = defineStore('chat', {
                     params,
                     tool_call_id: sm.tool_call_id
                   },
-                  end: { tool_call_id: sm.tool_call_id, success: true, result: sm.content },
-                  status: 'done'
+                  end: {
+                    tool_call_id: sm.tool_call_id,
+                    success: !isFailed,
+                    result: isFailed ? '' : content,
+                    error: isFailed ? content : ''
+                  },
+                  status: isFailed ? 'failed' : 'done'
                 },
                 timestamp: new Date(sm.timestamp).toISOString(),
                 sessionId
