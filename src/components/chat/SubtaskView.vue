@@ -205,7 +205,7 @@ function handlePermissionDeny() {
             <template v-else-if="success === true">已完成</template>
             <template v-else>失败</template>
             <span class="tag agent-tag">{{ displayAgentName }}</span>
-            <span class="tag task-id-tag">{{ description || taskID }}</span>
+            <span v-if="isSpawned && taskID" class="tag task-id-tag">{{ taskID }}</span>
             <span v-if="timeout && isSpawned" class="tag timeout-tag">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
                 <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
@@ -218,7 +218,7 @@ function handlePermissionDeny() {
       </div>
 
       <div class="header-right">
-        <span v-if="displayBlocks.length > 0" class="msg-count-badge">{{ displayBlocks.length }}</span>
+        <span v-if="isSpawned && displayBlocks.length > 0" class="msg-count-badge">{{ displayBlocks.length }}</span>
         <button class="collapse-btn">
           <el-icon :size="14"><ArrowUp v-if="!isCollapsed" /><ArrowDown v-else /></el-icon>
         </button>
@@ -249,8 +249,8 @@ function handlePermissionDeny() {
           </div>
         </template>
 
-        <!-- ===== Sub-agent Conversation Flow ===== -->
-        <div v-if="displayBlocks.length > 0" class="subtask-conversation">
+        <!-- ===== Sub-agent Conversation Flow（仅在已安排/执行中展示） ===== -->
+        <div v-if="isSpawned && displayBlocks.length > 0" class="subtask-conversation">
           <div class="section-label conversation-label">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" class="label-icon">
               <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" fill="currentColor" opacity="0.6"/>
