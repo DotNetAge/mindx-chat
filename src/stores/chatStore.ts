@@ -281,7 +281,7 @@ export const useChatStore = defineStore('chat', {
 
     restoreSessionMessages(sessionId: string, serverMessages: SessionMessage[]) {
       if (!serverMessages || serverMessages.length === 0) {
-          return
+        return
       }
 
       const restored: ChatMessage[] = []
@@ -348,9 +348,9 @@ export const useChatStore = defineStore('chat', {
               agentName = parsed.agent_name || ''
               taskID = parsed.task_id || ''
             } catch (e) {
-              
+
             }
-            
+
             if (taskID) taskInfoMap[taskID] = { agent_name: agentName, description: toolArgs?.task || '' }
             restored.push({
               id: `restored_tool_${idx}_${msg.timestamp}`,
@@ -564,7 +564,7 @@ export const useChatStore = defineStore('chat', {
         prevTimestamp = msgTimestamp
       }
 
-      
+
 
       // 从 localStorage 恢复 token 数据
       const cachedTokens = localStorage.getItem('mindx_chat_message_tokens')
@@ -1155,7 +1155,7 @@ export const useChatStore = defineStore('chat', {
           title: envelope?.title
         })
 
-        
+
       }
     },
 
@@ -1229,7 +1229,19 @@ export const useChatStore = defineStore('chat', {
     // 累积 tool_use_delta 参数到同 id 的最后一条 subtask 消息
     appendSubtaskToolUseDelta(sessionId: string, taskId: string, data: any): void {
       const msgs = this.subtaskMessagesBySession[sessionId]?.[taskId]
-      if (!msgs) return
+      if (!msgs) {
+        // 子任务第一条 delta 到达时数组可能还不存在，直接创建，便于 tool_exec_start 回填 tool_name
+        this.addSubtaskMessage(sessionId, taskId, {
+          role: 'tool',
+          content: data?.arguments || '',
+          eventType: 'tool_use_delta',
+          eventTitle: '',
+          eventData: data,
+          agentName: '',
+          metadata: { phase: 'tool_use_delta' }
+        })
+        return
+      }
       const lastDelta = [...msgs].reverse().find(m => m.eventType === 'tool_use_delta' && m.eventData?.id === data?.id)
       if (lastDelta) {
         if (data?.arguments) {
@@ -1340,7 +1352,7 @@ export const useChatStore = defineStore('chat', {
         eventData: data,
         metadata: { phase: 'subtask_spawned' }
       })
-      
+
     },
 
     handleSubtaskCompleted(data: any, opts?: { session_id?: string; title?: string }) {
@@ -1363,7 +1375,7 @@ export const useChatStore = defineStore('chat', {
         eventData: data,
         metadata: { phase: 'subtask_completed', success: data?.success }
       })
-      
+
     },
 
     /**
@@ -1400,7 +1412,11 @@ export const useChatStore = defineStore('chat', {
           }
 
           // 转换子会话消息 → ChatMessage 列表
+          // 通过 tool_call_id 把 assistant 的 tool_calls 和 tool 结果配对，
+          // 让结果块能正确显示工具名和参数预览（和实时流保持一致）
           const subMsgs: ChatMessage[] = []
+          const toolCallMap = new Map<string, { name: string; arguments: string }>()
+          const renderedToolCallIds = new Set<string>()
           for (const sm of detail.messages) {
             if (sm.role === 'user') {
               subMsgs.push({
@@ -1436,34 +1452,55 @@ export const useChatStore = defineStore('chat', {
                   sessionId
                 })
               }
-              // tool_calls
+              // tool_calls 不单独显示，只缓存给 tool 结果回填
               if (sm.tool_calls?.length) {
                 for (const tc of sm.tool_calls) {
-                  subMsgs.push({
-                    id: `subtask_restored_${taskID}_${sm.timestamp}_tc_${tc.id}`,
-                    role: 'assistant',
-                    content: tc.arguments || '',
-                    eventType: 'tool_use',
-                    eventTitle: tc.name,
-                    eventData: { tool_name: tc.name, arguments: tc.arguments, id: tc.id },
-                    timestamp: new Date(sm.timestamp).toISOString(),
-                    sessionId
-                  })
+                  toolCallMap.set(tc.id, { name: tc.name || '', arguments: tc.arguments || '' })
                 }
               }
             } else if (sm.role === 'tool') {
+              const tc = toolCallMap.get(sm.tool_call_id)
+              if (sm.tool_call_id) renderedToolCallIds.add(sm.tool_call_id)
+              let params: Record<string, any> | undefined
+              if (tc?.arguments) {
+                try {
+                  params = JSON.parse(tc.arguments)
+                } catch {
+                  params = { arguments: tc.arguments }
+                }
+              }
               subMsgs.push({
                 id: `subtask_restored_${taskID}_${sm.timestamp}_tool`,
                 role: 'tool',
                 content: sm.content,
                 eventType: 'tool_exec',
-                eventTitle: '',
+                eventTitle: tc?.name || '',
                 eventData: {
-                  start: { tool_call_id: sm.tool_call_id },
+                  start: {
+                    tool_name: tc?.name,
+                    params,
+                    tool_call_id: sm.tool_call_id
+                  },
                   end: { tool_call_id: sm.tool_call_id, success: true, result: sm.content },
                   status: 'done'
                 },
                 timestamp: new Date(sm.timestamp).toISOString(),
+                sessionId
+              })
+            }
+          }
+
+          // 如果某些 tool_call 没有对应的 tool 结果（例如子任务中断），保留原始显示避免数据丢失
+          for (const [callId, tc] of toolCallMap.entries()) {
+            if (!renderedToolCallIds.has(callId)) {
+              subMsgs.push({
+                id: `subtask_restored_${taskID}_unpaired_${callId}`,
+                role: 'assistant',
+                content: tc.arguments,
+                eventType: 'tool_use',
+                eventTitle: tc.name,
+                eventData: { tool_name: tc.name, arguments: tc.arguments, id: callId },
+                timestamp: new Date().toISOString(),
                 sessionId
               })
             }

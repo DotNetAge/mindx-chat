@@ -494,20 +494,38 @@ export const useConnectionStore = defineStore('connection', {
       client.on('tool_exec_start', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
-        const toolName = envelope.data?.tool_name || envelope.title || '🔧 ' + t('message.toolUse')
+        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
+
+        // 子 Agent 的 tool_exec_start 经常不带 tool_name，回退到同子任务最近一条 tool_use_delta 的名称
+        const subtaskMsgs = subtaskId ? chatStore.subtaskMessagesBySession[targetSessionId]?.[subtaskId] : null
+        const lastDelta = subtaskMsgs
+          ? [...subtaskMsgs].reverse().find(m => m.eventType === 'tool_use_delta')
+          : null
+        const deltaName = lastDelta?.eventData?.name || lastDelta?.eventData?.tool_name
+        const toolName = envelope.data?.tool_name || deltaName || envelope.title || '🔧 ' + t('message.toolUse')
 
         // AskUser 工具有专用视图，跳过 tool_exec 避免重复显示
         if (toolName === 'AskUser') return
 
-        const subtaskId = chatStore.getActiveSubtaskForAgent(targetSessionId, envelope.agent_name)
         if (subtaskId && targetSessionId) {
+          const startData = { ...envelope.data }
+          if (!startData.tool_name && toolName !== '🔧 ' + t('message.toolUse')) {
+            startData.tool_name = toolName
+          }
+          if (!startData.params && lastDelta?.eventData?.arguments) {
+            try {
+              startData.params = JSON.parse(lastDelta.eventData.arguments)
+            } catch {
+              startData.params = { arguments: lastDelta.eventData.arguments }
+            }
+          }
           chatStore.addSubtaskMessage(targetSessionId, subtaskId, {
             role: 'tool',
             content: '',
             eventType: 'tool_exec',
             eventTitle: toolName,
             eventData: {
-              start: envelope.data,
+              start: startData,
               end: null,
               status: 'executing'
             },
