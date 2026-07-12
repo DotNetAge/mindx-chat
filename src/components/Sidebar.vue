@@ -710,11 +710,11 @@ watch(showTokenReport, (val) => {
      <div class="user-profile">
        <div class="user-info">
          <span class="user-name">
-           {{ connectionStore.currentAgent?.meta?.name_zh || connectionStore.currentAgent?.name || connectionStore.primaryAgent?.meta?.name_zh || connectionStore.primaryAgent?.name || t('sidebar.defaultUserName') }}
+           {{ connectionStore.currentAgent?.meta?.role_zh || connectionStore.currentAgent?.role || connectionStore.primaryAgent?.meta?.role_zh || connectionStore.primaryAgent?.role || t('sidebar.defaultUserName') }}
          </span>
          <span class="user-status">
            <span class="status-dot" :class="{ online: connectionStore.isConnected }"></span>
-           {{ connectionStore.currentAgent?.meta?.role_zh || connectionStore.currentAgent?.role || connectionStore.primaryAgent?.meta?.role_zh || connectionStore.primaryAgent?.role || '' }}
+           {{ connectionStore.currentAgent?.meta?.name_zh || connectionStore.currentAgent?.name || connectionStore.primaryAgent?.meta?.name_zh || connectionStore.primaryAgent?.name || '' }}
          </span>
          <span class="user-rating" v-if="connectionStore.currentAgent">
            <span v-for="i in 5" :key="i" class="star" :class="{ filled: i <= (connectionStore.currentAgent.meta?.ratings || 0) }">★</span>

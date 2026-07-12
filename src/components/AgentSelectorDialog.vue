@@ -139,8 +139,9 @@ function localeMetaValue(
 }
 
 // ── 内联编辑状态 ──
-const editingField = ref<'name' | 'description' | null>(null)
+const editingField = ref<'role' | 'name' | 'description' | null>(null)
 const editValue = ref('')
+const roleInputRef = ref<any>(null)
 const nameInputRef = ref<any>(null)
 const descInputRef = ref<any>(null)
 
@@ -151,27 +152,30 @@ function getLocaleMetaKey(fieldBase: string): string {
   return fieldBase
 }
 
-function startEdit(field: 'name' | 'description') {
+function startEdit(field: 'role' | 'name' | 'description') {
   const agent = selectedAgent.value
   if (!agent) return
   editingField.value = field
-  if (field === 'name') {
+  if (field === 'role') {
+    editValue.value = localeMetaValue(agent.meta, 'role', agent.name)
+  } else if (field === 'name') {
     editValue.value = localeMetaValue(agent.meta, 'name', agent.name)
   } else {
     editValue.value = localeMetaValue(agent.meta, 'description', agent.description)
   }
   nextTick(() => {
-    const ref = field === 'name' ? nameInputRef.value : descInputRef.value
+    const ref = field === 'role' ? roleInputRef.value : field === 'name' ? nameInputRef.value : descInputRef.value
     ref?.focus?.()
   })
 }
 
-async function saveMetaField(field: 'name' | 'description') {
+async function saveMetaField(field: 'role' | 'name' | 'description') {
   editingField.value = null
   const agent = selectedAgent.value
   if (!agent) return
   const key = getLocaleMetaKey(field)
-  const current = localeMetaValue(agent.meta, field, field === 'name' ? agent.name : agent.description)
+  const fallback = field === 'name' ? agent.name : field === 'role' ? agent.role : agent.description
+  const current = localeMetaValue(agent.meta, field, fallback)
   if (editValue.value === current) return
 
   // Update local meta
@@ -534,7 +538,7 @@ function switchActiveAgent(name: string) {
                   </svg>
                 </div>
                 <div class="ali-info">
-                  <div class="ali-name">{{ agent.nameZh }}</div>
+                  <div class="ali-name">{{ agent.roleZh || agent.nameZh }}</div>
                   <div class="ali-id">{{ agent.name }}</div>
                   <div class="ali-rating">
                     <span v-for="i in 5" :key="i" class="astar" :class="{ filled: i <= agent.ratings }">★</span>
@@ -558,18 +562,18 @@ function switchActiveAgent(name: string) {
               <div class="dh-top">
                 <div class="dh-left">
                   <h3
-                    v-if="editingField !== 'name'"
+                    v-if="editingField !== 'role'"
                     class="editable-field"
-                    @click="startEdit('name')"
-                  >{{ localeMetaValue(selectedAgent.meta, 'name', selectedAgent.name) }}</h3>
+                    @click="startEdit('role')"
+                  >{{ localeMetaValue(selectedAgent.meta, 'role', selectedAgent.role) }}</h3>
                   <el-input
                     v-else
-                    ref="nameInputRef"
+                    ref="roleInputRef"
                     v-model="editValue"
                     size="small"
                     style="width: 300px;"
-                    @blur="saveMetaField('name')"
-                    @keydown.enter="saveMetaField('name')"
+                    @blur="saveMetaField('role')"
+                    @keydown.enter="saveMetaField('role')"
                   />
                 </div>
                 <div class="dh-actions">
@@ -598,7 +602,7 @@ function switchActiveAgent(name: string) {
                 </div>
               </div>
               <div class="detail-meta">
-                <span class="meta-role">{{ localeMetaValue(selectedAgent.meta, 'role', selectedAgent.role) }}</span>
+                <span class="meta-role">{{ localeMetaValue(selectedAgent.meta, 'name', selectedAgent.name) }}</span>
                 <span class="meta-model">{{ selectedAgent.model }}</span>
               </div>
               <div class="detail-rating">
