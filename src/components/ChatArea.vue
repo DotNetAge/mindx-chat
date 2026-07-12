@@ -416,15 +416,15 @@ function handleInputKeydown(e: KeyboardEvent) {
     return
   }
 
-  // Enter 发送
-  if (e.key === 'Enter' && !e.shiftKey) {
+  // Enter 发送（排除 Shift/Ctrl/Cmd 组合键）
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault()
     sendMessage()
     return
   }
 
-  // 空格长按 3s 检测
-  if (e.key === ' ' && !e.repeat) {
+  // 空格长按 3s 检测（仅单独按住空格时触发，排除修饰键组合）
+  if (e.key === ' ' && !e.repeat && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
     recognitionTimer.value = setTimeout(() => {
       startSpeechRecognition()
     }, HOLD_DURATION)

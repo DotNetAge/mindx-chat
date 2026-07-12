@@ -82,8 +82,8 @@ const sessionRecords = computed(() => {
     return true
   })
 
-  // 按时间排序
-  merged.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+  // 按时间倒序（最新在前）
+  merged.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
   return merged
 })
 
