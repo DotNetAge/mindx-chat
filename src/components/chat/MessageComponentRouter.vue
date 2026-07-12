@@ -110,7 +110,7 @@ const subtaskData = computed(() => {
 
   return {
     isSpawned: et === 'subtask_spawned',
-    taskID: d.task_id || d.TaskID || '',
+    taskID: d.session_id || '',
     agentName: d.agent_name || d.AgentName || '',
     description: d.description || d.Description || '',
     timeout: d.timeout || d.Timeout || '',

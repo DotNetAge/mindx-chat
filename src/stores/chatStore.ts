@@ -121,10 +121,10 @@ export const useChatStore = defineStore('chat', {
     // 追踪每个 session 当前正在产生事件的 agent，用于标记消息来源
     sessionCurrentAgentName: {} as Record<string, string>,
 
-    // 子Agent 对话流 — 按 sessionId → taskId → ChatMessage[] 存储
+    // 子Agent 对话流 — 按 sessionId → subSessionId → ChatMessage[] 存储
     subtaskMessagesBySession: {} as Record<string, Record<string, ChatMessage[]>>,
-    // 活跃子任务索引 — 按 sessionId → [{task_id, agent_name}]
-    activeSubtasksBySession: {} as Record<string, Array<{ task_id: string; agent_name: string }>>,
+    // 活跃子任务索引 — 按 sessionId → [{session_id, agent_name}]
+    activeSubtasksBySession: {} as Record<string, Array<{ session_id: string; agent_name: string }>>,
 
     // TaskXXX 工具系列 — 会话级 task map（taskId → TaskItem），由 TaskCreate/Update/List 工具事件驱动
     tasksBySession: {} as Record<string, Record<string, TaskItem>>,
@@ -291,8 +291,8 @@ export const useChatStore = defineStore('chat', {
       const toolCallStartTimestamps = new Map<string, number>()
       // 前一条消息的 timestamp，用于估算思考时长
       let prevTimestamp = 0
-      // taskID → {agent_name, description} 映射，用于 subtask_completed 恢复
-      const taskInfoMap: Record<string, { agent_name: string; description: string }> = {}
+      // subSessionID → {agent_name, description} 映射，用于 subtask_completed 恢复
+      const subSessionInfoMap: Record<string, { agent_name: string; description: string }> = {}
 
       for (let idx = 0; idx < serverMessages.length; idx++) {
         const msg = serverMessages[idx]
@@ -338,68 +338,112 @@ export const useChatStore = defineStore('chat', {
 
           // 检测 SubAgent 工具调用（按工具名称匹配）
           // SubAgent 工具的结果以 JSON 格式存储在 session 中:
-          //   {"task_id":"subagent-N","status":"running","agent_name":"<agentName>"}
+          //   {"status":"running","agent_name":"<agentName>","session_id":"<ULID>"}
           // 注意：task 描述不会保存在 tool 结果里，只在实时 WebSocket 的 subtask_spawned 事件中有
           if (toolName === 'SubAgent') {
             let agentName = ''
-            let taskID = ''
+            let sessionID = ''
             try {
               const parsed = JSON.parse(content)
               agentName = parsed.agent_name || ''
-              taskID = parsed.task_id || ''
+              sessionID = parsed.session_id || ''
             } catch (e) {
 
             }
 
-            if (taskID) taskInfoMap[taskID] = { agent_name: agentName, description: toolArgs?.task || '' }
+            if (sessionID) subSessionInfoMap[sessionID] = { agent_name: agentName, description: toolArgs?.task || '' }
             restored.push({
               id: `restored_tool_${idx}_${msg.timestamp}`,
               role: 'system',
               content,
               eventType: 'subtask_spawned',
               eventTitle: t('message.subtaskSpawned'),
-              eventData: { task_id: taskID, agent_name: agentName, description: '' },
+              eventData: { session_id: sessionID, agent_name: agentName, description: '' },
               metadata: { phase: 'subtask_spawned' },
               timestamp: new Date(msg.timestamp).toISOString(),
               sessionId
             })
           } else if (toolName === 'CollectResults') {
-            // CollectResults 工具返回子任务完成结果，格式：
-            //   "[subagent-N] completed (session:abc123):\n<answer>"   (成功)
-            //   "[subagent-N] failed (session:abc123): <error>"         (失败)
-            //   "[subagent-N] completed:\n<answer>"                    (旧格式，无 session)
-            //   "[subagent-N] failed: <error>"                        (旧格式，无 session)
-            const subtaskCompletedPattern = /\[([^\]]+)\]\s+(completed|failed)\s*(?:\(session:([^)]+)\))?:\s*(.*)/s
-            const lines = content.split('\n---\n')
+            // CollectResults 工具返回子任务完成结果，格式（JSON 数组）：
+            //   [{"session_id":"<ULID>","agent_name":"<agentName>","status":"completed","result":"<answer>"}, ...]
+            // 兼容旧格式（文本）：
+            //   "[subagent-N] completed (session:abc123):\n<answer>"
+            console.log('[MindX Chat] restoreSessionMessages: CollectResults raw content:', content)
             let matchedAny = false
-            for (const line of lines) {
-              const m = line.match(subtaskCompletedPattern)
-              if (m) {
+
+            // 尝试 JSON 格式解析
+            let jsonEntries: Array<{ session_id: string; status: string; result?: string; error?: string; agent_name?: string }> | null = null
+            try {
+              const parsed = JSON.parse(content)
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                jsonEntries = parsed
+                console.log('[MindX Chat] restoreSessionMessages: JSON.parse success', { count: parsed.length })
+              } else {
+                console.log('[MindX Chat] restoreSessionMessages: JSON.parse failed (not an array or empty)', { type: typeof parsed, isArray: Array.isArray(parsed), length: parsed?.length })
+              }
+            } catch (e) {
+              console.log('[MindX Chat] restoreSessionMessages: JSON.parse failed, falling back to text regex', { error: (e as Error)?.message })
+            }
+
+            if (jsonEntries) {
+              for (const entry of jsonEntries) {
                 matchedAny = true
-                const taskID = m[1]
-                const isSuccess = m[2] === 'completed'
-                const subSessionID = m[3] || ''
-                const rest = m[4].trim()
-                console.log('[MindX Chat] restoreSessionMessages: detected CollectResults', { taskID, isSuccess, subSessionID })
+                const subSessionID = entry.session_id || ''
+                const isSuccess = entry.status === 'completed'
+                const agentName = entry.agent_name || subSessionInfoMap[subSessionID]?.agent_name || ''
+                const answer = isSuccess ? (entry.result || '') : ''
+                const errorMsg = isSuccess ? '' : (entry.error || '')
                 restored.push({
-                  id: `restored_tool_${idx}_${msg.timestamp}_${taskID}`,
+                  id: `restored_tool_${idx}_${msg.timestamp}_${subSessionID}`,
                   role: 'system',
-                  content: line,
+                  content: JSON.stringify(entry),
                   eventType: 'subtask_completed',
                   eventTitle: isSuccess ? t('message.subtaskCompleted') : t('message.subtaskFailed'),
                   eventData: {
-                    task_id: taskID,
-                    agent_name: taskInfoMap[taskID]?.agent_name || '',
-                    description: taskInfoMap[taskID]?.description || '',
+                    session_id: subSessionID,
+                    agent_name: agentName,
+                    description: subSessionInfoMap[subSessionID]?.description || '',
                     success: isSuccess,
-                    answer: isSuccess ? rest : '',
-                    error: isSuccess ? '' : rest,
-                    session_id: subSessionID
+                    answer,
+                    error: errorMsg
                   },
                   metadata: { phase: 'subtask_completed', success: isSuccess },
                   timestamp: new Date(msg.timestamp).toISOString(),
                   sessionId
                 })
+              }
+            } else {
+              // 兼容旧格式：文本解析
+              const subtaskCompletedPattern = /\[([^\]]+)\]\s+(completed|failed)\s*(?:\(session:([^)]+)\))?:\s*(.*)/s
+              const lines = content.split('\n---\n')
+              for (const line of lines) {
+                const m = line.match(subtaskCompletedPattern)
+                if (m) {
+                  matchedAny = true
+                  const sessionIDFromText = m[3] || ''
+                  const isSuccess = m[2] === 'completed'
+                  const agentNameFromText = m[1]
+                  const rest = m[4].trim()
+                  console.log('[MindX Chat] restoreSessionMessages: detected CollectResults (legacy text)', { sessionID: sessionIDFromText, isSuccess })
+                  restored.push({
+                    id: `restored_tool_${idx}_${msg.timestamp}_${sessionIDFromText}`,
+                    role: 'system',
+                    content: line,
+                    eventType: 'subtask_completed',
+                    eventTitle: isSuccess ? t('message.subtaskCompleted') : t('message.subtaskFailed'),
+                    eventData: {
+                      session_id: sessionIDFromText,
+                      agent_name: subSessionInfoMap[sessionIDFromText]?.agent_name || agentNameFromText || '',
+                      description: subSessionInfoMap[sessionIDFromText]?.description || '',
+                      success: isSuccess,
+                      answer: isSuccess ? rest : '',
+                      error: isSuccess ? '' : rest
+                    },
+                    metadata: { phase: 'subtask_completed', success: isSuccess },
+                    timestamp: new Date(msg.timestamp).toISOString(),
+                    sessionId
+                  })
+                }
               }
             }
             // 未匹配到任何子任务结果时，降级为普通 tool 事件
@@ -502,8 +546,7 @@ export const useChatStore = defineStore('chat', {
           }
           default:
             role = 'system'
-            // 检测 subtask 历史消息（后端存的是 markdown 文本格式）
-            // 格式: ### <title>: `taskID`
+            // 检测 subtask 历史消息（后端存的是 markdown 文本格式，仅兼容旧数据）
             if (msg.content) {
               const c = msg.content
               const subtaskMatch = c.match(/^### .+: `([^`]+)`/m)
@@ -512,12 +555,11 @@ export const useChatStore = defineStore('chat', {
                   const m = c.match(pattern)
                   return m ? m[1].trim() : ''
                 }
-                const taskID = subtaskMatch[1]
                 if (c.indexOf('**Agent**:') >= 0) {
                   // subtask_spawned
                   eventType = 'subtask_spawned'
                   eventData = {
-                    task_id: taskID,
+                    session_id: '',
                     agent_name: extractField(/\*\*Agent\*\*: (.+)/),
                     description: extractField(/\*\*(?:描述|Description)\*\*: (.+)/m)
                   }
@@ -526,9 +568,9 @@ export const useChatStore = defineStore('chat', {
                   // subtask_completed success
                   eventType = 'subtask_completed'
                   eventData = {
-                    task_id: taskID,
-                    agent_name: taskInfoMap[taskID]?.agent_name || '',
-                    description: taskInfoMap[taskID]?.description || '',
+                    session_id: '',
+                    agent_name: extractField(/\*\*Agent\*\*: (.+)/) || '',
+                    description: '',
                     success: true,
                     answer: extractField(/\*\*(?:结果|Answer)\*\*:\s*(.+)/m)
                   }
@@ -537,9 +579,9 @@ export const useChatStore = defineStore('chat', {
                   // subtask_completed failed
                   eventType = 'subtask_completed'
                   eventData = {
-                    task_id: taskID,
-                    agent_name: taskInfoMap[taskID]?.agent_name || '',
-                    description: taskInfoMap[taskID]?.description || '',
+                    session_id: '',
+                    agent_name: extractField(/\*\*Agent\*\*: (.+)/) || '',
+                    description: '',
                     success: false,
                     error: extractField(/\*\*(?:错误|Error)\*\*:\s*(.+)/m)
                   }
@@ -1224,16 +1266,16 @@ export const useChatStore = defineStore('chat', {
       const subtasks = this.activeSubtasksBySession[sessionId]
       if (!subtasks || subtasks.length === 0) return null
       const found = subtasks.find(s => s.agent_name === agentName)
-      return found ? found.task_id : null
+      return found ? found.session_id : null
     },
 
     // 添加一条消息到 subtask 子消息列表
     // 累积 tool_use_delta 参数到同 id 的最后一条 subtask 消息
-    appendSubtaskToolUseDelta(sessionId: string, taskId: string, data: any): void {
-      const msgs = this.subtaskMessagesBySession[sessionId]?.[taskId]
+    appendSubtaskToolUseDelta(sessionId: string, subSessionId: string, data: any): void {
+      const msgs = this.subtaskMessagesBySession[sessionId]?.[subSessionId]
       if (!msgs) {
         // 子任务第一条 delta 到达时数组可能还不存在，直接创建，便于 tool_exec_start 回填 tool_name
-        this.addSubtaskMessage(sessionId, taskId, {
+        this.addSubtaskMessage(sessionId, subSessionId, {
           role: 'tool',
           content: data?.arguments || '',
           eventType: 'tool_use_delta',
@@ -1251,7 +1293,7 @@ export const useChatStore = defineStore('chat', {
           lastDelta.eventData = { ...lastDelta.eventData, ...data }
         }
       } else {
-        this.addSubtaskMessage(sessionId, taskId, {
+        this.addSubtaskMessage(sessionId, subSessionId, {
           role: 'tool',
           content: data?.arguments || '',
           eventType: 'tool_use_delta',
@@ -1263,37 +1305,37 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    addSubtaskMessage(sessionId: string, taskId: string, msg: Omit<ChatMessage, 'id' | 'timestamp' | 'sessionId'>): ChatMessage {
+    addSubtaskMessage(sessionId: string, subSessionId: string, msg: Omit<ChatMessage, 'id' | 'timestamp' | 'sessionId'>): ChatMessage {
       if (!this.subtaskMessagesBySession[sessionId]) {
         this.subtaskMessagesBySession[sessionId] = {}
       }
-      if (!this.subtaskMessagesBySession[sessionId][taskId]) {
-        this.subtaskMessagesBySession[sessionId][taskId] = []
+      if (!this.subtaskMessagesBySession[sessionId][subSessionId]) {
+        this.subtaskMessagesBySession[sessionId][subSessionId] = []
       }
       const newMsg: ChatMessage = {
         ...msg,
-        id: `subtask_${taskId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        id: `subtask_${subSessionId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         timestamp: new Date().toISOString(),
         sessionId
       }
-      this.subtaskMessagesBySession[sessionId][taskId].push(newMsg)
+      this.subtaskMessagesBySession[sessionId][subSessionId].push(newMsg)
       return newMsg
     },
 
     // Upsert a file_modified message inside a subtask, deduplicating by file path.
     upsertSubtaskFileModified(
       sessionId: string,
-      taskId: string,
+      subSessionId: string,
       file: { path: string; diff: string; additions: number; deletions: number; isNew: boolean },
       agentName: string
     ): void {
       if (!this.subtaskMessagesBySession[sessionId]) {
         this.subtaskMessagesBySession[sessionId] = {}
       }
-      if (!this.subtaskMessagesBySession[sessionId][taskId]) {
-        this.subtaskMessagesBySession[sessionId][taskId] = []
+      if (!this.subtaskMessagesBySession[sessionId][subSessionId]) {
+        this.subtaskMessagesBySession[sessionId][subSessionId] = []
       }
-      const msgs = this.subtaskMessagesBySession[sessionId][taskId]
+      const msgs = this.subtaskMessagesBySession[sessionId][subSessionId]
       const existingIdx = msgs.findIndex(
         m => m.eventType === 'file_modified' && (m.eventTitle || m.eventData?.path) === file.path
       )
@@ -1310,7 +1352,7 @@ export const useChatStore = defineStore('chat', {
         eventData: file,
         agentName,
         metadata: { phase: 'file_modified' },
-        id: `subtask_${taskId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        id: `subtask_${subSessionId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         timestamp: new Date().toISOString(),
         sessionId
       }
@@ -1318,31 +1360,31 @@ export const useChatStore = defineStore('chat', {
     },
 
     // 获取某个 subtask 的子消息
-    getSubtaskMessages(sessionId: string, taskId: string): ChatMessage[] {
-      return this.subtaskMessagesBySession[sessionId]?.[taskId] || []
+    getSubtaskMessages(sessionId: string, subSessionId: string): ChatMessage[] {
+      return this.subtaskMessagesBySession[sessionId]?.[subSessionId] || []
     },
 
     handleSubtaskSpawned(data: any, opts?: { session_id?: string; title?: string }) {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
-      const taskId = data?.task_id || ''
+      const sessionId = data?.session_id || ''
       const agentName = data?.agent_name || ''
 
       // 注册为活跃 subtask
-      if (targetSessionId && taskId && agentName) {
+      if (targetSessionId && sessionId && agentName) {
         if (!this.activeSubtasksBySession[targetSessionId]) {
           this.activeSubtasksBySession[targetSessionId] = []
         }
         // 避免重复注册
-        if (!this.activeSubtasksBySession[targetSessionId].find(s => s.task_id === taskId)) {
-          this.activeSubtasksBySession[targetSessionId].push({ task_id: taskId, agent_name: agentName })
+        if (!this.activeSubtasksBySession[targetSessionId].find(s => s.session_id === sessionId)) {
+          this.activeSubtasksBySession[targetSessionId].push({ session_id: sessionId, agent_name: agentName })
         }
         // 初始化子消息数组
         if (!this.subtaskMessagesBySession[targetSessionId]) {
           this.subtaskMessagesBySession[targetSessionId] = {}
         }
-        if (!this.subtaskMessagesBySession[targetSessionId][taskId]) {
-          this.subtaskMessagesBySession[targetSessionId][taskId] = []
+        if (!this.subtaskMessagesBySession[targetSessionId][sessionId]) {
+          this.subtaskMessagesBySession[targetSessionId][sessionId] = []
         }
       }
 
@@ -1361,12 +1403,12 @@ export const useChatStore = defineStore('chat', {
       const sessionStore = useSessionStore()
       const targetSessionId = opts?.session_id || sessionStore.activeSessionId
       const content = typeof data === 'string' ? data : (data?.answer || data?.error || '')
-      const taskId = data?.task_id || ''
+      const sessionId = data?.session_id || ''
 
       // 从活跃 subtask 列表中移除
-      if (targetSessionId && taskId && this.activeSubtasksBySession[targetSessionId]) {
+      if (targetSessionId && sessionId && this.activeSubtasksBySession[targetSessionId]) {
         this.activeSubtasksBySession[targetSessionId] =
-          this.activeSubtasksBySession[targetSessionId].filter(s => s.task_id !== taskId)
+          this.activeSubtasksBySession[targetSessionId].filter(s => s.session_id !== sessionId)
       }
 
       const msg = this.addMessage(targetSessionId, {
@@ -1387,20 +1429,19 @@ export const useChatStore = defineStore('chat', {
      */
     async loadSubtaskSessions(sessionId: string): Promise<void> {
       const msgs = this.messagesBySession[sessionId] || []
-      // CollectResults 工具结果中的 session_id → task_id 映射
-      const sessionMap = new Map<string, string>()
+      // 从事件数据中收集所有子会话的 session_id
+      const subSessionIds = new Set<string>()
       for (const msg of msgs) {
-        if (msg.eventType === 'subtask_completed' && msg.eventData?.session_id) {
-          sessionMap.set(msg.eventData.session_id, msg.eventData.task_id)
+        if (msg.eventData?.session_id) {
+          subSessionIds.add(msg.eventData.session_id)
         }
       }
-      if (sessionMap.size === 0) return
+      if (subSessionIds.size === 0) return
 
       const connStore = useConnectionStore()
-      const entries = [...sessionMap.entries()]
-      console.log(`[MindX Chat] loadSubtaskSessions: loading ${entries.length} sub-agent session(s)`, { sessionId })
+      console.log(`[MindX Chat] loadSubtaskSessions: loading ${subSessionIds.size} sub-agent session(s)`, { sessionId })
 
-      await Promise.all(entries.map(async ([subSessionID, taskID]) => {
+      await Promise.all([...subSessionIds].map(async (subSessionID) => {
         try {
           const detail = await connStore.fetchSessionDetail(subSessionID)
           if (!detail?.messages?.length) return
@@ -1409,8 +1450,8 @@ export const useChatStore = defineStore('chat', {
           if (!this.subtaskMessagesBySession[sessionId]) {
             this.subtaskMessagesBySession[sessionId] = {}
           }
-          if (!this.subtaskMessagesBySession[sessionId][taskID]) {
-            this.subtaskMessagesBySession[sessionId][taskID] = []
+          if (!this.subtaskMessagesBySession[sessionId][subSessionID]) {
+            this.subtaskMessagesBySession[sessionId][subSessionID] = []
           }
 
           // 转换子会话消息 → ChatMessage 列表
@@ -1422,7 +1463,7 @@ export const useChatStore = defineStore('chat', {
           for (const sm of detail.messages) {
             if (sm.role === 'user') {
               subMsgs.push({
-                id: `subtask_restored_${taskID}_${sm.timestamp}`,
+                id: `subtask_restored_${subSessionID}_${sm.timestamp}`,
                 role: 'user',
                 content: sm.content,
                 eventType: 'user',
@@ -1433,7 +1474,7 @@ export const useChatStore = defineStore('chat', {
               // reasoning_content → thinking_done
               if (sm.reasoning_content?.trim()) {
                 subMsgs.push({
-                  id: `subtask_restored_${taskID}_${sm.timestamp}_think`,
+                  id: `subtask_restored_${subSessionID}_${sm.timestamp}_think`,
                   role: 'assistant',
                   content: sm.reasoning_content,
                   eventType: 'thinking_done',
@@ -1446,7 +1487,7 @@ export const useChatStore = defineStore('chat', {
               // 正文
               if (sm.content?.trim()) {
                 subMsgs.push({
-                  id: `subtask_restored_${taskID}_${sm.timestamp}_msg`,
+                  id: `subtask_restored_${subSessionID}_${sm.timestamp}_msg`,
                   role: 'assistant',
                   content: sm.content,
                   eventType: 'markdown',
@@ -1475,7 +1516,7 @@ export const useChatStore = defineStore('chat', {
               const content = sm.content || ''
               const isFailed = /^\[[^\]]+\]\s+(error|skipped):/i.test(content)
               subMsgs.push({
-                id: `subtask_restored_${taskID}_${sm.timestamp}_tool`,
+                id: `subtask_restored_${subSessionID}_${sm.timestamp}_tool`,
                 role: 'tool',
                 content,
                 eventType: 'tool_exec',
@@ -1504,7 +1545,7 @@ export const useChatStore = defineStore('chat', {
           for (const [callId, tc] of toolCallMap.entries()) {
             if (!renderedToolCallIds.has(callId)) {
               subMsgs.push({
-                id: `subtask_restored_${taskID}_unpaired_${callId}`,
+                id: `subtask_restored_${subSessionID}_unpaired_${callId}`,
                 role: 'assistant',
                 content: tc.arguments,
                 eventType: 'tool_use',
@@ -1516,8 +1557,8 @@ export const useChatStore = defineStore('chat', {
             }
           }
 
-          this.subtaskMessagesBySession[sessionId][taskID] = subMsgs
-          console.log(`[MindX Chat] loadSubtaskSessions: loaded ${subMsgs.length} msgs for task ${taskID} (session:${subSessionID})`)
+          this.subtaskMessagesBySession[sessionId][subSessionID] = subMsgs
+          console.log(`[MindX Chat] loadSubtaskSessions: loaded ${subMsgs.length} msgs for session ${subSessionID}`)
         } catch (err) {
           console.warn(`[MindX Chat] loadSubtaskSessions: failed to load session ${subSessionID}:`, err)
         }
