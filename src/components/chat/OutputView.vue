@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, watch, useTemplateRef, nextTick } from 'vue'
+import { ref, computed, watch, useTemplateRef, nextTick, onMounted, onUpdated } from 'vue'
 import { CopyDocument, Document, Download, Link } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useMarkdown } from '../../composables/useMarkdown'
 import { useI18n } from 'vue-i18n'
+import { useFileExplorerStore } from '../../stores/fileExplorerStore'
+import { useConnectionStore } from '../../stores/connectionStore'
 
 const { t } = useI18n()
+const fileExplorerStore = useFileExplorerStore()
+const connectionStore = useConnectionStore()
 
 const props = defineProps({
   content: {
@@ -102,7 +106,7 @@ const formattedContent = computed(() => {
   return md.render(preprocessPaths(props.content))
 })
 
-// 将文本中的 URL 转换为 markdown 链接
+// 将文本中的 URL 转换为可点击的链接（不处理文件路径）
 function preprocessPaths(text: string): string {
   // 先替出已有 markdown 链接，避免破坏已有语法
   const links: string[] = []
@@ -112,8 +116,8 @@ function preprocessPaths(text: string): string {
   })
 
   // 匹配 http/https URL
-  const urlRe = /https?:\/\/[^\s<>"']+(?<![.,;:!?)\]])/g
-  const result = stripped.replace(urlRe, (match) => {
+  const urlRe = /https?:\/\/[^\s<>"']+(?<![.,;:!?)\]）])/g
+  let result = stripped.replace(urlRe, (match) => {
     return `[${match}](${match})`
   })
 
@@ -141,6 +145,146 @@ function deriveDownloadFilename(): string {
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
   return `mindx-output-${ts}.md`
 }
+
+/** 将文件路径解析为绝对路径 */
+function resolveFilePath(rawPath: string): string {
+  if (rawPath.startsWith('/')) return rawPath
+  const projectDir = connectionStore.currentProjectDir
+  if (!projectDir) return rawPath
+  const normalized = rawPath.replace(/^\.\//, '')
+  if (rawPath.startsWith('../')) {
+    let dir = projectDir.replace(/\/+$/, '')
+    let rel = rawPath
+    while (rel.startsWith('../')) {
+      dir = dir.substring(0, dir.lastIndexOf('/'))
+      rel = rel.substring(3)
+    }
+    return dir + '/' + rel
+  }
+  return projectDir.replace(/\/+$/, '') + '/' + normalized
+}
+
+/** 打开文件的核心逻辑 */
+async function tryOpenFile(filePath: string) {
+  if (!filePath) return
+  const resolved = resolveFilePath(filePath)
+  let stat: { name: string; path: string; size: number; is_dir: boolean } | null | undefined
+  try {
+    stat = await connectionStore.fetchFSStat(resolved)
+  } catch { /* 后端可能暂不支持 fs.stat */ }
+  if (stat === null) {
+    ElMessage.warning('文件不存在: ' + resolved)
+    return
+  }
+  if (stat?.is_dir) {
+    ElMessage.info('请选择文件，不是目录')
+    return
+  }
+  fileExplorerStore.pendingSelectPath = resolved
+  await fileExplorerStore.openFile(
+    { path: resolved, name: resolved.split('/').pop() || '', is_dir: false, size: stat?.size || 0, mode: '', mod_time: '' },
+    connectionStore
+  )
+  fileExplorerStore.visible = true
+}
+
+/** 点击链接时如果指向本地文件，用文件编辑器打开 */
+async function handleContentClick(e: MouseEvent) {
+  // 拦截 a[href^="/"]（绝对路径链接）和 a[href^="file://"]（file 协议）
+  const linkTarget = (e.target as HTMLElement).closest('a[href^="/"], a[href^="file://"]')
+  if (linkTarget) {
+    e.preventDefault()
+    const href = (linkTarget as HTMLAnchorElement).getAttribute('href') || ''
+    return tryOpenFile(href.replace(/^file:\/\//, ''))
+  }
+  // 拦截 data-file-path（DOM 遍历注入的文件路径span）
+  const pathTarget = (e.target as HTMLElement).closest('[data-file-path]')
+  if (pathTarget) {
+    const rawPath = (pathTarget as HTMLElement).getAttribute('data-file-path') || ''
+    return tryOpenFile(rawPath)
+  }
+}
+
+/**
+ * 在 markdown 渲染完成后，遍历 DOM 文本节点检测文件路径并注入 clickable span。
+ * 同时支持代码块中的路径。
+ */
+function injectFileLinks(root: HTMLElement) {
+  // 匹配：
+  //   1. /path/to/file.ext、./path、../path（显式路径）
+  //   2. path/to/file.ext（隐式相对路径，前面是空格/行首/括号/引号）
+  const pathRe = /((?:\/|\.{1,2}\/)[^\s<>"'\[\](){}|;:!?，。、]+(?:\.[a-zA-Z0-9]{1,8})|(?<=^|[\s(\["'`])[^\s<>"'\[\](){}|;:!?，。、\/]+\/[^\s<>"'\[\](){}|;:!?，。、]+\.[a-zA-Z0-9]{1,8})/g
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      // 跳过已有 <a> 内的文本（已有链接不重复处理）
+      let el = node.parentElement
+      while (el && el !== root) {
+        if (el.tagName === 'A' || el.hasAttribute?.('data-file-path')) return NodeFilter.FILTER_REJECT
+        el = el.parentElement
+      }
+      return NodeFilter.FILTER_ACCEPT
+    }
+  })
+
+  const textNodes: Text[] = []
+  while (walker.nextNode()) textNodes.push(walker.currentNode as Text)
+
+  console.log(`[injectFileLinks] 找到 ${textNodes.length} 个文本节点，开始扫描路径`)
+
+  let totalMatches = 0
+  for (const node of textNodes) {
+    const text = node.textContent || ''
+    pathRe.lastIndex = 0
+    const matches: { match: string; index: number }[] = []
+    let m
+    while ((m = pathRe.exec(text)) !== null) {
+      // 过滤明显不是文件的匹配（如 URL 协议残留、纯数字路径）
+      const p = m[1]
+      if (p.startsWith('//') || /^\/\d/.test(p)) continue
+      matches.push({ match: p, index: m.index })
+    }
+    if (!matches.length) continue
+
+    totalMatches += matches.length
+    console.log(`[injectFileLinks] 文本节点匹配到 ${matches.length} 个路径:`, matches.map(x => x.match).join(', '), '| 上下文:', text.slice(0, 120))
+
+    // 从后向前替换，不破坏 index
+    matches.reverse()
+    let content = text
+    for (const { match, index } of matches) {
+      const before = content.slice(0, index)
+      const after = content.slice(index + match.length)
+      content = before + `<span class="file-path-link" data-file-path="${match.replace(/"/g, '&quot;')}">${match}</span>` + after
+    }
+    // 用 innerHTML 替换 textNode 的父容器片段（因为我们插入了 HTML）
+    const span = document.createElement('span')
+    span.innerHTML = content
+    node.parentNode?.replaceChild(span, node)
+    // 展开 span 的所有子节点到父级
+    const parent = span.parentNode
+    if (parent) {
+      while (span.firstChild) parent.insertBefore(span.firstChild, span)
+      parent.removeChild(span)
+    }
+  }
+  console.log(`[injectFileLinks] 扫描完成，共匹配 ${totalMatches} 个路径`)
+}
+
+// ===== Mermaid 渲染 + 文件链接注入 =====
+const formattedRef = useTemplateRef<HTMLElement>('formatted')
+
+async function afterRender() {
+  if (showRaw.value || props.format === 'raw') return
+  await nextTick()
+  if (formattedRef.value) {
+    await renderMermaidInRoot(formattedRef.value)
+    injectFileLinks(formattedRef.value)
+  }
+}
+
+onMounted(afterRender)
+watch([() => props.content, () => props.format, showRaw], afterRender, { flush: 'post' })
 
 function downloadAsMarkdown() {
   if (!props.content) return
@@ -192,25 +336,11 @@ async function saveToProject() {
     ElMessage.error(t('outputView.saveError', { msg: e?.message || t('common.unknownError') }))
   }
 }
-
-// ===== Mermaid 渲染 =====
-// OutputView 没有弹窗，content 变化时（消息流式到达）就需要扫描渲染
-const formattedRef = useTemplateRef<HTMLElement>('formatted')
-
-watch(
-  [() => props.content, () => props.format, showRaw],
-  async () => {
-    if (showRaw.value || props.format === 'raw') return
-    await nextTick()
-    await renderMermaidInRoot(formattedRef.value)
-  },
-  { flush: 'post', immediate: true }
-)
 </script>
 
 <template>
   <div class="output-content" v-if="content">
-    <div v-if="!showRaw" class="formatted-content markdown-body" v-html="formattedContent"></div>
+    <div v-if="!showRaw" ref="formatted" class="formatted-content markdown-body" v-html="formattedContent" @click="handleContentClick"></div>
     <pre v-else class="raw-content"><code>{{ content }}</code></pre>
 
     <div class="meta" v-if="tokensOut > 0 || duration">
@@ -437,19 +567,20 @@ watch(
   text-decoration: none;
 }
 
-.formatted-content :deep(a[href^="file://"]) {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
+.formatted-content :deep(.file-path-link) {
+  display: inline;
   color: #5eead4;
   font-weight: 600;
-  font-size: 13px;
-  padding: 1px 6px;
-  border-radius: 4px;
+  padding: 0 2px;
+  border-radius: 3px;
   background: rgba(6, 182, 212, 0.08);
-  border: 1px solid rgba(6, 182, 212, 0.15);
+  border-bottom: 1px solid rgba(6, 182, 212, 0.3);
+  cursor: pointer;
   transition: all 0.15s ease;
-  white-space: nowrap;
+}
+.formatted-content :deep(.file-path-link:hover) {
+  background: rgba(6, 182, 212, 0.18);
+  border-bottom-color: #5eead4;
 }
 
 .formatted-content :deep(a[href^="file://"]:hover) {

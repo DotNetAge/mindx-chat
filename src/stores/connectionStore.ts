@@ -964,6 +964,16 @@ export const useConnectionStore = defineStore('connection', {
       await client.call('fs.reveal', { path })
     },
 
+    async fetchFSStat(path: string): Promise<{ name: string; path: string; size: number; is_dir: boolean } | null> {
+      const client = getMindXClient()
+      if (!client) return null
+      try {
+        return await client.call<{ name: string; path: string; size: number; is_dir: boolean }>('fs.stat', { path })
+      } catch {
+        return null
+      }
+    },
+
     async confirmFiles(sessionId: string, files?: string[]): Promise<string[]> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
