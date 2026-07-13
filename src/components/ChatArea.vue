@@ -276,7 +276,6 @@ const shouldShowMessage = (msg: ChatMessage): boolean => {
   if (et === 'thinking_delta' || et === 'thinking_done') return false
   if (et === 'tool_exec' || et === 'tool_exec_start' || et === 'tool_exec_end') return false
   if (et === 'tool_use_delta') return false
-  if (et === 'subtask_spawned' || et === 'subtask_completed') return false
   if (et === 'compaction') return false
   if (et === 'max_turns_reached') return false
   if (et === 'permission_denied') return false

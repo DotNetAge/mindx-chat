@@ -70,6 +70,14 @@ const rawSubMessages = computed(() => {
   return chatStore.subtaskMessagesBySession[sid]?.[tid] || []
 })
 
+/** 只看答案模式过滤：与主 ChatArea 的 shouldShowMessage 一致 */
+const shouldShowBlock = (type: string): boolean => {
+  if (!chatStore.showAnswerOnly) return true
+  if (type === 'thinking_delta' || type === 'thinking_done') return false
+  if (type === 'tool_exec') return false
+  return true
+}
+
 // Process raw messages into display blocks:
 //   - Consecutive thinking_delta + following thinking_done → merged into one thinking block
 //   - Consecutive content_delta / markdown → merged into one output block
@@ -259,7 +267,7 @@ function handlePermissionDeny() {
           </div>
 
           <div class="conversation-messages">
-            <template v-for="(block, idx) in displayBlocks" :key="idx">
+            <template v-for="(block, idx) in displayBlocks.filter(b => shouldShowBlock(b.type))" :key="idx">
               <!-- Thinking (streaming) -->
               <div v-if="block.type === 'thinking_delta'" class="conv-msg msg-thinking">
                 <ThinkingView

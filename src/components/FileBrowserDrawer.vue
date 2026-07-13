@@ -51,13 +51,11 @@ function normalizeDir(dir: string): string {
 
 async function refreshManifestMap(targetDir?: string) {
   const projectDir = normalizeDir(targetDir || props.projectDir || sessionStore.activeSession?.project_dir || connectionStore.currentProjectDir)
-  console.log('[DEBUG refreshManifestMap] projectDir=', projectDir)
   if (!projectDir) { manifestMap.value = {}; return }
   const serial = ++refreshSerial
   try {
     const data = await connectionStore.getIndexQueue(projectDir)
     if (serial !== refreshSerial) return // discard stale response
-    console.log('[DEBUG refreshManifestMap] kb.index.list response=', data)
     const map: Record<string, string> = {}
     if (data?.files) {
       for (const f of data.files) {
@@ -68,11 +66,9 @@ async function refreshManifestMap(targetDir?: string) {
         else if (f.state === 'processing') map[f.path] = 'indexing'
       }
     }
-    console.log('[DEBUG refreshManifestMap] built map=', map)
     manifestMap.value = map
   } catch (err: any) {
     if (serial !== refreshSerial) return
-    console.error('[DEBUG refreshManifestMap] error=', err)
     manifestMap.value = {}
   }
 }
@@ -170,26 +166,22 @@ async function loadTreeNode(node: any, resolve: any) {
     // 确保 manifestMap 已加载（项目目录下才需要索引图标）
     const projectDir = normalizeDir(props.projectDir || sessionStore.activeSession?.project_dir || connectionStore.currentProjectDir)
     const inProject = projectDir && (path === projectDir || path.startsWith(projectDir + '/'))
-    console.log('[DEBUG loadTreeNode] path=', path, 'projectDir=', projectDir, 'inProject=', inProject, 'manifestMap empty=', Object.keys(manifestMap.value).length === 0)
     if (inProject && Object.keys(manifestMap.value).length === 0) {
       await refreshManifestMap(projectDir)
     }
 
     // 从 manifest 缓存合并索引状态（项目目录下默认 unindexed）
     if (inProject) {
-      console.log('[DEBUG loadTreeNode] manifestMap keys=', Object.keys(manifestMap.value))
       for (const child of children) {
         const st = manifestMap.value[child.path]
         if (st) {
           child.index_state = st
-          console.log('[DEBUG loadTreeNode] child=', child.path, 'state=', st)
         } else if (child.is_dir) {
           const prefix = child.path + '/'
           const hasIndexed = Object.keys(manifestMap.value).some(p => p.startsWith(prefix))
           child.index_state = hasIndexed ? 'indexed' : 'unindexed'
         } else {
           child.index_state = 'unindexed'
-          console.log('[DEBUG loadTreeNode] child=', child.path, 'state=unindexed (not in manifest)')
         }
       }
     }
@@ -260,11 +252,9 @@ async function handleIndexCtx() {
   if (!st) { closeCtxMenu(); return }
   const projectDir = sessionStore.activeSession?.project_dir
   if (!projectDir) { ElMessage.warning('No active project directory'); closeCtxMenu(); return }
-  console.log('[DEBUG handleIndexCtx] action=', st, 'projectDir=', projectDir, 'path=', data.path)
   if (st === 'add') {
     try {
-      const res = await connectionStore.addToIndexQueue(projectDir, [data.path])
-      console.log('[DEBUG handleIndexCtx] add response=', res)
+      await connectionStore.addToIndexQueue(projectDir, [data.path])
       ElMessage.success('Added to index: ' + data.name)
       data.index_state = 'pending'
       await refreshManifestMap()
@@ -274,8 +264,7 @@ async function handleIndexCtx() {
     }
   } else {
     try {
-      const res = await connectionStore.removeFromIndexQueue(projectDir, [data.path])
-      console.log('[DEBUG handleIndexCtx] remove response=', res)
+      await connectionStore.removeFromIndexQueue(projectDir, [data.path])
       ElMessage.success('Removed from index: ' + data.name)
       data.index_state = 'unindexed'
       await refreshManifestMap()
@@ -449,6 +438,17 @@ async function handleDelete() {
   }
 }
 
+async function handleReveal() {
+  const node = ctxTarget.value
+  if (!node || node._phantom) return
+  closeCtxMenu()
+  try {
+    await connectionStore.fetchFSReveal(node.path)
+  } catch (err: any) {
+    ElMessage.error('Open failed: ' + (err?.message || ''))
+  }
+}
+
 function getParentPath(p: string): string {
   if (!p) return ''
   const idx = p.lastIndexOf('/')
@@ -462,21 +462,47 @@ function joinPath(parent: string, name: string): string {
 }
 
 // ── 拖拽移动 ──
+// 保存拖拽开始时的原始节点信息，防止 el-tree 内部 DOM 操作篡改 data
+const dragSource = ref<{ path: string; name: string } | null>(null)
+
+function handleNodeDragStart(node: any) {
+  if (node.data?._phantom) return false
+  console.log('[drag] nodeDragStart path=', node.data.path, 'name=', node.data.name, 'is_dir=', node.data.is_dir)
+  dragSource.value = { path: node.data.path, name: node.data.name }
+  return true
+}
+
+function handleNodeDragEnd() {
+  console.log('[drag] nodeDragEnd, dragSource was=', dragSource.value?.path)
+  // 不在 nodeDragEnd 清空 dragSource，因为 el-tree 中 nodeDragEnd 可能在 nodeDrop 之前触发
+}
+
 function allowDrop(draggingNode: any, dropNode: any, type: string): boolean {
   if (type === 'inner') return dropNode.data.is_dir === true && !dropNode.data._phantom
   return !draggingNode.data._phantom
 }
 
 async function handleNodeDrop(draggingNode: any, dropNode: any, dropType: string) {
-  const srcPath = draggingNode.data.path
+  // 优先使用拖拽开始时保存的信息，更可靠
+  const srcInfo = dragSource.value
+  const srcPath = srcInfo?.path || draggingNode.data.path
+  const srcName = srcInfo?.name || draggingNode.data.name
+  dragSource.value = null
+
   let targetDir: string
   if (dropType === 'inner') {
     targetDir = dropNode.data.path
   } else {
     targetDir = getParentPath(dropNode.data.path)
   }
-  const newPath = joinPath(targetDir, draggingNode.data.name)
-  if (newPath === srcPath) return
+  const newPath = joinPath(targetDir, srcName)
+  console.log('[drag] nodeDrop: srcInfo=', srcInfo, 'draggingNode.data.path=', draggingNode.data.path, 'draggingNode.data.name=', draggingNode.data.name)
+  console.log('[drag] nodeDrop: srcPath=', srcPath, 'srcName=', srcName, 'targetDir=', targetDir, 'dropType=', dropType, 'newPath=', newPath, 'dropNode.path=', dropNode.data.path, 'dropNode.is_dir=', dropNode.data.is_dir)
+  if (newPath === srcPath) {
+    console.log('[drag] newPath === srcPath, early return')
+    return
+  }
+  console.log('[drag] >>> calling fetchFSMove with:', { source: srcPath, target: newPath })
   try {
     await connectionStore.fetchFSMove(srcPath, newPath)
     draggingNode.data.path = newPath
@@ -601,6 +627,8 @@ watch(() => props.visible, async (val) => {
         @node-click="handleTreeNodeClick"
         @node-contextmenu="showCtxMenu"
         @node-drop="handleNodeDrop"
+        @node-drag-start="handleNodeDragStart"
+        @node-drag-end="handleNodeDragEnd"
         class="fe-tree"
       >
         <template #default="{ data }">
@@ -675,6 +703,10 @@ watch(() => props.visible, async (val) => {
           <span>{{ t('fileExplorer.newFolder') }}</span>
         </div>
         <div class="ctx-divider"></div>
+        <div v-if="ctxTarget?.is_dir" class="ctx-item" @click="handleReveal">
+          <el-icon><Folder /></el-icon>
+          <span>在桌面打开文件夹</span>
+        </div>
         <div class="ctx-item" @click="handleRename">
           <el-icon><Edit /></el-icon>
           <span>{{ t('fileExplorer.rename') }}</span>

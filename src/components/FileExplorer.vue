@@ -454,6 +454,17 @@ async function handleDelete() {
   }
 }
 
+async function handleReveal() {
+  const node = ctxTarget.value
+  if (!node || node._phantom) return
+  closeCtxMenu()
+  try {
+    await connectionStore.fetchFSReveal(node.path)
+  } catch (err: any) {
+    ElMessage.error('Open failed: ' + (err?.message || ''))
+  }
+}
+
 function getParentPath(p: string): string {
   if (!p) return ''
   const idx = p.lastIndexOf('/')
@@ -468,21 +479,47 @@ function joinPath(parent: string, name: string): string {
 }
 
 // ── 拖拽移动 ──
+// 保存拖拽开始时的原始节点信息，防止 el-tree 内部 DOM 操作篡改 data
+const dragSource = ref<{ path: string; name: string } | null>(null)
+
+function handleNodeDragStart(node: any) {
+  if (node.data?._phantom) return false
+  console.log('[drag] nodeDragStart path=', node.data.path, 'name=', node.data.name, 'is_dir=', node.data.is_dir)
+  dragSource.value = { path: node.data.path, name: node.data.name }
+  return true
+}
+
+function handleNodeDragEnd() {
+  console.log('[drag] nodeDragEnd, dragSource was=', dragSource.value?.path)
+  // 不在 nodeDragEnd 清空 dragSource，因为 el-tree 中 nodeDragEnd 可能在 nodeDrop 之前触发
+}
+
 function allowDrop(draggingNode: any, dropNode: any, type: string): boolean {
   if (type === 'inner') return dropNode.data.is_dir === true && !dropNode.data._phantom
   return !draggingNode.data._phantom
 }
 
 async function handleNodeDrop(draggingNode: any, dropNode: any, dropType: string, ev: any) {
-  const srcPath = draggingNode.data.path
+  // 优先使用拖拽开始时保存的信息，更可靠
+  const srcInfo = dragSource.value
+  const srcPath = srcInfo?.path || draggingNode.data.path
+  const srcName = srcInfo?.name || draggingNode.data.name
+  dragSource.value = null
+
   let targetDir: string
   if (dropType === 'inner') {
     targetDir = dropNode.data.path
   } else {
     targetDir = getParentPath(dropNode.data.path)
   }
-  const newPath = joinPath(targetDir, draggingNode.data.name)
-  if (newPath === srcPath) return
+  const newPath = joinPath(targetDir, srcName)
+  console.log('[drag] nodeDrop: srcInfo=', srcInfo, 'draggingNode.data.path=', draggingNode.data.path, 'draggingNode.data.name=', draggingNode.data.name)
+  console.log('[drag] nodeDrop: srcPath=', srcPath, 'srcName=', srcName, 'targetDir=', targetDir, 'dropType=', dropType, 'newPath=', newPath, 'dropNode.path=', dropNode.data.path, 'dropNode.is_dir=', dropNode.data.is_dir)
+  if (newPath === srcPath) {
+    console.log('[drag] newPath === srcPath, early return')
+    return
+  }
+  console.log('[drag] >>> calling fetchFSMove with:', { source: srcPath, target: newPath })
   // el-tree 已自动完成视觉移动，只需调用后端 API
   try {
     await connectionStore.fetchFSMove(srcPath, newPath)
@@ -743,6 +780,8 @@ async function handleIndexClick(data: any) {
               @node-click="handleTreeNodeClick"
               @node-contextmenu="showCtxMenu"
               @node-drop="handleNodeDrop"
+              @node-drag-start="handleNodeDragStart"
+              @node-drag-end="handleNodeDragEnd"
             >
               <template #default="{ data }">
                 <span class="fe-tree-icon">
@@ -793,6 +832,10 @@ async function handleIndexClick(data: any) {
                 {{ t('fileExplorer.indexManifest.removeFromKB') }}
               </div>
               <div class="ctx-menu-divider"></div>
+              <div v-if="ctxTarget?.is_dir" class="ctx-menu-item" @click="handleReveal">
+                <el-icon><Folder /></el-icon>
+                在桌面打开文件夹
+              </div>
               <div class="ctx-menu-item" @click="handleRename">
                 <el-icon><Edit /></el-icon>
                 {{ t('common.edit') }}
