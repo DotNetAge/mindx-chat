@@ -304,7 +304,9 @@
     "maxTurnsReached": "达到最大轮次",
     "executionSummary": "执行摘要",
     "userCancelled": "用户取消了操作",
-    "timeout": "处理超时: {msg}"
+    "timeout": "处理超时: {msg}",
+    "undoRound": "回收本轮对话",
+    "undoRoundConfirm": "此操作会彻底删除本轮对话，包括所有相应的消息及中间过程，且不可恢复。确定要执行回收操作吗？"
   },
   "tool": {
     "viewResult": "查看结果",

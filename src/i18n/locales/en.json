@@ -303,7 +303,9 @@
     "maxTurnsReached": "Max Turns Reached",
     "executionSummary": "Execution Summary",
     "userCancelled": "User cancelled operation",
-    "timeout": "Processing timeout: {msg}"
+    "timeout": "Processing timeout: {msg}",
+    "undoRound": "Undo this round",
+    "undoRoundConfirm": "This will permanently delete this entire round of conversation, including all messages and intermediate processes. This action cannot be undone. Are you sure?"
   },
   "tool": {
     "viewResult": "View Result",

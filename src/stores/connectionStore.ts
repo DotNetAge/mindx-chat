@@ -1209,6 +1209,16 @@ export const useConnectionStore = defineStore('connection', {
       return result || { session_id: sessionId, records: [] }
     },
 
+    async deleteRound(sessionId: string, messageId: number): Promise<boolean> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<{ deleted: boolean; cursor: number }>('session.delete_round', {
+        session_id: sessionId,
+        id: messageId
+      })
+      return result?.deleted ?? false
+    },
+
     emptyMonthlyStats(year?: number, month?: number): MonthlyUsageStats {
       const now = new Date()
       return {

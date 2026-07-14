@@ -49,14 +49,12 @@ const contextRingDash = computed(() => {
 
 const contextTableRows = computed(() => {
   if (!contextUsage.value) return []
-  const { window_tokens, max_window_size, message_count, cursor, active_message_count } = contextUsage.value
+  const { window_tokens, max_window_size, active_message_count } = contextUsage.value
   const pct = contextPercent.value
   return [
     { label: t('contextUsage.windowTokens'), value: window_tokens.toLocaleString() },
     { label: t('contextUsage.maxWindowSize'), value: max_window_size.toLocaleString() },
     { label: t('contextUsage.usageRatio'), value: `${pct}%` },
-    { label: t('contextUsage.totalMessages'), value: message_count.toLocaleString() },
-    { label: t('contextUsage.cursor'), value: cursor.toLocaleString() },
     { label: t('contextUsage.activeMessages'), value: active_message_count.toLocaleString() },
   ]
 })

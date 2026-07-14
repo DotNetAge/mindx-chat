@@ -139,8 +139,8 @@ watch(() => props.visible, (v) => {
   <el-dialog
     :model-value="props.visible"
     @update:model-value="emit('close')"
-    title="会话记忆"
-    width="620px"
+    title="记忆"
+    width="1240px"
     class="memory-browser-dialog"
     append-to-body
     destroy-on-close
@@ -310,10 +310,9 @@ watch(() => props.visible, (v) => {
   color: #94a3b8;
   line-height: 1.6;
   margin: 0 0 10px;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  max-height: 120px;
+  overflow-y: auto;
+  min-height: 4.8em;
 }
 .mb-item-footer {
   display: flex;

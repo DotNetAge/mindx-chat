@@ -562,6 +562,16 @@ function handleDismiss(messageId: string) {
   ]
 }
 
+async function handleUndoRound(messageId: number) {
+  const sid = sessionStore.activeSessionId
+  if (!sid || !messageId) return
+  const ok = await connectionStore.deleteRound(sid, messageId)
+  if (!ok) return
+  // 重新加载会话消息和上下文用量
+  await sessionStore.switchToSession(sid)
+  connectionStore.fetchContextUsage(sid)
+}
+
 function logCurrentMessages(_messages: any[]) {
   return ''
 }
@@ -699,18 +709,21 @@ function logCurrentMessages(_messages: any[]) {
         {{ logCurrentMessages(chatStore.currentMessages) }}
         <transition-group name="message-list" tag="div" class="message-list-inner">
           <div
-            v-for="message in filteredMessages"
+            v-for="(message, index) in filteredMessages"
             :key="message.id"
             class="message-wrapper"
             :class="[message.role, message.eventType]"
           >
             <MessageComponentRouter 
               :message="message"
+              :index="index"
+              :sessionId="sessionStore.activeSessionId"
               @permission-grant="(data) => handlePermissionGrant(data)"
               @permission-deny="(reason) => handlePermissionDeny(reason)"
               @form-submit="(data) => handleFormSubmit(data)"
               @retry="handleRetry(message.id)"
               @dismiss="handleDismiss(message.id)"
+              @undo-round="handleUndoRound"
             />
           </div>
         </transition-group>

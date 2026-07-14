@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElMessageBox } from 'element-plus'
+import { isTaskTool } from '../../stores/chatStore'
 import ThinkingView from './ThinkingView.vue'
 import ToolExecView from './ToolExecView.vue'
 import ChoicesPanel from './ChoicesPanel.vue'
@@ -14,15 +16,32 @@ import FormView from './FormView.vue'
 import AskUserView from './AskUserView.vue'
 import DiffView from './DiffView.vue'
 import FormattedContent from './FormattedContent.vue'
-import { isTaskTool } from '../../stores/chatStore'
 
 const { t } = useI18n()
+
 const props = defineProps({
   message: {
     type: Object as () => any,
     required: true
+  },
+  index: {
+    type: Number,
+    default: -1
+  },
+  sessionId: {
+    type: String,
+    default: ''
   }
 })
+
+const emit = defineEmits<{
+  (e: 'undo-round', messageId: number): void
+  (e: 'permission-grant', data: any): void
+  (e: 'permission-deny', reason: string): void
+  (e: 'retry'): void
+  (e: 'dismiss'): void
+  (e: 'form-submit', data: any): void
+}>()
 
 const componentType = computed(() => {
   const et = props.message.eventType
@@ -52,6 +71,26 @@ const componentType = computed(() => {
   if (role === 'assistant') return 'output'
   return 'default'
 })
+
+const isDeleting = ref(false)
+
+const canUndo = computed(() => {
+  const ts = props.message?.metadata?.backendTimestamp
+  return typeof ts === 'number' && ts > 0
+})
+
+async function handleUndoRound() {
+  const ts = props.message?.metadata?.backendTimestamp
+  if (isDeleting.value || typeof ts !== 'number' || ts <= 0) return
+  isDeleting.value = true
+  try {
+    emit('undo-round', ts)
+  } catch (e) {
+    console.error('undo round failed:', e)
+  } finally {
+    isDeleting.value = false
+  }
+}
 
 const thinkingData = computed(() => ({
   content: props.message.eventType === 'thinking_done' ? props.message.content : '',
@@ -169,7 +208,26 @@ function formatContent(content: string): string {
     <template v-if="componentType === 'user' && message.content">
       <div class="user-message">
         <span class="user-indicator"></span>
-        <p class="user-content"><FormattedContent :content="message.content" /></p>
+        <p class="user-content">
+          <span class="user-text"><FormattedContent :content="message.content" /></span>
+          <el-popconfirm
+            v-if="canUndo"
+            :title="t('message.undoRoundConfirm')"
+            confirm-button-text="确认回收"
+            cancel-button-text="取消"
+            @confirm="handleUndoRound"
+            placement="left"
+            :hide-after="0"
+            popper-class="undo-round-popover"
+          >
+            <template #reference>
+              <span
+                class="undo-round-btn"
+                :title="t('message.undoRound')"
+              >回收</span>
+            </template>
+          </el-popconfirm>
+        </p>
       </div>
     </template>
 
@@ -302,6 +360,10 @@ function formatContent(content: string): string {
 
 .user-content {
   flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
   font-size: 14px;
   line-height: 1.65;
   color: var(--text-primary);
@@ -310,6 +372,11 @@ function formatContent(content: string): string {
   border-radius: 0 12px 12px 0;
   margin: 0;
   word-wrap: break-word;
+}
+
+.user-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .system-message {
@@ -456,5 +523,31 @@ function formatContent(content: string): string {
   font-size: 10px;
   line-height: 1.5;
   color: #60a5fa;
+}
+
+.undo-round-btn {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-tertiary, #999);
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  user-select: none;
+  opacity: 0;
+  white-space: nowrap;
+}
+
+.user-content:hover .undo-round-btn {
+  opacity: 1;
+}
+
+:global(.undo-round-popover) {
+  min-width: 200px;
+}
+
+.undo-round-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
 }
 </style>

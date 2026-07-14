@@ -600,7 +600,7 @@ export const useChatStore = defineStore('chat', {
           eventType,
           eventTitle,
           eventData,
-          metadata,
+          metadata: { ...(metadata || {}), backendTimestamp: msgTimestamp },
           timestamp: new Date(msg.timestamp).toISOString(),
           sessionId
         })
