@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElMessage } from 'element-plus'
 import { useChatStore } from '../../stores/chatStore'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useConnectionStore } from '../../stores/connectionStore'
@@ -182,6 +183,100 @@ async function handlePermissionGrant(data: Record<string, any>) {
 function handlePermissionDeny() {
   chatStore.pendingPermissionToolName = ''
 }
+
+/** 点击 Agent 名称时切换/创建该 Agent 的会话 */
+async function handleAgentSwitch() {
+  const agentName = props.agentName
+  if (!agentName) return
+
+  const projectDir = connStore.currentProjectDir
+  if (!projectDir) {
+    ElMessage.warning('当前无项目目录，无法创建会话')
+    return
+  }
+
+  const normDir = projectDir.replace(/\/+$/, '')
+
+  // 1. 查找本地 sessionStore 中是否已有该 Agent + ProjectDir 的会话
+  const existing = sessionStore.sessions.find(
+    s => s.agent_name === agentName &&
+         s.project_dir &&
+         s.project_dir.replace(/\/+$/, '') === normDir
+  )
+
+  if (existing) {
+    await switchToAgentSession(agentName, existing.session_id)
+    return
+  }
+
+  // 2. 没有 → 尝试创建新会话
+  try {
+    const result = await connStore.createSession(agentName, projectDir)
+    const sessionId = result.session_id
+    await addAndSwitchSession(agentName, sessionId, projectDir)
+    ElMessage.success({ message: `已创建 ${agentName} 的新会话`, duration: 2000 })
+    return
+  } catch (err: any) {
+    const msg = err?.message || ''
+    // 后端返回 duplicate session → 从服务端拉取该 Agent 的会话列表找匹配的
+    if (msg.includes('duplicate session')) {
+      try {
+        const serverSessions = await connStore.fetchSessions(agentName)
+        const matched = serverSessions.find(
+          s => s.project_dir && s.project_dir.replace(/\/+$/, '') === normDir
+        )
+        if (matched) {
+          // 同步到本地 sessionStore
+          sessionStore.addSession({
+            session_id: matched.session_id,
+            agent_name: agentName,
+            title: matched.title || '',
+            created_at: matched.created_at,
+            updated_at: matched.last_activity_at,
+            message_count: 0,
+            project_dir: matched.project_dir
+          })
+          await switchToAgentSession(agentName, matched.session_id)
+          return
+        }
+      } catch (fetchErr) {
+        console.error('[SubtaskView] Failed to fetch sessions for agent:', fetchErr)
+      }
+    }
+    console.error('[SubtaskView] Failed to create session:', err)
+    ElMessage.error('创建会话失败: ' + msg)
+  }
+}
+
+/** 统一切换会话：更新 connectionStore + switchToSession */
+async function switchToAgentSession(agentName: string, sessionId: string) {
+  connStore.setLastSession(sessionId)
+  connStore.setLastAgent(agentName)
+  connStore.setCurrentAgent(agentName)
+  await sessionStore.switchToSession(sessionId)
+}
+
+/** 创建成功：从服务端获取元数据后加入 sessionStore 再切换 */
+async function addAndSwitchSession(agentName: string, sessionId: string, projectDir: string) {
+  connStore.setLastAgent(agentName)
+  connStore.setLastSession(sessionId)
+  connStore.currentProjectDir = projectDir
+
+  const detail = await connStore.fetchSessionDetail(sessionId)
+  const meta = detail?.meta || {}
+
+  sessionStore.addSession({
+    session_id: sessionId,
+    agent_name: agentName,
+    title: meta.title || '',
+    created_at: meta.created_at || new Date().toISOString(),
+    updated_at: meta.updated_at || new Date().toISOString(),
+    message_count: meta.message_count || 0,
+    project_dir: meta.project_dir || projectDir
+  })
+
+  await switchToAgentSession(agentName, sessionId)
+}
 </script>
 
 <template>
@@ -212,7 +307,7 @@ function handlePermissionDeny() {
             <template v-if="isSpawned">已安排</template>
             <template v-else-if="success === true">已完成</template>
             <template v-else>失败</template>
-            <span class="tag agent-tag">{{ displayAgentName }}</span>
+            <span class="tag agent-tag agent-clickable" @click.stop="handleAgentSwitch" :title="'切换到 ' + displayAgentName + ' 的会话'">{{ displayAgentName }}</span>
             <span v-if="isSpawned && taskID" class="tag task-id-tag">{{ taskID }}</span>
             <span v-if="timeout && isSpawned" class="tag timeout-tag">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
@@ -525,6 +620,16 @@ function handlePermissionDeny() {
   background: rgba(99, 102, 241, 0.12);
   color: #a5b4fc;
   border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.agent-clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.agent-clickable:hover {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #c7d2fe;
 }
 
 .timeout-tag {

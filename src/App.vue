@@ -92,7 +92,7 @@ async function handleDirectoryConfirm() {
     connectionStore.setLastSession(sessionId)
     connectionStore.currentProjectDir = selectedDirectory.value
 
-    // 从服务端获取真实 session 元数据（title, project_working_dir 等）
+    // 从服务端获取真实 session 元数据（title, project_dir 等）
     const detail = await connectionStore.fetchSessionDetail(sessionId)
     const meta = detail?.meta || {}
     console.log(`[MindX] 📥 session detail:`, JSON.parse(JSON.stringify(detail)))
@@ -105,7 +105,7 @@ async function handleDirectoryConfirm() {
       created_at: meta.created_at || new Date().toISOString(),
       updated_at: meta.updated_at || new Date().toISOString(),
       message_count: meta.message_count || 0,
-      project_dir: meta.project_working_dir || selectedDirectory.value
+      project_dir: meta.project_dir || selectedDirectory.value
     })
     sessionStore.setActiveSession(sessionId)
 

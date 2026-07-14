@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, watch, ref, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElTooltip, ElBadge } from 'element-plus'
+import { ElTooltip, ElPopover, ElBadge } from 'element-plus'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useChatStore } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
@@ -12,7 +12,54 @@ import LogDrawer from './LogDrawer.vue'
 import IndexDetailsDialog from './IndexDetailsDialog.vue'
 import EntityTagsDialog from './EntityTagsDialog.vue'
 import TerminalDrawer from './TerminalDrawer.vue'
+import MemoryBrowser from './MemoryBrowser.vue'
 import { getMindXClient } from '../services/websocket'
+
+// ── Context window ring ───────────────────────────────────────
+const contextUsage = computed(() => connectionStore.contextUsage)
+
+const contextRatio = computed(() => {
+  if (!contextUsage.value) return 0
+  return contextUsage.value.usage_ratio
+})
+
+const contextPercent = computed(() => {
+  return Math.round(contextRatio.value * 100)
+})
+
+const contextLabel = computed(() => {
+  if (!contextUsage.value) return '--'
+  return `${contextPercent.value}%`
+})
+
+const contextRingColor = computed(() => {
+  const r = contextRatio.value
+  if (r >= 0.80) return '#ef4444'      // red ≥ 80%
+  if (r >= 0.60) return '#f59e0b'      // amber ≥ 60%
+  if (r >= 0.40) return '#22d3ee'      // cyan ≥ 40%
+  return '#10b981'                      // green < 40%
+})
+
+const contextRingDash = computed(() => {
+  const circumference = 2 * Math.PI * 8 // r=8
+  const filled = circumference * Math.min(contextRatio.value, 1)
+  const empty = circumference - filled
+  return `${filled} ${empty}`
+})
+
+const contextTableRows = computed(() => {
+  if (!contextUsage.value) return []
+  const { window_tokens, max_window_size, message_count, cursor, active_message_count } = contextUsage.value
+  const pct = contextPercent.value
+  return [
+    { label: t('contextUsage.windowTokens'), value: window_tokens.toLocaleString() },
+    { label: t('contextUsage.maxWindowSize'), value: max_window_size.toLocaleString() },
+    { label: t('contextUsage.usageRatio'), value: `${pct}%` },
+    { label: t('contextUsage.totalMessages'), value: message_count.toLocaleString() },
+    { label: t('contextUsage.cursor'), value: cursor.toLocaleString() },
+    { label: t('contextUsage.activeMessages'), value: active_message_count.toLocaleString() },
+  ]
+})
 
 const { t } = useI18n()
 const connectionStore = useConnectionStore()
@@ -78,6 +125,7 @@ const updateLabel = computed(() => {
 const indexingState = computed(() => connectionStore.indexingState)
 const showIndexDialog = ref(false)
 const showEntityTagDialog = ref(false)
+const showMemoryBrowser = ref(false)
 
 async function handleOpenKB() {
   // Check if entity tags are configured
@@ -183,6 +231,15 @@ watch(indexingState, (s) => {
 })
 onUnmounted(() => { if (progressTimer) { clearInterval(progressTimer); progressTimer = null } })
 
+// ── Refresh memory count on session switch ──
+watch(() => sessionStore.activeSessionId, (sessionId) => {
+  if (sessionId && connectionStore.isConnected) {
+    connectionStore.fetchSessionMemoryList(sessionId)
+  } else {
+    connectionStore.sessionMemoryList = null
+  }
+}, { immediate: true })
+
 const formatNumber = (num: number): string => {
   if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M'
   if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K'
@@ -220,6 +277,41 @@ function handleOpenProjectDir() {
 
 function handleOpenAbout() {
   connectionStore.pendingShowAbout = true
+}
+
+// ── Memory Browser ────────────────────────────────────────────
+const memoryCount = computed(() => connectionStore.sessionMemoryList?.count ?? 0)
+
+async function handleOpenMemoryBrowser() {
+  const sessionId = sessionStore.activeSessionId
+  if (!sessionId) return
+  showMemoryBrowser.value = true
+  // Fetch asynchronously — the dialog will show loading
+  connectionStore.fetchSessionMemoryList(sessionId)
+}
+
+// ── Compact Session ────────────────────────────────────────────
+const showContextPopover = ref(false)
+const shouldShowCompactBtn = computed(() => {
+  return (contextUsage.value?.window_tokens || 0) > 100000
+})
+
+async function handleCompact() {
+  const sessionId = sessionStore.activeSessionId
+  if (!sessionId) return
+  const client = getMindXClient()
+  if (!client) return
+  showContextPopover.value = false // 关闭弹窗
+  chatStore.isCompacting = true
+  try {
+    const result = await client.call('session.compact', { session_id: sessionId, mode: 'full' })
+    // 压缩成功后刷新记忆计数
+    connectionStore.fetchSessionMemoryList(sessionId)
+  } catch (err) {
+    console.error('[StatusBar] compact failed:', err)
+  } finally {
+    chatStore.isCompacting = false
+  }
 }
 </script>
 
@@ -306,6 +398,89 @@ function handleOpenAbout() {
     </div>
 
     <div class="status-right">
+      <!-- Context usage ring -->
+      <ElPopover
+        v-if="contextUsage"
+        v-model="showContextPopover"
+        trigger="click"
+        placement="top"
+        :width="240"
+        popper-class="context-usage-popover"
+      >
+        <template #reference>
+          <div class="context-ring-wrapper">
+            <svg class="context-ring" width="18" height="18" viewBox="0 0 20 20">
+              <!-- background ring -->
+              <circle cx="10" cy="10" r="8" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2" />
+              <!-- foreground arc -->
+              <circle
+                cx="10" cy="10" r="8" fill="none"
+                :stroke="contextRingColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                :stroke-dasharray="contextRingDash"
+                transform="rotate(-90 10 10)"
+                class="context-ring-arc"
+              />
+            </svg>
+            <span class="context-ring-label" :style="{ color: contextRingColor }">{{ contextLabel }}</span>
+          </div>
+        </template>
+
+        <div class="context-popover-body">
+          <div class="context-popover-title">{{ t('contextUsage.title') }}</div>
+          <div class="context-popover-table">
+            <div
+              v-for="(row, idx) in contextTableRows"
+              :key="idx"
+              class="context-popover-row"
+              :class="{ last: idx === contextTableRows.length - 1 }"
+            >
+              <span class="context-popover-label">{{ row.label }}</span>
+              <span class="context-popover-value">{{ row.value }}</span>
+            </div>
+          </div>
+
+          <!-- 整理对话按钮：仅在 Token 量超过 100K 时显示 -->
+          <button
+            v-if="shouldShowCompactBtn"
+            class="compact-btn"
+            :disabled="chatStore.isCompacting"
+            @click="handleCompact"
+          >
+            <svg
+              v-if="chatStore.isCompacting"
+              class="compact-btn-spinner"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+            >
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36"/>
+            </svg>
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
+            </svg>
+            {{ chatStore.isCompacting ? '整理中...' : '整理对话' }}
+          </button>
+        </div>
+      </ElPopover>
+
+      <!-- 记忆计数 -->
+      <ElTooltip content="记忆" placement="top" :show-after="400">
+        <button class="action-btn memory-btn" @click="handleOpenMemoryBrowser">
+          <span class="memory-count">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+            </svg>
+            {{ memoryCount }}
+          </span>
+        </button>
+      </ElTooltip>
+
       <!-- 只看答案 -->
       <div class="answer-only-switch">
         <el-switch
@@ -377,6 +552,7 @@ function handleOpenAbout() {
   </footer>
   <LogDrawer ref="logDrawerRef" />
   <TerminalDrawer :visible="showTerminalDrawer" @update:visible="showTerminalDrawer = $event" :cwd="activeProjectDir" />
+  <MemoryBrowser v-if="showMemoryBrowser" :visible="showMemoryBrowser" @close="showMemoryBrowser = false" />
 </template>
 
 <style scoped>
@@ -436,6 +612,33 @@ function handleOpenAbout() {
 .connect-btn:hover {
   background: rgba(16, 185, 129, 0.15);
   color: #10b981;
+}
+
+/* ── 记忆按钮 ── */
+.memory-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+}
+
+.memory-btn:hover {
+  background: rgba(139, 92, 246, 0.12);
+  color: #a78bfa;
+}
+
+.memory-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.memory-count svg {
+  flex-shrink: 0;
 }
 
 .disconnect-btn:hover {
@@ -762,6 +965,112 @@ function handleOpenAbout() {
 }
 .index-loading-icon {
   font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* ── Context usage ring ── */
+.context-ring-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  cursor: default;
+}
+
+.context-ring {
+  display: block;
+  flex-shrink: 0;
+}
+
+.context-ring-arc {
+  transition: stroke-dasharray 0.6s ease, stroke 0.3s ease;
+}
+
+.context-ring-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  transition: color 0.3s ease;
+}
+
+/* ── Context usage popover ── */
+.context-popover-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.context-popover-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary, #e2e8f0);
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.context-popover-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+
+.context-popover-row.last {
+  padding-bottom: 0;
+}
+
+.context-popover-label {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.context-popover-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary, #e2e8f0);
+}
+
+/* ── 整理对话按钮 ── */
+.compact-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 6px 12px;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 6px;
+  background: rgba(139, 92, 246, 0.08);
+  color: #a78bfa;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.compact-btn:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.18);
+  border-color: #8b5cf6;
+}
+
+.compact-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.compact-btn-spinner {
+  animation: compact-btn-rotate 1.2s linear infinite;
+}
+
+@keyframes compact-btn-rotate {
+  to { transform: rotate(360deg); }
+}
+
+.compact-btn svg {
   flex-shrink: 0;
 }
 </style>

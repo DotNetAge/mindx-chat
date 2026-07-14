@@ -1,780 +1,527 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Refresh, Search } from '@element-plus/icons-vue'
+import { ref, computed, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useConnectionStore } from '../stores/connectionStore'
+import { useSessionStore } from '../stores/sessionStore'
+
+const props = defineProps<{
+  visible: boolean
+}>()
+
+const emit = defineEmits<{
+  close: []
+}>()
 
 const connectionStore = useConnectionStore()
-const { t } = useI18n()
+const sessionStore = useSessionStore()
 
-// ---------- 生命周期控制 ----------
-const visible = ref(false)
-async function open() {
-  visible.value = true
-  await loadStats()
-  await loadBrowsePage(1)
-}
-function close() { visible.value = false }
-defineExpose({ visible, open, close })
+// ── Loading ──
+const loading = ref(false)
 
-// ---------- 统计卡片 ----------
-const stats = ref({
-  total_files: 0,
-  indexed_files: 0,
-  total_chunks: 0
-})
-const statsLoading = ref(false)
+// ── Editable state ──
+const editingId = ref<string | null>(null)
+const editSummary = ref('')
+const editContent = ref('')
+const editTags = ref('')
 
-const progressPercent = computed(() => {
-  if (stats.value.total_files === 0) return 0
-  return Math.round((stats.value.indexed_files / stats.value.total_files) * 100)
-})
+// ── Data ──
+const memories = computed(() => connectionStore.sessionMemoryList?.chunks ?? [])
+const memoryCount = computed(() => connectionStore.sessionMemoryList?.count ?? 0)
 
-async function loadStats() {
-  statsLoading.value = true
-  try {
-    const data = await connectionStore.fetchKBStats('')
-    stats.value = data
-  } catch {
-    try {
-      const { count } = await connectionStore.fetchMemoryCount()
-      stats.value = { total_files: 0, indexed_files: 0, total_chunks: count }
-    } catch { /* silent */ }
-  } finally {
-    statsLoading.value = false
+// ── Format timestamp ──
+function formatTime(ts: number): string {
+  const d = new Date(ts * 1000)
+  const now = new Date()
+  const diff = now.getTime() - d.getTime()
+  // Today: show time only
+  if (diff < 86400000 && d.getDate() === now.getDate()) {
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
   }
+  // This week: show day + time
+  if (diff < 604800000) {
+    const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+    return days[d.getDay()] + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  }
+  // Older: show date
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+    d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
-// ---------- 浏览模式（分页列表） ----------
-type ChunkItem = {
-  id: string
-  content: string
-  doc_id?: string
-  parent_id?: string
-  mime_type?: string
-  metadata?: Record<string, any>
-  chunk_meta?: { index: number }
+// ── Start editing ──
+function startEdit(item: { id: string; summary: string; content: string; tags: string[] }) {
+  editingId.value = item.id
+  editSummary.value = item.summary
+  editContent.value = item.content
+  editTags.value = (item.tags || []).join(', ')
 }
 
-const browseChunks = ref<ChunkItem[]>([])
-const browsePage = ref(1)
-const browseTotal = ref(0)
-const browsePageSize = 10
-const browseLoading = ref(false)
-const isBrowseMode = ref(true) // true = 浏览模式, false = 搜索结果模式
-
-// Helper to safely access chunk_meta properties (Vue template type narrowing issue)
-function cm(item: any, key: string): any {
-  return item?.chunk_meta?.[key]
+// ── Cancel editing ──
+function cancelEdit() {
+  editingId.value = null
+  editSummary.value = ''
+  editContent.value = ''
+  editTags.value = ''
 }
 
-const totalPages = computed(() => {
-  if (browseTotal.value === 0) return 0
-  return Math.ceil(browseTotal.value / browsePageSize)
-})
-
-async function loadBrowsePage(page: number) {
-  browseLoading.value = true
-  isBrowseMode.value = true
-  browsePage.value = page
+// ── Save edit ──
+async function saveEdit(id: string) {
+  const summary = editSummary.value.trim()
+  const content = editContent.value.trim()
+  const tags = editTags.value.split(',').map(t => t.trim()).filter(Boolean)
+  if (!summary && !content) {
+    ElMessage.warning('摘要和内容不能同时为空')
+    return
+  }
+  loading.value = true
   try {
-    const result = await connectionStore.fetchMemoryChunks(page, browsePageSize)
-    browseChunks.value = result.chunks
-    // Use the exact total from Count if available, otherwise estimate
-    if (result.total > 0) {
-      browseTotal.value = result.total
+    const ok = await connectionStore.updateSessionMemory(id, summary, content, tags)
+    if (ok) {
+      ElMessage.success('已更新')
+      editingId.value = null
     } else {
-      browseTotal.value = stats.value.total_chunks
+      ElMessage.error('更新失败')
     }
-    // Print raw chunks data to console for inspection
-    console.log(`[MemoryBrowser] browse page=${page} total=${result.total} chunks=`, JSON.parse(JSON.stringify(result.chunks)))
   } catch {
-    browseChunks.value = []
+    ElMessage.error('更新失败')
   } finally {
-    browseLoading.value = false
+    loading.value = false
   }
 }
 
-function goToPage(page: number) {
-  if (page < 1 || page > totalPages.value) return
-  loadBrowsePage(page)
-}
-
-// For paginator display — which page numbers to show
-const visiblePages = computed(() => {
-  const total = totalPages.value
-  const current = browsePage.value
-  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
-  const pages: (number | '...')[] = []
-  pages.push(1)
-  if (current > 3) pages.push('...')
-  const start = Math.max(2, current - 1)
-  const end = Math.min(total - 1, current + 1)
-  for (let i = start; i <= end; i++) pages.push(i)
-  if (current < total - 2) pages.push('...')
-  pages.push(total)
-  return pages
-})
-
-// ---------- 查询 ----------
-const queryText = ref('')
-const searching = ref(false)
-const searchResults = ref<Array<{ id: string; content: string; score: number; created_at: string }>>([])
-const errorText = ref('')
-const expandedIds = ref<Set<string>>(new Set())
-
-function toggleExpand(id: string) {
-  if (expandedIds.value.has(id)) {
-    expandedIds.value.delete(id)
-  } else {
-    expandedIds.value.add(id)
-  }
-}
-
-async function doSearch() {
-  const q = queryText.value.trim()
-  if (!q) return
-  searching.value = true
-  errorText.value = ''
-  isBrowseMode.value = false
+// ── Delete ──
+async function handleDelete(id: string) {
   try {
-    searchResults.value = await connectionStore.queryMemory(q, 10)
-  } catch (e: any) {
-    errorText.value = e.message || String(e)
-    searchResults.value = []
+    await ElMessageBox.confirm('确定要删除这条记忆吗？此操作不可撤销。', '删除记忆', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+      confirmButtonClass: 'el-button--danger',
+    })
+    loading.value = true
+    try {
+      const ok = await connectionStore.deleteSessionMemory(id)
+      if (ok) {
+        ElMessage.success('已删除')
+      } else {
+        ElMessage.error('删除失败')
+      }
+    } catch {
+      ElMessage.error('删除失败')
+    } finally {
+      loading.value = false
+    }
+  } catch {
+    // User cancelled
+  }
+}
+
+// ── Refresh ──
+async function refresh() {
+  const sessionId = sessionStore.activeSessionId
+  if (!sessionId) return
+  loading.value = true
+  try {
+    await connectionStore.fetchSessionMemoryList(sessionId)
   } finally {
-    searching.value = false
+    loading.value = false
   }
 }
 
-function clearSearch() {
-  queryText.value = ''
-  expandedIds.value.clear()
-  // Reload browse view
-  loadBrowsePage(1)
-}
-
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter') doSearch()
-}
-
-// ---------- 过滤（仅搜索结果） ----------
-const filterText = ref('')
-const filteredResults = computed(() => {
-  const f = filterText.value.trim().toLowerCase()
-  if (!f) return searchResults.value
-  return searchResults.value.filter(r =>
-    r.content.toLowerCase().includes(f) ||
-    r.id.toLowerCase().includes(f)
-  )
-})
-
-// ---------- 重置 ----------
-watch(visible, (v) => {
+// ── Reset editing state on dialog close ──
+watch(() => props.visible, (v) => {
   if (!v) {
-    queryText.value = ''
-    searchResults.value = []
-    errorText.value = ''
-    filterText.value = ''
-    expandedIds.value.clear()
-    browseChunks.value = []
-    browseTotal.value = 0
-    browsePage.value = 1
-    isBrowseMode.value = true
+    cancelEdit()
   }
-})
-
-// Auto-refresh interval
-let refreshTimer: ReturnType<typeof setInterval> | null = null
-onMounted(() => {
-  refreshTimer = setInterval(() => {
-    if (visible.value) loadStats()
-  }, 30_000)
-})
-onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
 
 <template>
-  <Teleport to="body">
-    <transition name="fade-scale">
-      <div v-if="visible" class="mb-overlay">
-        <!-- Header bar (匹配 GraphViewer 风格) -->
-        <header class="mb-header">
-          <div class="mb-header-left">
-            <button class="back-btn" @click="close">
-              <el-icon><ArrowLeft /></el-icon>
-              {{ t('memoryBrowser.back') }}
-            </button>
-            <h1 class="mb-title">{{ t('memoryBrowser.title') }}</h1>
-          </div>
-          <div class="mb-header-right">
-            <button class="header-action-btn" @click="loadStats" :title="t('memoryBrowser.refresh')">
-              <el-icon><Refresh /></el-icon>
-            </button>
-            <button class="header-close-btn" @click="close">&times;</button>
-          </div>
-        </header>
+  <el-dialog
+    :model-value="props.visible"
+    @update:model-value="emit('close')"
+    title="会话记忆"
+    width="620px"
+    class="memory-browser-dialog"
+    append-to-body
+    destroy-on-close
+    top="5vh"
+  >
+    <div class="mb-body" v-loading="loading">
+      <!-- Empty state -->
+      <div v-if="memories.length === 0" class="mb-empty">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="mb-empty-icon">
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+        </svg>
+        <p class="mb-empty-text">暂无记忆</p>
+      </div>
 
-        <!-- Body: 垂直三部分 -->
-        <div class="mb-body">
-          <!-- ==================== Part 1: 统计卡片区 ==================== -->
-          <section class="mb-stats-section">
-            <div class="stats-card-row">
-              <!-- 待索引文件 -->
-              <div class="stat-card">
-                <span class="stat-label">{{ t('memoryBrowser.statsPending') }}</span>
-                <span class="stat-value pending-value">
-                  {{ statsLoading ? '...' : Math.max(0, stats.total_files - stats.indexed_files) }}
-                </span>
+      <!-- Memory list (iOS-style) -->
+      <div v-else class="mb-list">
+        <div
+          v-for="item in memories"
+          :key="item.id"
+          class="mb-item"
+          :class="{ editing: editingId === item.id }"
+        >
+          <!-- ── View mode ── -->
+          <template v-if="editingId !== item.id">
+            <div class="mb-item-header">
+              <h3 class="mb-item-summary">{{ item.summary || '(无摘要)' }}</h3>
+              <span class="mb-item-time">{{ formatTime(item.timestamp) }}</span>
+            </div>
+            <p class="mb-item-content">{{ item.content }}</p>
+            <div class="mb-item-footer">
+              <div class="mb-item-tags" v-if="item.tags && item.tags.length > 0">
+                <span v-for="tag in item.tags" :key="tag" class="mb-tag">{{ tag }}</span>
               </div>
-              <!-- 已索引文件 -->
-              <div class="stat-card">
-                <span class="stat-label">{{ t('memoryBrowser.statsIndexed') }}</span>
-                <span class="stat-value indexed-value">
-                  {{ statsLoading ? '...' : stats.indexed_files }}
-                </span>
-              </div>
-              <!-- 记忆条目总数 -->
-              <div class="stat-card">
-                <span class="stat-label">{{ t('memoryBrowser.statsTotalChunks') }}</span>
-                <span class="stat-value chunks-value">
-                  {{ statsLoading ? '...' : stats.total_chunks }}
-                </span>
+              <div class="mb-item-actions">
+                <button class="mb-action-btn edit-btn" @click="startEdit(item)" title="编辑">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                  </svg>
+                </button>
+                <button class="mb-action-btn delete-btn" @click="handleDelete(item.id)" title="删除">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  </svg>
+                </button>
               </div>
             </div>
-            <!-- 进度条 -->
-            <div class="progress-area" v-if="stats.total_files > 0">
-              <div class="progress-header">
-                <span class="progress-label">{{ t('memoryBrowser.statsProgress') }}</span>
-                <span class="progress-pct">{{ progressPercent }}%</span>
-              </div>
-              <div class="progress-track">
-                <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
-              </div>
-            </div>
-          </section>
+          </template>
 
-          <!-- ==================== Part 2: 查询输入区 ==================== -->
-          <section class="mb-search-section">
-            <div class="search-row">
-              <input
-                v-model="queryText"
-                type="text"
-                :placeholder="t('memoryBrowser.searchPlaceholder')"
-                class="mb-search-input"
-                @keydown="onKeydown"
-                autofocus
-              />
-              <button class="mb-search-btn" @click="doSearch" :disabled="searching || !queryText.trim()">
-                <el-icon><Search /></el-icon>
-                <span>{{ searching ? t('memoryBrowser.loading') : t('memoryBrowser.searchBtn') }}</span>
-              </button>
-              <!-- Clear search button (only visible in search mode) -->
-              <button v-if="!isBrowseMode" class="mb-clear-btn" @click="clearSearch" :title="t('memoryBrowser.backToBrowse')">
-                {{ t('memoryBrowser.clear') }}
+          <!-- ── Edit mode ── -->
+          <template v-else>
+            <div class="mb-edit-field">
+              <label class="mb-edit-label">摘要</label>
+              <input v-model="editSummary" class="mb-edit-input" placeholder="摘要" />
+            </div>
+            <div class="mb-edit-field">
+              <label class="mb-edit-label">内容</label>
+              <textarea v-model="editContent" class="mb-edit-textarea" placeholder="内容" rows="3"></textarea>
+            </div>
+            <div class="mb-edit-field">
+              <label class="mb-edit-label">标签</label>
+              <input v-model="editTags" class="mb-edit-input" placeholder="标签（逗号分隔）" />
+            </div>
+            <div class="mb-edit-actions">
+              <button class="mb-edit-btn cancel" @click="cancelEdit">取消</button>
+              <button class="mb-edit-btn save" :disabled="loading" @click="saveEdit(item.id)">
+                {{ loading ? '保存中...' : '保存' }}
               </button>
             </div>
-            <!-- 过滤输入（仅搜索结果模式显示） -->
-            <input
-              v-model="filterText"
-              type="text"
-              :placeholder="t('memoryBrowser.filterPlaceholder')"
-              class="mb-filter-input"
-              v-if="!isBrowseMode && searchResults.length > 0"
-            />
-          </section>
-
-          <!-- ==================== Part 3: 结果列表 ==================== -->
-          <section class="mb-results-section">
-            <!-- 浏览模式：加载中 -->
-            <div v-if="isBrowseMode && browseLoading" class="mb-empty-state">
-              <div class="spinner"></div>
-              <p>{{ t('memoryBrowser.loading') }}</p>
-            </div>
-
-            <!-- 浏览模式：无数据 -->
-            <div v-else-if="isBrowseMode && browseChunks.length === 0 && !browseLoading" class="mb-empty-state">
-              <p class="mb-hint">{{ t('memoryBrowser.noMemories') }}</p>
-            </div>
-
-            <!-- 搜索模式：加载中 -->
-            <div v-else-if="searching" class="mb-empty-state">
-              <div class="spinner"></div>
-              <p>{{ t('memoryBrowser.loading') }}</p>
-            </div>
-
-            <!-- 搜索模式：错误 -->
-            <div v-else-if="!isBrowseMode && errorText" class="mb-error-state">
-              <p class="mb-error-text">{{ t('memoryBrowser.error') }}: {{ errorText }}</p>
-            </div>
-
-            <!-- 搜索模式：无结果 -->
-            <div v-else-if="!isBrowseMode && searchResults.length > 0 && filteredResults.length === 0" class="mb-empty-state">
-              <p>{{ t('memoryBrowser.noResults') }}</p>
-            </div>
-
-            <!-- 搜索模式：初始提示（未搜索且无浏览数据） -->
-            <div v-else-if="!isBrowseMode && searchResults.length === 0 && !errorText" class="mb-empty-state">
-              <p class="mb-hint">{{ t('memoryBrowser.searchHint') }}</p>
-            </div>
-
-            <!-- 浏览模式：结果列表（带分页） -->
-            <div v-else-if="isBrowseMode && browseChunks.length > 0" class="mb-results-list">
-              <div
-                v-for="(item, idx) in browseChunks"
-                :key="item.id"
-                class="mb-result-item"
-              >
-                <div class="mb-item-header" @click="toggleExpand(item.id)">
-                  <div class="mb-item-summary">
-                    <span class="mb-idx">#{{ (browsePage - 1) * browsePageSize + idx + 1 }}</span>
-                    <span class="mb-doc-id" :title="item.doc_id || ''">
-                      {{ item.doc_id ? item.doc_id.split('/').pop() || item.doc_id : '(no doc)' }}
-                    </span>
-                    <span class="mb-badge">mime={{ item.mime_type || '?' }}</span>
-                    <span v-if="item.chunk_meta" class="mb-badge">chunk[{{ item.chunk_meta.index }}]</span>
-                    <span v-if="item.chunk_meta" class="mb-badge">pos={{ cm(item,'start_pos') }}-{{ cm(item,'end_pos') }}</span>
-                    <span v-if="cm(item,'heading_level') > 0" class="mb-badge">
-                      h{{ cm(item,'heading_level') }}:{{ (cm(item,'heading_path') || []).join('/') }}
-                    </span>
-                    <span class="mb-id-trunc" :title="item.id">{{ item.id.slice(0, 16) }}…</span>
-                    <span class="mb-toggle">{{ expandedIds.has(item.id) ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-if="item.parent_id" class="mb-item-meta-line">
-                    parent: {{ item.parent_id }}
-                  </div>
-                </div>
-                <transition name="expand">
-                  <div v-show="expandedIds.has(item.id)" class="mb-item-body">
-                    <div class="mb-raw-meta">
-                      <strong>metadata:</strong>
-                      <pre>{{ JSON.stringify(item.metadata || {}, null, 2) }}</pre>
-                    </div>
-                    <pre class="mb-content">{{ item.content }}</pre>
-                  </div>
-                </transition>
-              </div>
-
-              <!-- === 分页器 === -->
-              <div v-if="totalPages > 1" class="mb-paginator">
-                <button
-                  class="page-btn"
-                  :disabled="browsePage <= 1"
-                  @click="goToPage(browsePage - 1)"
-                >&laquo;</button>
-                <div v-for="p in visiblePages" :key="typeof p === 'string' ? 'e' + p : p" class="page-wrapper">
-                  <span v-if="typeof p === 'string'" class="page-ellipsis">...</span>
-                  <button
-                    v-else
-                    class="page-btn"
-                    :class="{ active: p === browsePage }"
-                    @click="goToPage(p)"
-                  >{{ p }}</button>
-                </div>
-                <button
-                  class="page-btn"
-                  :disabled="browsePage >= totalPages"
-                  @click="goToPage(browsePage + 1)"
-                >&raquo;</button>
-              </div>
-            </div>
-
-            <!-- 搜索模式：搜索结果列表 -->
-            <div v-else-if="!isBrowseMode && filteredResults.length > 0" class="mb-results-list">
-              <div
-                v-for="(item, idx) in filteredResults"
-                :key="item.id"
-                class="mb-result-item"
-              >
-                <div class="mb-item-header" @click="toggleExpand(item.id)">
-                  <span class="mb-idx">#{{ idx + 1 }}</span>
-                  <span class="mb-score" :class="{ high: item.score > 0.8, mid: item.score > 0.5 }">
-                    {{ t('memoryBrowser.matchScore') }}: {{ (item.score * 100).toFixed(1) }}%
-                  </span>
-                  <span class="mb-time">{{ new Date(item.created_at).toLocaleString() }}</span>
-                  <span class="mb-toggle">{{ expandedIds.has(item.id) ? '▲' : '▼' }}</span>
-                </div>
-                <transition name="expand">
-                  <div v-show="expandedIds.has(item.id)" class="mb-item-body">
-                    <pre class="mb-content">{{ item.content }}</pre>
-                  </div>
-                </transition>
-              </div>
-            </div>
-          </section>
+          </template>
         </div>
       </div>
-    </transition>
-  </Teleport>
+    </div>
+
+    <template #footer>
+      <span class="mb-footer-count">{{ memoryCount }} 条记忆</span>
+      <div class="mb-footer-actions">
+        <el-button size="small" @click="refresh">刷新</el-button>
+        <el-button size="small" type="primary" @click="emit('close')">关闭</el-button>
+      </div>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
-/* ── Overlay (全屏, 匹配 GraphViewer 风格) ── */
-.mb-overlay {
-  position: fixed; inset: 0; z-index: 8000;
-  display: flex; flex-direction: column;
-  background: var(--bg-primary);
+.mb-body {
+  min-height: 200px;
+  max-height: 65vh;
+  overflow-y: auto;
+  padding: 4px 0;
 }
 
-/* ── Header ── */
-.mb-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 20px;
-  min-height: 48px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
+/* ── Empty state ── */
+.mb-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  gap: 12px;
 }
-.mb-header-left {
-  display: flex; align-items: center; gap: 12px;
+.mb-empty-icon {
+  color: #475569;
 }
-.back-btn {
-  display: flex; align-items: center; gap: 5px;
-  padding: 6px 12px; font-size: 13px; font-weight: 500;
-  color: var(--text-secondary);
-  background: rgba(255,255,255,.05);
-  border: 1px solid rgba(255,255,255,.1);
-  border-radius: 7px; cursor: pointer;
-  transition: all .15s;
-}
-.back-btn:hover {
-  color: var(--text-primary);
-  background: rgba(255,255,255,.08);
-  border-color: rgba(255,255,255,.18);
-}
-.mb-title {
-  font-size: 16px; font-weight: 700; color: var(--text-primary);
+.mb-empty-text {
+  font-size: 14px;
+  color: #64748b;
   margin: 0;
 }
-.mb-header-right {
-  display: flex; align-items: center; gap: 6px;
-}
-.header-action-btn {
-  width: 32px; height: 32px;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-muted); font-size: 16px;
-  background: rgba(255,255,255,.04);
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: 7px; cursor: pointer;
-  transition: all .15s;
-}
-.header-action-btn:hover {
-  color: var(--accent-cyan);
-  background: rgba(6,182,212,.08);
-  border-color: rgba(6,182,212,.2);
-}
-.header-close-btn {
-  width: 28px; height: 28px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 18px; color: var(--text-muted);
-  background: none; border: none; border-radius: 6px; cursor: pointer;
-}
-.header-close-btn:hover { background: rgba(255,255,255,.08); color: var(--text-primary); }
 
-/* ── Body ── */
-.mb-body {
-  flex: 1;
-  display: flex; flex-direction: column;
-  overflow: hidden;
-  padding: 20px 28px;
-  gap: 20px;
-}
-
-/* ==================== Part 1: Stats Cards ==================== */
-.mb-stats-section {
-  flex-shrink: 0;
-  display: flex; flex-direction: column;
-  gap: 12px;
-}
-.stats-card-row {
-  display: flex; gap: 12px;
-}
-.stat-card {
-  flex: 1;
-  display: flex; flex-direction: column;
-  gap: 6px;
-  padding: 14px 18px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+/* ── List (iOS-style) ── */
+.mb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.04);
   border-radius: 10px;
-  min-width: 0;
-}
-.stat-label {
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: .5px;
-  color: var(--text-muted);
-}
-.stat-value {
-  font-size: 28px; font-weight: 800;
-  font-family: 'JetBrains Mono', monospace;
-  line-height: 1.1;
-}
-.pending-value { color: #f59e0b; }
-.indexed-value { color: #10b981; }
-.chunks-value { color: #8b5cf6; }
-
-.progress-area {
-  display: flex; flex-direction: column;
-  gap: 6px;
-  padding: 12px 18px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-}
-.progress-header {
-  display: flex; justify-content: space-between; align-items: center;
-}
-.progress-label {
-  font-size: 12px; font-weight: 600; color: var(--text-secondary);
-}
-.progress-pct {
-  font-size: 12px; font-weight: 700; color: #8b5cf6;
-  font-family: 'JetBrains Mono', monospace;
-}
-.progress-track {
-  width: 100%; height: 8px;
-  background: rgba(255,255,255,.06);
-  border-radius: 4px;
   overflow: hidden;
 }
-.progress-fill {
-  height: 100%;
-  border-radius: 4px;
-  background: linear-gradient(90deg, #8b5cf6, #06b6d4);
-  transition: width .5s ease;
+
+.mb-item {
+  padding: 14px 16px;
+  background: var(--bg-secondary, #1e293b);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.15s ease;
+}
+.mb-item:last-child {
+  border-bottom: none;
+}
+.mb-item:hover:not(.editing) {
+  background: rgba(139, 92, 246, 0.04);
+}
+.mb-item.editing {
+  background: rgba(139, 92, 246, 0.06);
 }
 
-/* ==================== Part 2: Search ==================== */
-.mb-search-section {
-  flex-shrink: 0;
-  display: flex; flex-direction: column;
-  gap: 8px;
-}
-.search-row {
-  display: flex; gap: 8px;
-}
-.mb-search-input {
-  flex: 1;
-  padding: 10px 14px;
-  font-size: 14px;
-  color: var(--text-primary);
-  background: rgba(255,255,255,.04);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  outline: none;
-  transition: border-color .15s;
-}
-.mb-search-input:focus { border-color: #8b5cf6; }
-.mb-search-input::placeholder { color: #64748b; }
-.mb-search-btn {
-  display: flex; align-items: center; gap: 6px;
-  padding: 10px 20px;
-  font-size: 13px; font-weight: 600;
-  color: #fff; background: #8b5cf6;
-  border: none; border-radius: 8px; cursor: pointer;
-  transition: background .15s;
-  white-space: nowrap;
-}
-.mb-search-btn:hover:not(:disabled) { background: #7c3aed; }
-.mb-search-btn:disabled { opacity: .5; cursor: not-allowed; }
-
-.mb-clear-btn {
-  padding: 10px 16px;
-  font-size: 13px; font-weight: 500;
-  color: var(--text-secondary);
-  background: rgba(255,255,255,.04);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all .15s;
-  white-space: nowrap;
-}
-.mb-clear-btn:hover {
-  color: var(--text-primary);
-  background: rgba(255,255,255,.08);
-}
-
-.mb-filter-input {
-  padding: 8px 12px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  background: rgba(255,255,255,.03);
-  border: 1px solid var(--border-color);
-  border-radius: 7px;
-  outline: none;
-  transition: border-color .15s;
-}
-.mb-filter-input:focus { border-color: #8b5cf6; }
-.mb-filter-input::placeholder { color: #64748b; }
-
-/* ==================== Part 3: Results ==================== */
-.mb-results-section {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.mb-empty-state {
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  height: 100%;
-  color: var(--text-muted);
-  font-size: 14px;
-  gap: 12px;
-}
-.mb-hint { color: #64748b; font-size: 13px; }
-.mb-error-state {
-  display: flex; align-items: center; justify-content: center;
-  height: 100%;
-}
-.mb-error-text { color: #ef4444; font-size: 13px; }
-
-.spinner {
-  width: 24px; height: 24px;
-  border: 2px solid rgba(139,92,246,.2);
-  border-top-color: #8b5cf6;
-  border-radius: 50%;
-  animation: spin .6s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* ── Result Items ── */
-.mb-results-list {
-  display: flex; flex-direction: column;
-  gap: 8px;
-}
-.mb-result-item {
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  overflow: hidden;
-}
+/* ── View mode ── */
 .mb-item-header {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px;
-  cursor: pointer;
-  transition: background .12s;
-}
-.mb-item-header:hover { background: rgba(139,92,246,.05); }
-.mb-idx {
-  font-size: 11px; font-weight: 700; color: #8b5cf6;
-  font-family: 'JetBrains Mono', monospace;
-  flex-shrink: 0;
-}
-.mb-score {
-  font-size: 11.5px; font-weight: 500; font-family: 'JetBrains Mono', monospace;
-  color: #94a3b8;
-  padding: 1px 6px; border-radius: 4px; background: rgba(148,163,184,.08);
-}
-.mb-score.high { color: #10b981; background: rgba(16,185,129,.12); }
-.mb-score.mid { color: #f59e0b; background: rgba(245,158,11,.12); }
-.mb-time {
-  font-size: 11px; color: #64748b; margin-left: auto;
-}
-.mb-doc-id {
-  font-size: 11px; color: #06b6d4;
-  font-family: 'JetBrains Mono', monospace;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  max-width: 180px; flex-shrink: 0;
-}
-.mb-badge {
-  flex-shrink: 0;
-  font-size: 10px; padding: 1px 6px; font-weight: 600;
-  border-radius: 3px;
-  background: rgba(100,116,139,.12);
-  color: #94a3b8;
-  font-family: 'JetBrains Mono', monospace;
-  white-space: nowrap;
-}
-.mb-id-trunc {
-  flex-shrink: 0;
-  font-size: 10px; color: #64748b;
-  font-family: 'JetBrains Mono', monospace;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
 }
 .mb-item-summary {
-  display: flex; align-items: center; gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin: 0;
+  line-height: 1.4;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mb-item-time {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.mb-item-content {
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.6;
+  margin: 0 0 10px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.mb-item-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mb-item-tags {
+  display: flex;
   flex-wrap: wrap;
-}
-.mb-item-meta-line {
-  margin-top: 4px;
-  font-size: 11px; color: #64748b; font-family: monospace;
-}
-.mb-raw-meta {
-  margin-bottom: 8px; padding: 8px; border-radius: 4px;
-  background: rgba(0,0,0,.15);
-  font-size: 11px; color: var(--text-secondary);
-  max-height: 200px; overflow: auto;
-}
-.mb-raw-meta pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-all; font-size: 11px; }
-.mb-toggle {
-  font-size: 10px; color: #8b5cf6; transition: transform .15s;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
-.mb-item-body {
-  padding: 0 14px 12px;
-}
-.mb-content {
-  margin: 0; padding: 10px 12px;
-  font-size: 12px; line-height: 1.6;
-  color: var(--text-secondary);
-  white-space: pre-wrap; word-break: break-word;
-  background: rgba(255,255,255,.02);
-  border: 1px solid rgba(255,255,255,.05);
-  border-radius: 6px;
-  max-height: 240px; overflow-y: auto;
-}
-
-/* ==================== Paginator ==================== */
-.mb-paginator {
-  display: flex; align-items: center; justify-content: center;
   gap: 4px;
-  padding: 12px 0 4px;
+  flex: 1;
+  min-width: 0;
+}
+.mb-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.mb-item-actions {
+  display: flex;
+  gap: 4px;
   flex-shrink: 0;
 }
-.page-btn {
-  min-width: 32px; height: 32px;
-  display: flex; align-items: center; justify-content: center;
-  padding: 0 8px;
-  font-size: 13px; font-weight: 500;
-  color: var(--text-secondary);
-  background: rgba(255,255,255,.03);
-  border: 1px solid var(--border-color);
+.mb-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.edit-btn {
+  color: #94a3b8;
+}
+.edit-btn:hover {
+  color: #22d3ee;
+  background: rgba(6, 182, 212, 0.08);
+  border-color: rgba(6, 182, 212, 0.2);
+}
+.delete-btn {
+  color: #94a3b8;
+}
+.delete-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+/* ── Edit mode ── */
+.mb-edit-field {
+  margin-bottom: 10px;
+}
+.mb-edit-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.mb-edit-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(55, 65, 81, 0.5);
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+.mb-edit-input:focus {
+  border-color: #8b5cf6;
+}
+.mb-edit-input::placeholder {
+  color: #475569;
+}
+.mb-edit-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(55, 65, 81, 0.5);
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.15s;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.mb-edit-textarea:focus {
+  border-color: #8b5cf6;
+}
+.mb-edit-textarea::placeholder {
+  color: #475569;
+}
+.mb-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.mb-edit-btn {
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
   border-radius: 6px;
   cursor: pointer;
-  transition: all .12s;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
 }
-.page-btn:hover:not(:disabled):not(.active) {
-  color: var(--text-primary);
-  background: rgba(255,255,255,.07);
-  border-color: rgba(255,255,255,.15);
+.mb-edit-btn.cancel {
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
 }
-.page-btn.active {
+.mb-edit-btn.cancel:hover {
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.08);
+}
+.mb-edit-btn.save {
   color: #fff;
   background: #8b5cf6;
   border-color: #8b5cf6;
 }
-.page-btn:disabled {
-  opacity: .3;
+.mb-edit-btn.save:hover:not(:disabled) {
+  background: #7c3aed;
+}
+.mb-edit-btn.save:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
-.page-wrapper {
-  display: inline-flex;
-}
-.page-ellipsis {
-  width: 24px; text-align: center;
-  color: var(--text-muted); font-size: 13px;
-  align-self: center;
-}
 
-/* ── Transitions ── */
-.fade-scale-enter-active { transition: opacity .2s ease, transform .2s ease; }
-.fade-scale-leave-active { transition: opacity .15s ease, transform .15s ease; }
-.fade-scale-enter-from { opacity: 0; transform: scale(.97); }
-.fade-scale-leave-to { opacity: 0; transform: scale(.97); }
+/* ── Footer ── */
+.mb-footer-count {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+.mb-footer-actions {
+  display: flex;
+  gap: 8px;
+}
+</style>
 
-.expand-enter-active, .expand-leave-active { transition: all .2s ease; overflow: hidden; }
-.expand-enter-from, .expand-leave-to { opacity: 0; max-height: 0; }
+<style>
+/* Global overrides for this dialog */
+.memory-browser-dialog .el-overlay {
+  background: rgba(0, 0, 0, 0.65);
+}
+.memory-browser-dialog .el-dialog {
+  background: #0f172a;
+  border: 1px solid rgba(55, 65, 81, 0.8);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+.memory-browser-dialog .el-dialog__header {
+  padding: 18px 24px 14px;
+  margin: 0;
+  border-bottom: 1px solid rgba(55, 65, 81, 0.5);
+}
+.memory-browser-dialog .el-dialog__title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+.memory-browser-dialog .el-dialog__headerbtn .el-dialog__close {
+  color: #94a3b8;
+  font-size: 18px;
+}
+.memory-browser-dialog .el-dialog__headerbtn:hover .el-dialog__close {
+  color: #f87171;
+}
+.memory-browser-dialog .el-dialog__body {
+  padding: 16px 24px 12px;
+}
+.memory-browser-dialog .el-dialog__footer {
+  padding: 12px 24px 16px;
+  border-top: 1px solid rgba(55, 65, 81, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.memory-browser-dialog .el-button--primary {
+  --el-button-bg-color: #8b5cf6;
+  --el-button-border-color: #8b5cf6;
+  --el-button-hover-bg-color: #7c3aed;
+  --el-button-hover-border-color: #7c3aed;
+}
+.memory-browser-dialog .el-button--danger {
+  --el-button-bg-color: #ef4444;
+  --el-button-border-color: #ef4444;
+  --el-button-hover-bg-color: #dc2626;
+  --el-button-hover-border-color: #dc2626;
+}
 </style>

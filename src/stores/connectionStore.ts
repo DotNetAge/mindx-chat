@@ -64,7 +64,31 @@ export const useConnectionStore = defineStore('connection', {
     },
     /** Monotonic counter incremented on file_indexing events that affect manifest.
      *  Components watch this to know when to refresh their manifest cache. */
-    manifestVersion: 0
+    manifestVersion: 0,
+
+    /** Session memory chunks list (cached for memory browser). */
+    sessionMemoryList: null as {
+      chunks: Array<{
+        id: string
+        summary: string
+        content: string
+        session_id: string
+        agent_name: string
+        tags: string[]
+        timestamp: number
+      }>
+      count: number
+    } | null,
+
+    /** Context window usage for the current session (updated after each LLM call). */
+    contextUsage: null as {
+      window_tokens: number
+      max_window_size: number
+      usage_ratio: number
+      message_count: number
+      cursor: number
+      active_message_count: number
+    } | null
   }),
 
   getters: {
@@ -733,12 +757,52 @@ export const useConnectionStore = defineStore('connection', {
         })
       })
 
+      client.on('context_usage', (envelope) => {
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        // Only update if this event is for the current active session
+        if (targetSessionId === sessionStore.activeSessionId && envelope.data) {
+          this.contextUsage = {
+            window_tokens: envelope.data.window_tokens ?? 0,
+            max_window_size: envelope.data.max_window_size ?? 0,
+            usage_ratio: envelope.data.usage_ratio ?? 0,
+            message_count: envelope.data.message_count ?? 0,
+            cursor: envelope.data.cursor ?? 0,
+            active_message_count: envelope.data.active_message_count ?? 0,
+          }
+        }
+      })
+
       client.on('compaction', (envelope) => {
         const targetSessionId = envelope.session_id || sessionStore.activeSessionId
         chatStore.setSessionCurrentAgent(targetSessionId, envelope.agent_name)
         chatStore.handleCompaction(envelope.data, {
           session_id: targetSessionId
         })
+      })
+
+      // Handle compact_start/compact_done notifications from both
+      // manual (session.compact RPC) and runtime (ask loop auto-compact) paths.
+      client.on('compact_start', (envelope) => {
+        console.log('[MindX WS] compact_start received:', envelope)
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        if (targetSessionId === sessionStore.activeSessionId) {
+          chatStore.isCompacting = true
+        }
+      })
+
+      client.on('compact_done', (envelope) => {
+        console.log('[MindX WS] compact_done received:', envelope)
+        const targetSessionId = envelope.session_id || sessionStore.activeSessionId
+        if (targetSessionId === sessionStore.activeSessionId) {
+          sessionStore.switchToSession(targetSessionId)
+          chatStore.isCompacting = false
+          // Add a visual compaction event to the timeline
+          chatStore.handleCompaction(envelope.data, {
+            session_id: targetSessionId
+          })
+          // 刷新记忆计数
+          connectionStore.fetchSessionMemoryList(targetSessionId)
+        }
       })
 
       client.on('max_turns_reached', (envelope) => {
@@ -1103,6 +1167,34 @@ export const useConnectionStore = defineStore('connection', {
       return result || { total_tokens: 0, total_cost: 0, total_conversations: 0 }
     },
 
+    async fetchContextUsage(sessionId: string) {
+      const client = getMindXClient()
+      if (!client) return
+      try {
+        const result = await client.call<{
+          session_id: string
+          window_tokens: number
+          max_window_size: number
+          usage_ratio: number
+          message_count: number
+          cursor: number
+          active_message_count: number
+        }>('session.context', { session_id: sessionId })
+        if (result) {
+          this.contextUsage = {
+            window_tokens: result.window_tokens ?? 0,
+            max_window_size: result.max_window_size ?? 0,
+            usage_ratio: result.usage_ratio ?? 0,
+            message_count: result.message_count ?? 0,
+            cursor: result.cursor ?? 0,
+            active_message_count: result.active_message_count ?? 0,
+          }
+        }
+      } catch (e) {
+        console.warn('[MindX] Failed to fetch context usage:', e)
+      }
+    },
+
     async fetchSessionTokenUsage(sessionId: string): Promise<SessionTokenUsage> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
@@ -1221,6 +1313,62 @@ export const useConnectionStore = defineStore('connection', {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')
       return client.call('memory.count', {})
+    },
+
+    async fetchSessionMemoryList(sessionId: string): Promise<{
+      chunks: Array<{
+        id: string; summary: string; content: string
+        session_id: string; agent_name: string
+        tags: string[]; timestamp: number
+      }>
+      count: number
+    } | null> {
+      const client = getMindXClient()
+      if (!client) return null
+      try {
+        const result = await client.call<any>('memory.list_by_session', { session_id: sessionId })
+        this.sessionMemoryList = result || { chunks: [], count: 0 }
+        return this.sessionMemoryList
+      } catch {
+        this.sessionMemoryList = { chunks: [], count: 0 }
+        return this.sessionMemoryList
+      }
+    },
+
+    async deleteSessionMemory(id: string): Promise<boolean> {
+      const client = getMindXClient()
+      if (!client) return false
+      try {
+        await client.call('memory.delete', { id })
+        // Remove from local cache
+        if (this.sessionMemoryList) {
+          this.sessionMemoryList.chunks = this.sessionMemoryList.chunks.filter(c => c.id !== id)
+          this.sessionMemoryList.count = this.sessionMemoryList.chunks.length
+        }
+        return true
+      } catch {
+        return false
+      }
+    },
+
+    async updateSessionMemory(id: string, summary: string, content: string, tags: string[]): Promise<boolean> {
+      const client = getMindXClient()
+      if (!client) return false
+      try {
+        await client.call('memory.update', { id, summary, content, tags })
+        // Update local cache
+        if (this.sessionMemoryList) {
+          const idx = this.sessionMemoryList.chunks.findIndex(c => c.id === id)
+          if (idx >= 0) {
+            this.sessionMemoryList.chunks[idx].summary = summary
+            this.sessionMemoryList.chunks[idx].content = content
+            this.sessionMemoryList.chunks[idx].tags = tags
+          }
+        }
+        return true
+      } catch {
+        return false
+      }
     },
 
     async fetchKBStats(projectDir: string): Promise<{

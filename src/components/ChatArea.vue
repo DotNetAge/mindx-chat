@@ -157,7 +157,7 @@ const LANG_OPTIONS = ['英文', '中文', '日文', '韩文', '法文', '德文'
 const isRecording = ref(false)
 const recognitionTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const recognition = ref<any>(null)
-const HOLD_DURATION = 2000
+const HOLD_DURATION = 5000
 
 function startSpeechRecognition() {
   const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -415,8 +415,8 @@ function handleInputKeydown(e: KeyboardEvent) {
     return
   }
 
-  // Enter 发送（排除 Shift/Ctrl/Cmd 组合键）
-  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+  // Enter 发送（排除 Shift/Ctrl/Cmd/Option 组合键 → 换行）
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault()
     sendMessage()
     return
@@ -694,7 +694,7 @@ function logCurrentMessages(_messages: any[]) {
     <!-- Messages Area -->
     <div class="chat-messages" ref="chatContainer">
       <!-- 消息流：与骨架屏共存，加载时隐藏在骨架屏后方 -->
-      <div v-if="chatStore.currentMessages.length > 0" class="messages-container">
+      <div v-if="chatStore.currentMessages.length > 0 && !chatStore.isCompacting" class="messages-container">
         <!-- [DEBUG] -->
         {{ logCurrentMessages(chatStore.currentMessages) }}
         <transition-group name="message-list" tag="div" class="message-list-inner">
@@ -729,6 +729,12 @@ function logCurrentMessages(_messages: any[]) {
       <!-- 切换会话加载历史消息时的骨架屏覆盖层 -->
       <div v-if="chatStore.isRestoringSession" class="skeleton-overlay">
         <SkeletonChat />
+      </div>
+
+      <!-- 压缩对话时的覆盖层 -->
+      <div v-if="chatStore.isCompacting" class="compact-overlay">
+        <div class="compact-spinner"></div>
+        <div class="compact-label">正在整理对话</div>
       </div>
 
       <!-- 空状态：仅当未加载且无消息时显示 -->
@@ -1375,6 +1381,38 @@ function logCurrentMessages(_messages: any[]) {
   z-index: 10;
   background: var(--bg-primary, #0f172a);
   overflow: hidden;
+}
+
+/* 压缩对话覆盖层：遮盖消息流并显示加载动画 */
+.compact-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: var(--bg-primary, #0f172a);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.compact-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(139, 92, 246, 0.2);
+  border-top-color: #8b5cf6;
+  border-radius: 50%;
+  animation: compact-spin 0.8s linear infinite;
+}
+
+@keyframes compact-spin {
+  to { transform: rotate(360deg); }
+}
+
+.compact-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted, #94a3b8);
 }
 
 /* 只看答案模式 - 加载占位 */

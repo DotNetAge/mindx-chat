@@ -102,6 +102,7 @@ export const useChatStore = defineStore('chat', {
 
     // 切换会话时正在恢复历史消息（骨架屏用）
     isRestoringSession: false as boolean,
+    isCompacting: false as boolean,
     // 消息已加载完毕待揭晓（ChatArea 先滚动底部再移除骨架屏）
     sessionRevealPending: false as boolean,
 

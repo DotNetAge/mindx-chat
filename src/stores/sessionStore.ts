@@ -118,6 +118,9 @@ export const useSessionStore = defineStore('session', {
       // 从服务端同步当前 session 的 token 用量统计
       await chatStore.syncSessionTokenStats(sessionId)
 
+      // 从服务端拉取上下文窗口用量
+      connectionStore.fetchContextUsage(sessionId)
+
       try {
         const detail = await connectionStore.fetchSessionDetail(sessionId)
         if (detail?.messages && detail.messages.length > 0) {
