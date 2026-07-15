@@ -28,12 +28,14 @@ const viewMode = ref<'monthly' | 'session'>('monthly')
 // 从服务端加载的会话 token 明细
 const sessionServerRecords = ref<Array<{
   timestamp: string
-  inputTokens: number
-  outputTokens: number
+  promptTokens: number
+  completionTokens: number
   cachedTokens: number
   totalTokens: number
   cost: number
   sessionId: string
+  modelName: string
+  providerName: string
 }>>([])
 
 const sessionDetailLoading = ref(false)
@@ -49,12 +51,14 @@ async function loadSessionDetail() {
     const data = await connectionStore.fetchSessionTokenDetail(sessionId)
     sessionServerRecords.value = (data.records || []).map(r => ({
       timestamp: r.timestamp,
-      inputTokens: r.input_tokens,
-      outputTokens: r.output_tokens,
+      promptTokens: r.input_tokens,
+      completionTokens: r.output_tokens,
       cachedTokens: r.cached_tokens,
-      totalTokens: Math.max(r.input_tokens + r.output_tokens - r.cached_tokens, 0),
+      totalTokens: r.total_tokens,
       cost: r.cost,
-      sessionId
+      sessionId,
+      modelName: r.model_name,
+      providerName: r.provider_name,
     }))
   } catch (err) {
     console.warn('[TokenUsageReport] Failed to load session detail from server:', err)
@@ -80,7 +84,11 @@ const sessionRecords = computed(() => {
     if (seen.has(key)) return false
     seen.add(key)
     return true
-  })
+  }).map(r => ({
+    ...r,
+    // 计费口径：prompt + completion - cached，与月度统计 total_tokens 保持一致
+    actualTokens: Math.max(0, r.promptTokens + r.completionTokens - r.cachedTokens)
+  }))
 
   // 按时间倒序（最新在前）
   merged.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
@@ -98,15 +106,17 @@ const sessionAverages = computed(() => {
   const n = records.length
   const sum = (fn: (r: typeof records[0]) => number) => records.reduce((a, r) => a + fn(r), 0)
   return {
-    inputAvg: Math.round(sum(r => r.inputTokens) / n),
-    outputAvg: Math.round(sum(r => r.outputTokens) / n),
+    inputAvg: Math.round(sum(r => r.promptTokens) / n),
+    outputAvg: Math.round(sum(r => r.completionTokens) / n),
     cacheAvg: Math.round(sum(r => r.cachedTokens) / n),
-    totalAvg: Math.round(sum(r => r.inputTokens + r.outputTokens - r.cachedTokens) / n),
+    // 计费口径：prompt + completion - cached，与月度统计保持一致
+    totalAvg: Math.round(sum(r => r.actualTokens) / n),
     costAvg: sum(r => r.cost) / n,
   }
 })
 
-const formatNumber = (num: number): string => {
+const formatNumber = (num: number | undefined | null): string => {
+  if (num == null || isNaN(num)) return '0'
   return num.toLocaleString('zh-CN')
 }
 
@@ -287,7 +297,7 @@ function handleExport() {
     lines.push(`=== ${t('tokenUsage.dailyBreakdown')} ===`)
     lines.push(`${t('tokenUsage.date')}\t${t('tokenUsage.model')}\t${t('tokenUsage.inputTokens')}\t${t('tokenUsage.outputTokens')}\t${t('tokenUsage.totalTokens')}\t${t('tokenUsage.cost')}\t${t('tokenUsage.requestCount')}`)
     monthlyData.value.daily_usage.forEach(d => {
-      lines.push(`${d.date}\t${d.model}\t${d.input_tokens}\t${d.output_tokens}\t${d.total_tokens}\t${d.cost.toFixed(4)}\t${d.request_count}`)
+      lines.push(`${d.date}\t${d.model}\t${d.prompt_tokens}\t${d.completion_tokens}\t${d.total_tokens}\t${d.cost.toFixed(4)}\t${d.request_count}`)
     })
   }
 
@@ -396,10 +406,10 @@ onMounted(() => {
               <tbody>
                 <tr v-for="(r, i) in sessionRecords" :key="i">
                   <td class="cell-time">{{ formatTime(r.timestamp) }}</td>
-                  <td class="cell-num">{{ formatNumber(r.inputTokens) }}</td>
-                  <td class="cell-num">{{ formatNumber(r.outputTokens) }}</td>
+                  <td class="cell-num">{{ formatNumber(r.promptTokens) }}</td>
+                  <td class="cell-num">{{ formatNumber(r.completionTokens) }}</td>
                   <td class="cell-num">{{ formatNumber(r.cachedTokens) }}</td>
-                  <td class="cell-num">{{ formatNumber(r.totalTokens) }}</td>
+                  <td class="cell-num">{{ formatNumber(r.actualTokens) }}</td>
                   <td class="cell-cost">{{ formatCost(r.cost) }}</td>
                 </tr>
               </tbody>

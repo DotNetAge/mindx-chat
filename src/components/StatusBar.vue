@@ -49,13 +49,16 @@ const contextRingDash = computed(() => {
 
 const contextTableRows = computed(() => {
   if (!contextUsage.value) return []
-  const { window_tokens, max_window_size, active_message_count } = contextUsage.value
+  const { window_tokens, max_window_size, active_message_count, total_actual_tokens, total_cost } = contextUsage.value
   const pct = contextPercent.value
   return [
     { label: t('contextUsage.windowTokens'), value: window_tokens.toLocaleString() },
     { label: t('contextUsage.maxWindowSize'), value: max_window_size.toLocaleString() },
     { label: t('contextUsage.usageRatio'), value: `${pct}%` },
     { label: t('contextUsage.activeMessages'), value: active_message_count.toLocaleString() },
+    { separator: true },
+    { label: t('contextUsage.totalActualTokens'), value: total_actual_tokens.toLocaleString() },
+    { label: t('contextUsage.totalCost'), value: `¥${total_cost.toFixed(2)}` },
   ]
 })
 
@@ -428,15 +431,13 @@ async function handleCompact() {
         <div class="context-popover-body">
           <div class="context-popover-title">{{ t('contextUsage.title') }}</div>
           <div class="context-popover-table">
-            <div
-              v-for="(row, idx) in contextTableRows"
-              :key="idx"
-              class="context-popover-row"
-              :class="{ last: idx === contextTableRows.length - 1 }"
-            >
-              <span class="context-popover-label">{{ row.label }}</span>
-              <span class="context-popover-value">{{ row.value }}</span>
-            </div>
+            <template v-for="(row, idx) in contextTableRows">
+              <div v-if="row.separator" :key="'sep-'+idx" class="context-popover-separator"></div>
+              <div v-else :key="idx" class="context-popover-row" :class="{ last: idx === contextTableRows.length - 1 }">
+                <span class="context-popover-label">{{ row.label }}</span>
+                <span class="context-popover-value">{{ row.value }}</span>
+              </div>
+            </template>
           </div>
 
           <!-- 整理对话按钮：仅在 Token 量超过 100K 时显示 -->
@@ -1029,6 +1030,12 @@ async function handleCompact() {
   font-size: 11px;
   font-weight: 600;
   color: var(--text-primary, #e2e8f0);
+}
+
+.context-popover-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 /* ── 整理对话按钮 ── */

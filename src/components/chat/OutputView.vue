@@ -24,17 +24,17 @@ const props = defineProps({
     type: String,
     default: ''
   },
-  tokensIn: {
-    type: Number,
-    default: 0
-  },
-  tokensOut: {
-    type: Number,
-    default: 0
-  },
-  tokensCache: {
-    type: Number,
-    default: 0
+  /** Turn-level token usage (aggregate of all LLM calls in this turn). */
+  turnUsage: {
+    type: Object as () => {
+      prompt_tokens: number
+      completion_tokens: number
+      total_tokens: number
+      cached_tokens?: number
+      actual_tokens?: number
+      cost?: number
+    } | null,
+    default: null
   },
   duration: {
     type: Number,
@@ -343,17 +343,18 @@ async function saveToProject() {
     <div v-if="!showRaw" ref="formatted" class="formatted-content markdown-body" v-html="formattedContent" @click="handleContentClick"></div>
     <pre v-else class="raw-content"><code>{{ content }}</code></pre>
 
-    <div class="meta" v-if="tokensOut > 0 || duration">
-      <span v-if="tokensIn > 0" class="meta-item">{{ t('outputView.tokensIn', { n: formatCompactNumber(tokensIn) }) }}</span>
-      <span v-if="tokensOut > 0" class="meta-item">{{ t('outputView.tokensOut', { n: formatCompactNumber(tokensOut) }) }}</span>
-      <span v-if="tokensIn > 0 || tokensOut > 0" class="meta-item">{{ t('outputView.tokensCache', { n: formatCompactNumber(tokensCache) }) }}</span>
-      <span v-if="tokensIn > 0 || tokensOut > 0" class="meta-item">{{ t('outputView.tokensTotal', { n: formatCompactNumber(tokensIn + tokensOut - tokensCache) }) }}</span>
-      <span v-if="duration" class="meta-item">{{ duration }}ms</span>
-    </div>
+    <div class="meta-row">
+      <div class="meta">
+        <span class="meta-item">{{ t('outputView.tokensIn', { n: formatCompactNumber(turnUsage?.prompt_tokens || 0) }) }}</span>
+        <span class="meta-item">{{ t('outputView.tokensOut', { n: formatCompactNumber(turnUsage?.completion_tokens || 0) }) }}</span>
+        <span class="meta-item">{{ t('outputView.tokensCache', { n: formatCompactNumber(turnUsage?.cached_tokens || 0) }) }}</span>
+        <span class="meta-item">{{ t('outputView.tokensTotal', { n: formatCompactNumber((turnUsage?.actual_tokens ?? Math.max(0, (turnUsage?.total_tokens || 0) - (turnUsage?.cached_tokens || 0))) || 0) }) }}</span>
+        <span v-if="turnUsage?.cost" class="meta-item">{{ t('outputView.tokensCost', { n: turnUsage.cost.toFixed(2) }) }}</span>
+        <span v-if="duration" class="meta-item">{{ duration }}ms</span>
+      </div>
 
-    <!-- 尾部工具栏（图标 only，default 样式） -->
-    <div class="actions actions-footer">
-      <button class="action-btn" :class="{ 'is-active': isSpeaking }" @click.stop="speakContent" :title="t('outputView.speak')" :aria-label="t('outputView.speak')">
+      <div class="actions">
+        <button class="action-btn" :class="{ 'is-active': isSpeaking }" @click.stop="speakContent" :title="t('outputView.speak')" :aria-label="t('outputView.speak')">
         <svg v-if="!isSpeaking" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
           <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
@@ -382,8 +383,7 @@ async function saveToProject() {
         <el-icon><Document /></el-icon>
       </button>
     </div>
-
-    <!-- 保存文件名对话框 -->
+    </div>
     <el-dialog v-model="saveDialogVisible" :title="t('outputView.saveDialogTitle')" width="400px" align-center>
       <el-input v-model="saveFilename" :placeholder="t('outputView.saveDialogPlaceholder')" @keyup.enter="saveToProject" />
       <template #footer>
@@ -403,15 +403,30 @@ async function saveToProject() {
   width: 100%;
 }
 
-/* ===== 尾部工具栏（图标 only，default 样式，常驻可见） ===== */
-.actions {
+/* ===== 尾部工具栏 + 用量统计（同行布局） ===== */
+.meta-row {
   display: flex;
-  justify-content: flex-end;
-  gap: 4px;
+  align-items: center;
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid rgba(6, 182, 212, 0.1);
-  /* 修：之前 opacity:0 + 错父选择器 .output-block:hover 导致按钮永久不可见 */
+}
+
+.meta {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+}
+
+.meta-item {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #64748b;
+}
+
+.actions {
+  display: flex;
+  gap: 4px;
 }
 
 .action-btn {
@@ -634,17 +649,4 @@ async function saveToProject() {
   word-break: break-word;
 }
 
-.meta {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(6, 182, 212, 0.1);
-}
-
-.meta-item {
-  font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  color: #64748b;
-}
 </style>

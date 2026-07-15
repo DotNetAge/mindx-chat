@@ -88,6 +88,8 @@ export const useConnectionStore = defineStore('connection', {
       message_count: number
       cursor: number
       active_message_count: number
+      total_actual_tokens: number
+      total_cost: number
     } | null
   }),
 
@@ -768,6 +770,8 @@ export const useConnectionStore = defineStore('connection', {
             message_count: envelope.data.message_count ?? 0,
             cursor: envelope.data.cursor ?? 0,
             active_message_count: envelope.data.active_message_count ?? 0,
+            total_actual_tokens: envelope.data.total_actual_tokens ?? 0,
+            total_cost: envelope.data.total_cost ?? 0,
           }
         }
       })
@@ -1179,6 +1183,8 @@ export const useConnectionStore = defineStore('connection', {
           message_count: number
           cursor: number
           active_message_count: number
+          total_actual_tokens: number
+          total_cost: number
         }>('session.context', { session_id: sessionId })
         if (result) {
           this.contextUsage = {
@@ -1188,6 +1194,8 @@ export const useConnectionStore = defineStore('connection', {
             message_count: result.message_count ?? 0,
             cursor: result.cursor ?? 0,
             active_message_count: result.active_message_count ?? 0,
+            total_actual_tokens: result.total_actual_tokens ?? 0,
+            total_cost: result.total_cost ?? 0,
           }
         }
       } catch (e) {

@@ -122,6 +122,18 @@ export interface SessionMessage {
     name: string;
     arguments: string;
   }>;
+  /** Per-message token usage from the LLM response, present on assistant messages. */
+  token_usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    cached_tokens?: number;
+    reasoning_tokens?: number;
+  };
+  /** Computed net tokens (prompt + completion - cached), enriched by goharness. */
+  actual_tokens?: number;
+  /** Computed cost for this message, enriched by goharness. */
+  cost?: number;
 }
 
 export interface ServerSessionInfo {
@@ -172,8 +184,8 @@ export interface FSEntry {
 
 export interface DailyUsage {
   date: string;
-  input_tokens: number;
-  output_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
   cached_tokens?: number;
   total_tokens: number;
   cost: number;
@@ -185,8 +197,8 @@ export interface ModelUsageSummary {
   model: string;
   provider: string;
   total_tokens: number;
-  input_tokens: number;
-  output_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
   cached_tokens?: number;
   total_cost: number;
   request_count: number;

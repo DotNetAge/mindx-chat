@@ -402,6 +402,11 @@ export async function scanFileStates(projectDir: string): Promise<FileStateResul
   return call('kb.file_states', { project_dir: projectDir })
 }
 
+/** Reset knowledge base — clear all index data from GraphIndexer */
+export async function kbReset(): Promise<{ status: string }> {
+  return call('kb.reset', {})
+}
+
 // ── Multi-hop graph traversal ──
 
 /**

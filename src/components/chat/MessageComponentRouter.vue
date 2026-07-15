@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
 import { isTaskTool } from '../../stores/chatStore'
+import { useChatStore } from '../../stores/chatStore'
 import ThinkingView from './ThinkingView.vue'
 import ToolExecView from './ToolExecView.vue'
 import ChoicesPanel from './ChoicesPanel.vue'
@@ -18,6 +19,7 @@ import DiffView from './DiffView.vue'
 import FormattedContent from './FormattedContent.vue'
 
 const { t } = useI18n()
+const chatStore = useChatStore()
 
 const props = defineProps({
   message: {
@@ -70,6 +72,56 @@ const componentType = computed(() => {
   if (role === 'user') return 'user'
   if (role === 'assistant') return 'output'
   return 'default'
+})
+
+/**
+ * Compute turn-level token usage for the current output message.
+ * A turn spans from the nearest preceding user message up to this message.
+ * Walks the full messages array (not filtered) by message.id to handle
+ * filtered indices correctly.
+ */
+const turnUsage = computed(() => {
+  if (componentType.value !== 'output') return null
+  const allMessages = chatStore.currentMessages
+  const currentId = props.message.id
+  const currentIdx = allMessages.findIndex(m => m.id === currentId)
+  if (currentIdx < 0) return null
+
+  // Walk backward from currentIdx to find the last user message (turn boundary)
+  let turnStart = 0
+  for (let i = currentIdx - 1; i >= 0; i--) {
+    if (allMessages[i].role === 'user') {
+      turnStart = i + 1
+      break
+    }
+  }
+
+  // Sum tokenUsage across all messages in the turn
+  let pt = 0, ct = 0, ca = 0, tc = 0
+  for (let i = turnStart; i <= currentIdx; i++) {
+    const u = allMessages[i].tokenUsage
+    if (u) {
+      pt += u.prompt_tokens || 0
+      ct += u.completion_tokens || 0
+      ca += u.cached_tokens || 0
+    }
+    tc += allMessages[i].cost || 0
+  }
+
+  // Only return if there's actual data
+  if (pt === 0 && ct === 0) return null
+  const rawTotal = pt + ct
+  const actualTokens = Math.max(0, rawTotal - ca)
+  return {
+    prompt_tokens: pt,
+    completion_tokens: ct,
+    // total_tokens matches the backend raw API语义: prompt + completion
+    total_tokens: rawTotal,
+    cached_tokens: ca,
+    // actual_tokens is the billing口径: prompt + completion - cached
+    actual_tokens: actualTokens,
+    cost: tc,
+  }
 })
 
 const isDeleting = ref(false)
@@ -252,9 +304,7 @@ function formatContent(content: string): string {
       :content="message.content"
       :title="message.eventTitle || '最终输出'"
       :format="'markdown'"
-      :tokensIn="message.metadata?.inputTokens || 0"
-      :tokensOut="message.metadata?.outputTokens || 0"
-      :tokensCache="message.metadata?.cacheTokens || 0"
+      :turnUsage="turnUsage"
     />
 
     <!-- Permission Request Component -->

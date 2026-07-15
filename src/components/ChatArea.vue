@@ -57,10 +57,18 @@ function toggleFileBrowser() {
 
 onMounted(() => {
   timer = setInterval(updateClock, 1000)
+  nextTick(() => {
+    const el = chatContainer.value
+    if (el) {
+      el.addEventListener('scroll', onScroll)
+      onScroll() // init state
+    }
+  })
 })
 
 onUnmounted(() => {
   clearInterval(timer)
+  chatContainer.value?.removeEventListener('scroll', onScroll)
 })
 
 const props = defineProps({
@@ -85,6 +93,11 @@ const props = defineProps({
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const connectionStore = useConnectionStore()
+
+// Re-check scroll state after messages load (content height may change)
+watch(() => chatStore.currentMessages.length, () => {
+  nextTick(() => onScroll())
+})
 
 // ── 多 Tab 会话系统 ──
 // openTabIds: 已打开的会话 Tab 列表（始终包含当前活跃会话）
@@ -450,6 +463,31 @@ function scrollToBottom() {
   }
 }
 
+// ── Top/Bottom scroll button ──
+const isAtTop = ref(true)
+const isAtBottom = ref(false) // starts false to avoid initial double-hide
+
+function onScroll() {
+  const el = chatContainer.value
+  if (!el) return
+  isAtTop.value = el.scrollTop <= 10
+  isAtBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 10
+}
+
+function scrollToTop() {
+  if (chatContainer.value) {
+    chatContainer.value.scrollTop = 0
+  }
+}
+
+function toggleScroll() {
+  if (isAtBottom.value) {
+    scrollToTop()
+  } else {
+    scrollToBottom()
+  }
+}
+
 function handleModelChange(modelName: string) {
   connectionStore.setCurrentModel(modelName)
   const model = connectionStore.models.find(m => m.name === modelName)
@@ -702,9 +740,10 @@ function logCurrentMessages(_messages: any[]) {
     </div>
 
     <!-- Messages Area -->
-    <div class="chat-messages" ref="chatContainer">
-      <!-- 消息流：与骨架屏共存，加载时隐藏在骨架屏后方 -->
-      <div v-if="chatStore.currentMessages.length > 0 && !chatStore.isCompacting" class="messages-container">
+    <div class="chat-messages-wrapper">
+      <div class="chat-messages" ref="chatContainer">
+        <!-- 消息流：与骨架屏共存，加载时隐藏在骨架屏后方 -->
+        <div v-if="chatStore.currentMessages.length > 0 && !chatStore.isCompacting" class="messages-container">
         <!-- [DEBUG] -->
         {{ logCurrentMessages(chatStore.currentMessages) }}
         <transition-group name="message-list" tag="div" class="message-list-inner">
@@ -758,7 +797,22 @@ function logCurrentMessages(_messages: any[]) {
         :sessions-length="sessionStore.sessions.length"
         @send-prompt="onQuickPrompt"
       />
-    </div>
+    </div>  <!-- .chat-messages -->
+
+    <!-- Top/Bottom scroll button -->
+    <button
+      v-if="chatStore.currentMessages.length > 0 && !chatStore.isRestoringSession"
+      class="scroll-btn"
+      :class="{ 'at-bottom': isAtBottom, 'at-top': isAtTop }"
+      @click="toggleScroll"
+      :title="isAtBottom ? $t('chat.scrollToTop') : $t('chat.scrollToBottom')"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline v-if="isAtBottom" :points="'18 15 12 9 6 15'"/>
+        <polyline v-else :points="'6 9 12 15 18 9'"/>
+      </svg>
+    </button>
+  </div>  <!-- .chat-messages-wrapper -->
 
     <!-- File Review Bar -->
     <FileReviewBar />
@@ -1370,13 +1424,50 @@ function logCurrentMessages(_messages: any[]) {
   color: #ef4444;
 }
 
-/* Messages */
+/* ── Messages Area ── */
+.chat-messages-wrapper {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
   padding: 24px 28px;
   scroll-behavior: smooth;
-  position: relative;
+}
+/* Top/Bottom scroll button */
+.scroll-btn {
+  position: absolute;
+  bottom: 100px;
+  right: 28px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(6, 182, 212, 0.15);
+  color: #64748b;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.scroll-btn:hover {
+  background: rgba(6, 182, 212, 0.25);
+  color: #22d3ee;
+}
+
+/* Hide button when content fits without scrolling — both at top AND at bottom means no overflow */
+.scroll-btn.at-bottom.at-top {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .messages-container {

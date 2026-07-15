@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import {
   Document, Collection, DataAnalysis, Search,
-  RefreshLeft,
+  RefreshLeft, WarningFilled,
 } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
 import { useMarkdown } from '../composables/useMarkdown'
@@ -62,6 +63,33 @@ function onChunkPageChange(page: number) {
 }
 
 const searchInput = ref('')
+
+const resettingKB = ref(false)
+
+async function handleResetKB() {
+  try {
+    await ElMessageBox.confirm(
+      '⚠️ 确定要重置知识库吗？\n\n这将永久删除 GraphIndexer 下的全部索引数据（向量、图谱、全文索引），且不可恢复！\n\n如果知识库正在被使用，请先确认已备份重要数据。',
+      '⚠️ 严重警告',
+      {
+        confirmButtonText: '确认重置，全部删除',
+        cancelButtonText: '取消',
+        type: 'error',
+        confirmButtonClass: 'el-button--danger',
+        cancelButtonClass: 'el-button--default',
+      }
+    )
+    resettingKB.value = true
+    await store.resetKnowledgeBase()
+    ElMessage.success('知识库已重置')
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error('重置知识库失败: ' + (e.message || e))
+    }
+  } finally {
+    resettingKB.value = false
+  }
+}
 
 
 const tabs = [
@@ -335,23 +363,21 @@ watch(() => store.defaultChunks, (chunks) => {
           </div>
         </div>
 
-        <div v-if="store.levelDistribution.length" class="stat-section">
-          <h4>{{ t('kgViewer.knowledgeLevels') }}</h4>
-          <div class="level-bars">
-            <div v-for="lv in store.levelDistribution" :key="lv.label" class="level-row">
-              <span class="level-name">{{ lv.label }}</span>
-              <div class="level-bar-track">
-                <div
-                  class="level-bar-fill"
-                  :style="{
-                    width: (lv.count / Math.max(...store.levelDistribution.map(l => l.count)) * 100) + '%',
-                    background: lv.label === 'core' ? '#06b6d4' : lv.label === 'advanced' ? '#8b5cf6' : lv.label === 'practical' ? '#10b981' : '#94a3b8'
-                  }"
-                ></div>
-              </div>
-              <span class="level-count">{{ lv.count }}</span>
-            </div>
+        <div class="stat-section reset-section">
+          <div class="reset-warning-text">
+            <el-icon><WarningFilled /></el-icon>
+            <span>危险操作 — 将清空全部索引数据</span>
           </div>
+          <el-button
+            type="danger"
+            size="small"
+            class="reset-btn"
+            @click="handleResetKB"
+            :loading="resettingKB"
+          >
+            <el-icon><WarningFilled /></el-icon>
+            重置知识库
+          </el-button>
         </div>
 
         <div v-if="store.relationDistribution.length" class="stat-section">
@@ -723,6 +749,37 @@ watch(() => store.defaultChunks, (chunks) => {
 .rel-count {
   font-family: 'JetBrains Mono', monospace;
   color: var(--text-muted); font-size: 11px;
+}
+
+/* ── Reset KB button ── */
+
+.reset-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  margin-top: 12px;
+  border-top: 1px solid rgba(239, 68, 68, 0.2);
+}
+.reset-warning-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: #ef4444;
+  justify-content: center;
+}
+.reset-warning-text .el-icon {
+  font-size: 14px;
+}
+.reset-btn {
+  width: 100%;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.3) inset;
+}
+.reset-btn:hover {
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.6) inset;
 }
 
 /* ── Footer ── */

@@ -561,14 +561,14 @@ async function handleEnqueueAll() {
           </ElTableColumn>
 
           <!-- Token columns -->
-          <ElTableColumn prop="input_tokens" label="输入(T)" width="110" align="right" sortable>
+          <ElTableColumn prop="prompt_tokens" label="输入(T)" width="110" align="right" sortable>
             <template #default="{ row }">
-              <span class="table-token-value">{{ formatCount(row.input_tokens) }}</span>
+              <span class="table-token-value">{{ formatCount(row.prompt_tokens) }}</span>
             </template>
           </ElTableColumn>
-          <ElTableColumn prop="output_tokens" label="输出(T)" width="110" align="right" sortable>
+          <ElTableColumn prop="completion_tokens" label="输出(T)" width="110" align="right" sortable>
             <template #default="{ row }">
-              <span class="table-token-value">{{ formatCount(row.output_tokens) }}</span>
+              <span class="table-token-value">{{ formatCount(row.completion_tokens) }}</span>
             </template>
           </ElTableColumn>
           <ElTableColumn prop="cache_tokens" label="缓存(T)" width="100" align="right" sortable>

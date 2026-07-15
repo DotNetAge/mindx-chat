@@ -20,6 +20,18 @@ export interface ChatMessage {
   metadata?: Record<string, any>
   sessionId: string
   agentName?: string
+  /** Per-message token usage from the LLM response. */
+  tokenUsage?: {
+    prompt_tokens: number
+    completion_tokens: number
+    total_tokens: number
+    cached_tokens?: number
+    reasoning_tokens?: number
+  }
+  /** Computed net tokens (prompt + completion - cached), enriched by goharness. */
+  actualTokens?: number
+  /** Computed cost for this message, enriched by goharness. */
+  cost?: number
 }
 
 /** TaskXXX 工具系列维护的任务项，与会话绑定 */
@@ -49,16 +61,16 @@ export interface ExecutionStats {
   toolsUsed: string[]
   duration: string
   tokensUsed: number
-  inputTokens: number
-  outputTokens: number
+  promptTokens: number
+  completionTokens: number
   cacheTokens: number
 }
 
 /** 单次 token_usage_recorded 事件的明细记录 */
 export interface TokenUsageRecord {
   timestamp: string
-  inputTokens: number
-  outputTokens: number
+  promptTokens: number
+  completionTokens: number
   cachedTokens: number
   totalTokens: number
   cost: number
@@ -95,7 +107,7 @@ export const useChatStore = defineStore('chat', {
     sessionTokenStats: {} as Record<string, { tokensUsed: number; cost: number }>,
 
     // 按 session 缓存的最后一条消息 token 数据，刷新后恢复用
-    sessionMessageTokens: {} as Record<string, { inputTokens: number; outputTokens: number; cacheTokens: number; totalTokens: number } | null>,
+    sessionMessageTokens: {} as Record<string, { promptTokens: number; completionTokens: number; cacheTokens: number; totalTokens: number } | null>,
 
     // 当前会话的 TokenUsage 实时明细记录
     tokenUsageRecords: [] as TokenUsageRecord[],
@@ -601,6 +613,15 @@ export const useChatStore = defineStore('chat', {
           eventTitle,
           eventData,
           metadata: { ...(metadata || {}), backendTimestamp: msgTimestamp },
+          tokenUsage: msg.token_usage ? {
+            prompt_tokens: msg.token_usage.prompt_tokens,
+            completion_tokens: msg.token_usage.completion_tokens,
+            total_tokens: msg.token_usage.total_tokens,
+            cached_tokens: msg.token_usage.cached_tokens,
+            reasoning_tokens: msg.token_usage.reasoning_tokens,
+          } : undefined,
+          actualTokens: msg.actual_tokens,
+          cost: msg.cost,
           timestamp: new Date(msg.timestamp).toISOString(),
           sessionId
         })
@@ -620,8 +641,8 @@ export const useChatStore = defineStore('chat', {
           if (restored[i].eventType === 'task_summary') {
             restored[i].metadata = {
               ...restored[i].metadata,
-              inputTokens: sessionTokens.inputTokens,
-              outputTokens: sessionTokens.outputTokens,
+              promptTokens: sessionTokens.promptTokens,
+              completionTokens: sessionTokens.completionTokens,
               cacheTokens: sessionTokens.cacheTokens,
               totalTokens: sessionTokens.totalTokens
             }
@@ -1169,10 +1190,10 @@ export const useChatStore = defineStore('chat', {
         // total_tokens = prompt_tokens + completion_tokens (raw sum)
         // cached_tokens 是 prompt 中被缓存命中的部分，不计入计费消耗
         // 有效消耗 = total_tokens - cached_tokens
-        const cachedTokens = data.prompt_tokens_details?.cached_tokens || 0
-        const tokensUsed = (data.total_tokens || 0) - cachedTokens
-        const inputTokens = data.prompt_tokens || 0
-        const outputTokens = data.completion_tokens || 0
+        const cachedTokens = data.cached_tokens || 0
+        const tokensUsed = Math.max(0, (data.total_tokens || 0) - cachedTokens)
+        const promptTokens = data.prompt_tokens || 0
+        const completionTokens = data.completion_tokens || 0
 
         // 优先使用服务端提供的 cost（精确按模型实际定价计算）
         // 否则用本地固定单价估算
@@ -1191,8 +1212,8 @@ export const useChatStore = defineStore('chat', {
         // 记录明细
         this.tokenUsageRecords.push({
           timestamp: new Date().toISOString(),
-          inputTokens,
-          outputTokens,
+          promptTokens,
+          completionTokens,
           cachedTokens,
           totalTokens: data.total_tokens || 0,
           cost,
@@ -1212,7 +1233,9 @@ export const useChatStore = defineStore('chat', {
         // 优先从 meta 读取结构化 token 数据（后端 WithResponseMeta 提供）
         const metaTokens = envelope?.meta?.tokens_used
         const dataTokens = data.tokens_used
-        const tokensUsed = metaTokens?.total_tokens || dataTokens?.total_tokens || dataTokens || 0
+        // actual_tokens = prompt + completion - cached（计费口径）
+        // total_tokens  = prompt + completion（原始 API 语义）
+        const tokensUsed = metaTokens?.actual_tokens || dataTokens?.actual_tokens || metaTokens?.total_tokens || dataTokens?.total_tokens || dataTokens || 0
 
         this.executionStats = {
           totalIterations: envelope?.meta?.iterations || data.iterations || 0,
@@ -1220,8 +1243,8 @@ export const useChatStore = defineStore('chat', {
           toolsUsed: data.tools_used || [],
           duration: envelope?.meta?.duration || data.duration || '',
           tokensUsed,
-          inputTokens: metaTokens?.input_tokens || dataTokens?.input_tokens || 0,
-          outputTokens: metaTokens?.output_tokens || dataTokens?.output_tokens || 0,
+          promptTokens: metaTokens?.prompt_tokens || dataTokens?.prompt_tokens || 0,
+          completionTokens: metaTokens?.completion_tokens || dataTokens?.completion_tokens || 0,
           cacheTokens: metaTokens?.cache_tokens || dataTokens?.cache_tokens || 0
         }
 
@@ -1620,10 +1643,14 @@ export const useChatStore = defineStore('chat', {
 
       // 注意：token 统一由 ExecutionSummary（权威来源）和 token_usage_recorded（实时）更新
       // TaskSummary 不再重复更新 token 计数，避免与 ExecutionSummary 重复计算
-      const inputTokens = opts?.meta?.input_tokens || data?.token_usage?.input_tokens || data?.input_tokens || 0
-      const outputTokens = opts?.meta?.output_tokens || data?.token_usage?.output_tokens || data?.output_tokens || 0
-      const cacheTokens = opts?.meta?.cache_tokens || data?.token_usage?.cache_tokens || data?.cache_tokens || 0
-      const totalTokens = Math.max(0, inputTokens + outputTokens - cacheTokens)
+      const promptTokens = opts?.meta?.prompt_tokens || data?.token_usage?.prompt_tokens || data?.prompt_tokens || 0
+      const completionTokens = opts?.meta?.completion_tokens || data?.token_usage?.completion_tokens || data?.completion_tokens || 0
+      const cacheTokens = opts?.meta?.cached_tokens || data?.token_usage?.cached_tokens || data?.cached_tokens || 0
+      // total_tokens 保持与后端一致：原始 API 返回的 prompt + completion
+      const totalTokens = promptTokens + completionTokens
+      // actual_tokens = prompt + completion - cached（计费口径）
+      const actualTokens = Math.max(0, totalTokens - cacheTokens)
+      const cost = data?.cost || data?.token_usage?.cost || 0
 
       this.addMessage(targetSessionId, {
         role: 'assistant',
@@ -1633,15 +1660,24 @@ export const useChatStore = defineStore('chat', {
         eventData: data,
         metadata: {
           phase: 'summary',
-          inputTokens,
-          outputTokens,
+          promptTokens,
+          completionTokens,
           cacheTokens,
-          totalTokens
-        }
+          totalTokens,
+          actualTokens
+        },
+        tokenUsage: {
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: totalTokens,
+          cached_tokens: cacheTokens,
+        },
+        actualTokens,
+        cost,
       })
 
       // 缓存 token 数据用于刷新后恢复
-      this.sessionMessageTokens[targetSessionId] = { inputTokens, outputTokens, cacheTokens, totalTokens }
+      this.sessionMessageTokens[targetSessionId] = { promptTokens, completionTokens, cacheTokens, totalTokens }
       localStorage.setItem('mindx_chat_message_tokens', JSON.stringify(this.sessionMessageTokens))
 
       delete this.pendingContentBySession[targetSessionId]

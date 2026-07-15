@@ -668,6 +668,18 @@ export const useGraphStore = defineStore('graph', {
       }
     },
 
+    /** Reset knowledge base — clear all index data and reload */
+    async resetKnowledgeBase() {
+      try {
+        await api.kbReset()
+        // Reload all data after reset
+        await this.loadAllData()
+      } catch (e: any) {
+        console.error('[GraphStore] KB reset failed:', e)
+        throw e
+      }
+    },
+
     // ── File reader panel ──
 
     openFile(filePath: string) {
