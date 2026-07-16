@@ -1604,12 +1604,29 @@ function logCurrentMessages(_messages: any[]) {
   max-width: 200px;
   font-size: 11px;
   border-radius: 4px;
+  background: rgba(6, 182, 212, 0.08);
+  border-color: rgba(6, 182, 212, 0.2);
+  color: var(--accent-cyan, #06b6d4);
+}
+
+.ref-tag.ref-tag:hover {
+  background: rgba(6, 182, 212, 0.12);
+  border-color: rgba(6, 182, 212, 0.3);
 }
 
 .ref-tag :deep(.el-tag__content) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ref-tag :deep(.el-tag__close) {
+  color: rgba(6, 182, 212, 0.7);
+}
+
+.ref-tag :deep(.el-tag__close:hover) {
+  background: rgba(6, 182, 212, 0.15);
+  color: var(--accent-cyan, #06b6d4);
 }
 
 /* ── 工具栏行 ── */

@@ -519,7 +519,6 @@ async function handleNodeDrop(draggingNode: any, dropNode: any, dropType: string
 
 function handleAddRef(entry: any) {
   emit('add-ref', entry.path, entry.name)
-  emit('update:visible', false)
 }
 
 // ── 索引状态控制 ──
@@ -647,19 +646,18 @@ watch(() => props.visible, async (val) => {
               <el-icon v-if="data.is_dir"><Folder /></el-icon>
               <el-icon v-else><Document /></el-icon>
             </span>
-            <!-- 索引状态图标 -->
-            <span v-if="data.index_state && !data._phantom" class="fe-index-icon" :class="'idx-' + data.index_state" @click.stop="handleIndexClick(data)">
-              <ElTooltip :content="t(`fileExplorer.indexManifest.${manifestTooltipKey(data.index_state)}`)" placement="left" :show-after="300">
-                <el-icon v-if="data.index_state === 'excluded'" :size="15"><Remove /></el-icon>
-                <el-icon v-else-if="data.index_state === 'indexing'" :size="15" class="is-loading"><Loading /></el-icon>
-                <el-icon v-else-if="data.index_state === 'unindexed'" :size="15"><CirclePlus /></el-icon>
-                <el-icon v-else-if="data.index_state === 'indexed'" :size="15"><CircleCheck /></el-icon>
-                <el-icon v-else-if="data.index_state === 'pending'" :size="15"><CircleClose /></el-icon>
-                <el-icon v-else-if="data.index_state === 'enqueued'" :size="15"><Clock /></el-icon>
-              </ElTooltip>
-            </span>
-            <span class="fe-tree-label" :title="data.name">{{ data.name }}</span>
+            <span class="fe-tree-label" :class="data.index_state ? 'idx-' + data.index_state : ''" :title="data.name">{{ data.name }}</span>
             <div class="tree-node-actions" @click.stop>
+              <span v-if="data.index_state && !data._phantom" class="fe-index-icon" :class="'idx-' + data.index_state" @click.stop="handleIndexClick(data)">
+                <ElTooltip :content="t(`fileExplorer.indexManifest.${manifestTooltipKey(data.index_state)}`)" placement="left" :show-after="300">
+                  <el-icon v-if="data.index_state === 'excluded'" :size="15"><Remove /></el-icon>
+                  <el-icon v-else-if="data.index_state === 'indexing'" :size="15" class="is-loading"><Loading /></el-icon>
+                  <el-icon v-else-if="data.index_state === 'unindexed'" :size="15"><CirclePlus /></el-icon>
+                  <el-icon v-else-if="data.index_state === 'indexed'" :size="15"><CircleCheck /></el-icon>
+                  <el-icon v-else-if="data.index_state === 'pending'" :size="15"><CircleClose /></el-icon>
+                  <el-icon v-else-if="data.index_state === 'enqueued'" :size="15"><Clock /></el-icon>
+                </ElTooltip>
+              </span>
               <el-icon
                 class="ref-icon"
                 :title="t('fileBrowser.addToChat')"
@@ -923,7 +921,6 @@ watch(() => props.visible, async (val) => {
   transition: all .15s;
   cursor: pointer;
   color: var(--text-muted);
-  margin-right: 2px;
 }
 .fe-index-icon:hover {
   background: var(--bg-hover);
@@ -965,6 +962,26 @@ watch(() => props.visible, async (val) => {
 .fe-index-icon.idx-excluded {
   cursor: default;
   opacity: 0.4;
+  color: var(--text-muted);
+}
+
+/* 节点文字颜色与索引按钮颜色一致 */
+.fe-tree-label.idx-indexed {
+  color: #34d399;
+}
+.fe-tree-label.idx-pending {
+  color: #fbbf24;
+}
+.fe-tree-label.idx-enqueued {
+  color: #f59e0b;
+}
+.fe-tree-label.idx-indexing {
+  color: var(--accent-cyan);
+}
+.fe-tree-label.idx-unindexed {
+  color: var(--text-muted);
+}
+.fe-tree-label.idx-excluded {
   color: var(--text-muted);
 }
 </style>

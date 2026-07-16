@@ -22,11 +22,59 @@ const loading = ref(false)
 const editingId = ref<string | null>(null)
 const editSummary = ref('')
 const editContent = ref('')
-const editTags = ref('')
+const editTags = ref<string[]>([])
 
 // ── Data ──
 const memories = computed(() => connectionStore.sessionMemoryList?.chunks ?? [])
 const memoryCount = computed(() => connectionStore.sessionMemoryList?.count ?? 0)
+
+// ── Selection state ──
+const selectedId = ref<string | null>(null)
+const selectedMemory = computed(() => memories.value.find(m => m.id === selectedId.value) ?? null)
+
+// ── Clear all ──
+const clearingAll = ref(false)
+
+async function handleClearAll() {
+  const count = memories.value.length
+  if (count === 0) {
+    ElMessage.info('没有可清空的记忆')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定要清空全部 ${count} 条记忆吗？此操作不可撤销。`,
+      '清空记忆',
+      {
+        confirmButtonText: '清空全部',
+        cancelButtonText: '取消',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger',
+      }
+    )
+  } catch {
+    return
+  }
+  clearingAll.value = true
+  let failed = 0
+  for (const item of memories.value) {
+    try {
+      const ok = await connectionStore.deleteSessionMemory(item.id)
+      if (!ok) failed++
+    } catch {
+      failed++
+    }
+  }
+  clearingAll.value = false
+  selectedId.value = null
+  cancelEdit()
+  if (failed === 0) {
+    ElMessage.success(`已清空全部 ${count} 条记忆`)
+  } else {
+    ElMessage.warning(`已删除 ${count - failed} 条，${failed} 条删除失败`)
+  }
+  await refresh()
+}
 
 // ── Format timestamp ──
 function formatTime(ts: number): string {
@@ -49,10 +97,11 @@ function formatTime(ts: number): string {
 
 // ── Start editing ──
 function startEdit(item: { id: string; summary: string; content: string; tags: string[] }) {
+  selectedId.value = item.id
   editingId.value = item.id
   editSummary.value = item.summary
   editContent.value = item.content
-  editTags.value = (item.tags || []).join(', ')
+  editTags.value = [...(item.tags || [])]
 }
 
 // ── Cancel editing ──
@@ -60,14 +109,14 @@ function cancelEdit() {
   editingId.value = null
   editSummary.value = ''
   editContent.value = ''
-  editTags.value = ''
+  editTags.value = []
 }
 
 // ── Save edit ──
 async function saveEdit(id: string) {
   const summary = editSummary.value.trim()
   const content = editContent.value.trim()
-  const tags = editTags.value.split(',').map(t => t.trim()).filter(Boolean)
+  const tags = editTags.value
   if (!summary && !content) {
     ElMessage.warning('摘要和内容不能同时为空')
     return
@@ -101,6 +150,10 @@ async function handleDelete(id: string) {
     try {
       const ok = await connectionStore.deleteSessionMemory(id)
       if (ok) {
+        if (selectedId.value === id) {
+          selectedId.value = null
+          cancelEdit()
+        }
         ElMessage.success('已删除')
       } else {
         ElMessage.error('删除失败')
@@ -130,6 +183,7 @@ async function refresh() {
 // ── Reset editing state on dialog close ──
 watch(() => props.visible, (v) => {
   if (!v) {
+    selectedId.value = null
     cancelEdit()
   }
 })
@@ -155,61 +209,91 @@ watch(() => props.visible, (v) => {
         <p class="mb-empty-text">暂无记忆</p>
       </div>
 
-      <!-- Memory list (iOS-style) -->
-      <div v-else class="mb-list">
-        <div
-          v-for="item in memories"
-          :key="item.id"
-          class="mb-item"
-          :class="{ editing: editingId === item.id }"
-        >
-          <!-- ── View mode ── -->
-          <template v-if="editingId !== item.id">
-            <div class="mb-item-header">
-              <h3 class="mb-item-summary">{{ item.summary || '(无摘要)' }}</h3>
-              <span class="mb-item-time">{{ formatTime(item.timestamp) }}</span>
+      <!-- Two-column layout -->
+      <div v-else class="mb-split">
+        <!-- ── Left: list sidebar ── -->
+        <div class="mb-sidebar">
+          <div
+            v-for="item in memories"
+            :key="item.id"
+            class="mb-sidebar-item"
+            :class="{ active: selectedId === item.id }"
+            @click="selectedId = item.id; editingId = null"
+          >
+            <div class="mb-sidebar-header">
+              <span class="mb-sidebar-summary">{{ item.summary || '(无摘要)' }}</span>
+              <span class="mb-sidebar-time">{{ formatTime(item.timestamp) }}</span>
             </div>
-            <p class="mb-item-content">{{ item.content }}</p>
-            <div class="mb-item-footer">
-              <div class="mb-item-tags" v-if="item.tags && item.tags.length > 0">
-                <span v-for="tag in item.tags" :key="tag" class="mb-tag">{{ tag }}</span>
-              </div>
-              <div class="mb-item-actions">
-                <button class="mb-action-btn edit-btn" @click="startEdit(item)" title="编辑">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                  </svg>
-                </button>
-                <button class="mb-action-btn delete-btn" @click="handleDelete(item.id)" title="删除">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="3 6 5 6 21 6"/>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                  </svg>
-                </button>
-              </div>
+            <p class="mb-sidebar-preview">{{ item.content ? (item.content.length > 80 ? item.content.slice(0, 80) + '...' : item.content) : '' }}</p>
+          </div>
+        </div>
+
+        <!-- ── Right: detail panel ── -->
+        <div class="mb-detail">
+          <template v-if="!selectedMemory">
+            <div class="mb-detail-empty">
+              <p>选择一条记忆查看详情</p>
             </div>
           </template>
 
-          <!-- ── Edit mode ── -->
-          <template v-else>
-            <div class="mb-edit-field">
-              <label class="mb-edit-label">摘要</label>
-              <input v-model="editSummary" class="mb-edit-input" placeholder="摘要" />
+          <!-- View mode -->
+          <template v-else-if="editingId !== selectedMemory.id">
+            <div class="mb-detail-header">
+              <h3 class="mb-detail-title">{{ selectedMemory.summary || '(无摘要)' }}</h3>
+              <span class="mb-detail-time">{{ formatTime(selectedMemory.timestamp) }}</span>
             </div>
-            <div class="mb-edit-field">
-              <label class="mb-edit-label">内容</label>
-              <textarea v-model="editContent" class="mb-edit-textarea" placeholder="内容" rows="3"></textarea>
+            <div class="mb-detail-content">{{ selectedMemory.content }}</div>
+            <div class="mb-detail-tags" v-if="selectedMemory.tags && selectedMemory.tags.length > 0">
+              <span v-for="tag in selectedMemory.tags" :key="tag" class="mb-tag">{{ tag }}</span>
             </div>
-            <div class="mb-edit-field">
-              <label class="mb-edit-label">标签</label>
-              <input v-model="editTags" class="mb-edit-input" placeholder="标签（逗号分隔）" />
-            </div>
-            <div class="mb-edit-actions">
-              <button class="mb-edit-btn cancel" @click="cancelEdit">取消</button>
-              <button class="mb-edit-btn save" :disabled="loading" @click="saveEdit(item.id)">
-                {{ loading ? '保存中...' : '保存' }}
+            <div class="mb-detail-actions">
+              <button class="mb-action-btn edit-btn" @click="startEdit(selectedMemory)" title="编辑">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+                <span>编辑</span>
               </button>
+              <button class="mb-action-btn delete-btn" @click="handleDelete(selectedMemory.id)" title="删除">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+                <span>删除</span>
+              </button>
+            </div>
+          </template>
+
+          <!-- Edit mode -->
+          <template v-else>
+            <div class="mb-edit-section">
+              <div class="mb-edit-field">
+                <label class="mb-edit-label">摘要</label>
+                <input v-model="editSummary" class="mb-edit-input" placeholder="摘要" />
+              </div>
+              <div class="mb-edit-field">
+                <label class="mb-edit-label">内容</label>
+                <textarea v-model="editContent" class="mb-edit-textarea" placeholder="内容" rows="12"></textarea>
+              </div>
+              <div class="mb-edit-field">
+              <label class="mb-edit-label">标签</label>
+              <el-select
+                v-model="editTags"
+                multiple
+                allow-create
+                filterable
+                default-first-option
+                placeholder="输入标签后回车"
+                class="mb-tag-select"
+                size="small"
+              />
+            </div>
+              <div class="mb-edit-actions">
+                <button class="mb-edit-btn cancel" @click="cancelEdit">取消</button>
+                <button class="mb-edit-btn save" :disabled="loading" @click="saveEdit(selectedMemory.id)">
+                  {{ loading ? '保存中...' : '保存' }}
+                </button>
+              </div>
             </div>
           </template>
         </div>
@@ -219,6 +303,7 @@ watch(() => props.visible, (v) => {
     <template #footer>
       <span class="mb-footer-count">{{ memoryCount }} 条记忆</span>
       <div class="mb-footer-actions">
+        <el-button size="small" :loading="clearingAll" :disabled="clearingAll" @click="handleClearAll">清空</el-button>
         <el-button size="small" @click="refresh">刷新</el-button>
         <el-button size="small" type="primary" @click="emit('close')">关闭</el-button>
       </div>
@@ -252,45 +337,50 @@ watch(() => props.visible, (v) => {
   margin: 0;
 }
 
-/* ── List (iOS-style) ── */
-.mb-list {
+/* ── Split layout ── */
+.mb-split {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 10px;
-  overflow: hidden;
+  gap: 0;
+  height: 100%;
+  min-height: 400px;
 }
 
-.mb-item {
-  padding: 14px 16px;
-  background: var(--bg-secondary, #1e293b);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  transition: background 0.15s ease;
+/* ── Left sidebar ── */
+.mb-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid rgba(55, 65, 81, 0.5);
+  padding: 4px 0;
 }
-.mb-item:last-child {
+.mb-sidebar-item {
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+.mb-sidebar-item:last-child {
   border-bottom: none;
 }
-.mb-item:hover:not(.editing) {
+.mb-sidebar-item:hover {
   background: rgba(139, 92, 246, 0.04);
 }
-.mb-item.editing {
-  background: rgba(139, 92, 246, 0.06);
+.mb-sidebar-item.active {
+  background: rgba(139, 92, 246, 0.1);
+  border-left: 3px solid #8b5cf6;
+  padding-left: 13px;
 }
-
-/* ── View mode ── */
-.mb-item-header {
+.mb-sidebar-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 6px;
+  gap: 8px;
+  margin-bottom: 4px;
 }
-.mb-item-summary {
-  font-size: 14px;
+.mb-sidebar-summary {
+  font-size: 13px;
   font-weight: 600;
   color: #e2e8f0;
-  margin: 0;
   line-height: 1.4;
   flex: 1;
   min-width: 0;
@@ -298,39 +388,89 @@ watch(() => props.visible, (v) => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mb-item-time {
-  font-size: 11px;
+.mb-sidebar-time {
+  font-size: 10px;
   color: #64748b;
   white-space: nowrap;
   flex-shrink: 0;
   margin-top: 2px;
 }
-.mb-item-content {
-  font-size: 13px;
-  color: #94a3b8;
-  line-height: 1.6;
-  margin: 0 0 10px;
-  max-height: 120px;
-  overflow-y: auto;
-  min-height: 4.8em;
+.mb-sidebar-preview {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.mb-item-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.mb-item-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+
+/* ── Right detail panel ── */
+.mb-detail {
   flex: 1;
   min-width: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
 }
+.mb-detail-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 300px;
+  color: #64748b;
+  font-size: 14px;
+}
+.mb-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(55, 65, 81, 0.4);
+}
+.mb-detail-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0;
+  line-height: 1.4;
+  flex: 1;
+}
+.mb-detail-time {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.mb-detail-content {
+  font-size: 14px;
+  color: #cbd5e1;
+  line-height: 1.8;
+  margin-bottom: 16px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mb-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+.mb-detail-actions {
+  display: flex;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(55, 65, 81, 0.4);
+}
+
+/* ── Tags (shared) ── */
 .mb-tag {
   display: inline-block;
-  padding: 1px 8px;
-  font-size: 10px;
+  padding: 2px 10px;
+  font-size: 11px;
   font-weight: 500;
   color: #a78bfa;
   background: rgba(139, 92, 246, 0.1);
@@ -338,18 +478,15 @@ watch(() => props.visible, (v) => {
   border-radius: 10px;
   white-space: nowrap;
 }
-.mb-item-actions {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
+
+/* ── Action buttons (shared) ── */
 .mb-action-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
@@ -358,6 +495,7 @@ watch(() => props.visible, (v) => {
 }
 .edit-btn {
   color: #94a3b8;
+  border-color: rgba(100, 116, 139, 0.2);
 }
 .edit-btn:hover {
   color: #22d3ee;
@@ -366,6 +504,7 @@ watch(() => props.visible, (v) => {
 }
 .delete-btn {
   color: #94a3b8;
+  border-color: rgba(100, 116, 139, 0.2);
 }
 .delete-btn:hover {
   color: #ef4444;
@@ -373,9 +512,12 @@ watch(() => props.visible, (v) => {
   border-color: rgba(239, 68, 68, 0.2);
 }
 
-/* ── Edit mode ── */
+/* ── Edit mode (right panel) ── */
+.mb-edit-section {
+  padding: 0;
+}
 .mb-edit-field {
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
 .mb-edit-label {
   display: block;
@@ -384,7 +526,7 @@ watch(() => props.visible, (v) => {
   color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 4px;
+  margin-bottom: 5px;
 }
 .mb-edit-input {
   width: 100%;
@@ -417,6 +559,7 @@ watch(() => props.visible, (v) => {
   resize: vertical;
   font-family: inherit;
   box-sizing: border-box;
+  min-height: 300px;
 }
 .mb-edit-textarea:focus {
   border-color: #8b5cf6;
@@ -424,14 +567,17 @@ watch(() => props.visible, (v) => {
 .mb-edit-textarea::placeholder {
   color: #475569;
 }
+.mb-tag-select {
+  width: 100%;
+}
 .mb-edit-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 16px;
 }
 .mb-edit-btn {
-  padding: 6px 16px;
+  padding: 7px 18px;
   font-size: 12px;
   font-weight: 600;
   border-radius: 6px;
@@ -522,5 +668,19 @@ watch(() => props.visible, (v) => {
   --el-button-border-color: #ef4444;
   --el-button-hover-bg-color: #dc2626;
   --el-button-hover-border-color: #dc2626;
+}
+
+/* ── Tag select theme ── */
+.memory-browser-dialog .el-select__tags .el-tag {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139, 92, 246, 0.3);
+  color: #a78bfa;
+}
+.memory-browser-dialog .el-select__tags .el-tag .el-tag__close {
+  color: #a78bfa;
+}
+.memory-browser-dialog .el-select__tags .el-tag .el-tag__close:hover {
+  background: #8b5cf6;
+  color: #fff;
 }
 </style>

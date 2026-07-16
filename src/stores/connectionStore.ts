@@ -256,6 +256,13 @@ export const useConnectionStore = defineStore('connection', {
       return Array.isArray(result) ? result : []
     },
 
+    async fetchSkillGet(name: string): Promise<any> {
+      const client = getMindXClient()
+      if (!client) throw new Error('WebSocket client not initialized')
+      const result = await client.call<any>('skill.get', { name })
+      return result
+    },
+
     async fetchFSHome(): Promise<string> {
       const client = getMindXClient()
       if (!client) throw new Error('WebSocket client not initialized')

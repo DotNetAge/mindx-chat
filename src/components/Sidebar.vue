@@ -14,6 +14,7 @@ import EntityTagsDialog from './EntityTagsDialog.vue'
 import AgentSelectorDialog from './AgentSelectorDialog.vue'
 import MCPExplorer from './MCPExplorer.vue'
 import FileExplorer from './FileExplorer.vue'
+import SkillEditor from './SkillEditor.vue'
 import { useI18n } from 'vue-i18n'
 import { revealInFileManager } from '../services/graphApi'
 import { useMarkdown } from '../composables/useMarkdown'
@@ -67,6 +68,7 @@ const showEntityTags = inject('showEntityTags', ref(false))
 const restarting = ref(false)
 const showAgentSelector = ref(false)
 const showMCPExplorer = ref(false)
+const showSkillEditor = ref(false)
 const showAbout = ref(false)
 const showDirBrowser = ref(false)
 const currentRelease = ref<any>(null)
@@ -684,6 +686,24 @@ watch(showTokenReport, (val) => {
             </el-button>
           </div>
 
+          <!-- Skills -->
+          <div class="setting-row">
+            <div class="setting-row-info">
+              <el-icon class="setting-row-icon"><Document /></el-icon>
+              <div class="setting-row-text">
+                <div class="setting-row-title">技能编辑器</div>
+                <div class="setting-row-desc">编辑和管理技能文件（SKILL.md、引用、脚本）</div>
+              </div>
+            </div>
+            <el-button
+              size="small"
+              @click="showSkillEditor = true"
+              :disabled="!connectionStore.isConnected"
+            >
+              管理
+            </el-button>
+          </div>
+
           <!-- Restart Service -->
           <div class="setting-row">
             <div class="setting-row-info">
@@ -1062,6 +1082,7 @@ watch(showTokenReport, (val) => {
 
     <AgentSelectorDialog v-model:visible="showAgentSelector" />
     <MCPExplorer v-model:visible="showMCPExplorer" />
+    <SkillEditor v-model:visible="showSkillEditor" />
     <FileExplorer />
   </aside>
 </template>
